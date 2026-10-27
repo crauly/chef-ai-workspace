@@ -12,11 +12,13 @@ export default function Library(){
  const [items,setItems]=useState<Item[]>([]),[selected,setSelected]=useState<Recipe|null>(null);
  const [draft,setDraft]=useState(""),[rename,setRename]=useState(""),[error,setError]=useState("");
  const [busy,setBusy]=useState(false),[page,setPage]=useState(1);
+ const [cost,setCost]=useState<{partial:boolean;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean}|null>(null);
  const [food,setFood]=useState(""),[qty,setQty]=useState(""),[unit,setUnit]=useState("g"),[price,setPrice]=useState(""),[priceQty,setPriceQty]=useState("1"),[priceUnit,setPriceUnit]=useState("kg");
  const [locale,setLocale]=useState<Locale>("ja");
  const t=(key:Parameters<typeof label>[1])=>label(locale,key);
  useEffect(()=>{const current=localStorage.getItem("chef-ui-locale");if(current==="ja"||current==="en-US")setLocale(current);},[]);
  function switchLocale(next:Locale){setLocale(next);localStorage.setItem("chef-ui-locale",next);document.documentElement.lang=next;}
+ useEffect(()=>{let active=true;setCost(null);if(selected){void request<{partial:boolean;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean}>(`/api/recipes/${selected.id}/cost`).then(result=>{if(active)setCost(result);}).catch(()=>{if(active)setCost(null);});}return()=>{active=false;};},[selected?.id,selected?.revision]);
  const reload=useCallback(async()=>{try{setItems((await request<{items:Item[]}>(`/api/recipes?page=${page}&page_size=20`)).items);setError("");}catch(e){setError(String(e));}},[page]);
  useEffect(()=>{void reload();},[reload]);
  async function create(e:React.FormEvent){e.preventDefault();if(!draft.trim())return;setBusy(true);
@@ -69,6 +71,7 @@ export default function Library(){
  <select aria-label="Price unit" value={priceUnit} onChange={e=>setPriceUnit(e.target.value)}><option value="kg">kg</option><option value="g">g</option><option value="L">L</option><option value="ml">ml</option></select>
  <button disabled={busy||!food.trim()||!qty.trim()||!price.trim()}>{locale==="ja"?"食材を追加":"Add ingredient"}</button>
  </form>
+ {cost&&<section aria-label="Recipe cost summary" className="cost-summary"><strong>{locale==="ja"?"現在の原価":"Current food cost"}: {cost.total_cost_jpy===null?(locale==="ja"?"要確認":"Needs review"):`¥${cost.total_cost_jpy}`}</strong><span>{locale==="ja"?"原価率":"Food cost %"}: {cost.cost_rate_pct===null?"—":`${cost.cost_rate_pct}%`}{cost.estimated?` (${t("assumed")})`:""}</span></section>}
  <p className="muted">{t("price")}: {selected.selling_price_jpy.value??t("missing")}{selected.selling_price_jpy.status==="assumed"?` (${t("assumed")})`:selected.selling_price_jpy.status==="unresolved"?` (${t("unresolved")})`:""}</p>
  </section>}</main>;
 }
