@@ -1,5 +1,6 @@
 -- Chef AI Workspace: initial Supabase schema. REVIEW BEFORE APPLYING.
--- Assumption: authenticated Supabase users own private recipe data.
+-- Confirmed: individual Supabase Auth users own private recipe data.
+-- IMPORTANT: commit RPC is callable by service_role ONLY from a trusted backend.
 create extension if not exists pgcrypto;
 
 create table public.recipes (
@@ -59,7 +60,10 @@ alter table public.mutation_receipts enable row level security;
 alter table public.ingredients enable row level security;
 alter table public.ingredient_images enable row level security;
 
-create policy recipes_owner on public.recipes for all to authenticated using (owner_id = (select auth.uid())) with check (owner_id = (select auth.uid()));
+create policy recipes_select on public.recipes for select to authenticated using (owner_id = (select auth.uid()));
+-- Creation policy is temporary until server-side validated creation is implemented.
+create policy recipes_insert on public.recipes for insert to authenticated with check (owner_id = (select auth.uid()));
+-- No client UPDATE or DELETE grants via RLS.
 create policy versions_read on public.recipe_versions for select to authenticated using (owner_id = (select auth.uid()));
 create policy versions_insert on public.recipe_versions for insert to authenticated with check (
  owner_id = (select auth.uid()) and exists
@@ -76,19 +80,20 @@ create policy ingredient_images_insert on public.ingredient_images for insert to
 create policy ingredient_images_delete on public.ingredient_images for delete to authenticated using (owner_id = (select auth.uid()));
 
 -- Perform compare-and-swap and request dedup in one database transaction.
--- Caller must validate entire proposed state and cost in application BEFORE calling.
+-- A trusted server must authenticate user, validate entire proposed state/cost,
+-- then invoke with service_role. Never expose service_role to client.
 create or replace function public.commit_recipe_revision(
- p_recipe_id uuid, p_request_id uuid, p_expected_revision bigint,
+ p_owner_id uuid, p_recipe_id uuid, p_request_id uuid, p_expected_revision bigint,
  p_new_state jsonb, p_title text, p_cost_snapshot jsonb, p_payload_hash text,
  p_save_version boolean default false
 ) returns bigint
 language plpgsql security definer set search_path = ''
 as $$
-declare v_owner uuid := auth.uid();
+declare v_owner uuid := p_owner_id;
         v_revision bigint;
         v_receipt public.mutation_receipts%rowtype;
 begin
- if v_owner is null then raise exception 'Authentication required'; end if;
+ if v_owner is null then raise exception 'Owner required'; end if;
  if p_request_id is null or p_new_state is null or p_title is null or btrim(p_title) = ''
    or p_payload_hash is null or p_payload_hash = '' or p_expected_revision < 0 then
    raise exception 'Invalid mutation payload';
@@ -119,5 +124,5 @@ begin
  return v_revision + 1;
 end;
 $$;
-revoke all on function public.commit_recipe_revision(uuid,uuid,bigint,jsonb,text,jsonb,text,boolean) from public;
-grant execute on function public.commit_recipe_revision(uuid,uuid,bigint,jsonb,text,jsonb,text,boolean) to authenticated;
+revoke all on function public.commit_recipe_revision(uuid,uuid,uuid,bigint,jsonb,text,jsonb,text,boolean) from public, anon, authenticated;
+grant execute on function public.commit_recipe_revision(uuid,uuid,uuid,bigint,jsonb,text,jsonb,text,boolean) to service_role;
