@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Probe real Supabase Auth and verify JWT when test account is configured
         env:
-          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_PUBLISHABLE_KEY: sb_publishable_H7pGiYkdLtTNm5REGvbMZQ_Ezj5HqH4
           AUTH_TEST_EMAIL: ${{ secrets.AUTH_TEST_EMAIL }}
           AUTH_TEST_PASSWORD: ${{ secrets.AUTH_TEST_PASSWORD }}
         run: python -m unittest -v tests.test_live_supabase_auth
