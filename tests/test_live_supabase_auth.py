@@ -31,7 +31,7 @@ class LiveSupabaseAuth(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not KEY:
-            raise RuntimeError("SUPABASE_PUBLISHABLE_KEY missing")
+            raise unittest.SkipTest("Live Supabase Auth key not configured for this job")
 
     def test_invalid_bearer_denied(self):
         status,_=call("/auth/v1/user",token="not-a-jwt")
