@@ -106,6 +106,22 @@ class BridgeTests(unittest.TestCase):
             self.run_mutation(db,p)
         self.assertEqual(db.commits,[])
 
+    def test_inherited_quote_included_in_snapshot(self):
+        from chef_ai_workspace import Ingredient
+        db=FakeRepository()
+        db.current=replace(db.current,materials=(replace(
+            db.current.materials[0],ingredient_id="ingredient-1",
+            price_mode="inherit",price_override=None),))
+        def catalog(owner_id, recipe):
+            self.assertEqual(owner_id,"user-a")
+            return {"ingredient-1":Ingredient("ingredient-1","海老",
+                   PriceQuote(tv("150"),"1","尾","shared-ingredient"))}
+        db.load_owned_catalog=catalog
+        out=self.run_mutation(db,save_version=True)
+        self.assertEqual(out.resulting_revision,1)
+        self.assertEqual(db.commits[0][1]["total_cost_jpy"],"600")
+        self.assertEqual(db.commits[0][1]["effective_quotes"]["m1"]["effective_quote"]["amount_jpy"]["value"],"150")
+
     def test_bad_batch_never_calls_database(self):
         db=FakeRepository()
         bad=Proposal("r1",0,"req-1",({"op":"unknown"},))
