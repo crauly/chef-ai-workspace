@@ -21,6 +21,8 @@ class FakeRepository:
         if owner_id != "user-a" or recipe_id != self.current.id:
             raise ValueError("Not found")
         return self.current
+    def get_mutation_receipt(self, owner_id, request_id):
+        return self.receipts.get(request_id)
     def commit_recipe_revision(self, *, owner_id, recipe_id, request_id,
                                base_revision, state, title, cost_snapshot,
                                payload_hash, save_version):
@@ -53,6 +55,22 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(len(db.commits),1)
         self.assertEqual(db.commits[0][1]["effective_quotes"]["m1"]["effective_quote"]["amount_jpy"]["value"],"150")
         self.assertEqual(db.commits[0][1]["total_cost_jpy"],"600")
+    def test_retry_returns_existing_state_without_second_commit(self):
+        db=FakeRepository()
+        first=self.run_mutation(db)
+        second=self.run_mutation(db)
+        self.assertFalse(first.replayed)
+        self.assertTrue(second.replayed)
+        self.assertEqual(second.resulting_revision, 1)
+        self.assertEqual(len(db.commits), 1)
+
+    def test_request_id_collision_rejected_before_mutation(self):
+        db=FakeRepository()
+        self.run_mutation(db)
+        with self.assertRaises(MutationError):
+            self.run_mutation(db, Proposal("r1",0,"req-1",({"op":"set_title","value":"Different"},)))
+        self.assertEqual(len(db.commits), 1)
+
     def test_bad_batch_never_calls_database(self):
         db=FakeRepository()
         bad=Proposal("r1",0,"req-1",({"op":"unknown"},))
