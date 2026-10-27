@@ -47,8 +47,29 @@ test("English mobile: edit/discard invalidates approval; empty, stale and unavai
 test("proxy gates anonymous calls, cross-origin writes, invalid IDs and private backend errors", async ({request}) => {
   // Native fetch deliberately bypasses Playwright's configured HTTP credentials.
   for (const path of ["/", "/api/recipes", `/api/recipes/${id}/propose`]) expect((await fetch(`http://localhost:3100${path}`)).status).toBe(401);
+  const bypass = await fetch("http://localhost:3100/api/recipes", {headers: {"x-middleware-subrequest": "middleware:middleware:middleware:middleware:middleware"}});
+  expect([401, 403]).toContain(bypass.status);
   expect((await request.post(`/api/recipes/${id}/confirm`, {headers: {Origin: "https://attacker.example"}, data: {}})).status()).toBe(403);
   expect((await request.get("/api/recipes/invalid")).status()).toBe(400);
   const result = await request.post(`/api/recipes/${id}/propose`, {headers: {Origin: "http://localhost:3100"}, data: {instruction: "failure"}});
   expect(result.status()).toBe(502); expect(await result.text()).not.toContain("test-only-backend-token");
+});
+test("uncertain save retries the exact request ID without a second commit", async ({page, request}) => {
+  await page.goto("/"); await page.getByRole("button", {name: "詳細を見る"}).click();
+  await page.getByLabel("料理人の指示", {exact: true}).fill("片栗粉15g、売価1800円に");
+  await page.getByRole("button", {name: "変更案を作る"}).click();
+  await page.getByRole("checkbox").check();
+  const payloads: unknown[] = [];
+  await page.route(`**/api/recipes/${id}/confirm`, async route => {
+    payloads.push(route.request().postDataJSON());
+    const response = await route.fetch();
+    if (payloads.length === 1) await route.fulfill({status: 502, json: {error: "Response lost after commit"}});
+    else await route.fulfill({response});
+  });
+  const save = page.getByRole("button", {name: "承認して保存・原価再計算"});
+  await save.click(); await expect(page.getByRole("region", {name: "AIに変更を相談", exact: true}).getByRole("alert")).toContainText("保存結果が不明");
+  await save.click();
+  await expect(page.getByRole("region", {name: "Recipe cost summary"})).toContainText("¥15");
+  expect(payloads).toHaveLength(2); expect(payloads[0]).toEqual(payloads[1]);
+  expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).confirms).toHaveLength(1);
 });
