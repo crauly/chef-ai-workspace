@@ -50,6 +50,8 @@ class PriceQuote:
             raise ValueError("Negative price")
         if not self.per_unit:
             raise ValueError("Missing quote unit")
+        if self.source not in ("manual", "estimated", "shared-ingredient"):
+            raise ValueError("Invalid price source")
 
 
 @dataclass(frozen=True)
@@ -70,8 +72,12 @@ class MaterialLine:
     price_mode: Literal["override", "inherit"] = "override"
 
     def __post_init__(self):
+        if self.price_mode not in ("override", "inherit"):
+            raise ValueError("Invalid price mode")
         if self.quantity.value is not None and decimal(self.quantity.value) < 0:
             raise ValueError("Negative quantity")
+        if self.quantity.value is not None and not self.unit:
+            raise ValueError("Known quantity requires unit")
         if self.price_mode == "inherit" and self.ingredient_id is None:
             raise ValueError("Inherit requires linked ingredient")
         if self.price_mode == "inherit" and self.price_override is not None:
@@ -88,6 +94,8 @@ class Recipe:
     revision: int = 0
 
     def __post_init__(self):
+        if self.cost_adjustment_jpy.value is not None:
+            decimal(self.cost_adjustment_jpy.value)
         if self.selling_price_jpy.value is not None and decimal(self.selling_price_jpy.value) <= 0:
             raise ValueError("Selling price must be positive")
         if self.revision < 0 or len({m.id for m in self.materials}) != len(self.materials):
