@@ -48,7 +48,7 @@ def calculate_cost(recipe: Recipe, ingredients: Mapping[str, Ingredient] | None 
         if qty is None:
             unresolved.append(line.id)
             continue
-        costs[line.id] = qty / decimal(quote.per_quantity) * decimal(quote.amount_jpy.value)
+        costs[line.id] = (qty * decimal(quote.amount_jpy.value)) / decimal(quote.per_quantity)
         price_sources[line.id] = "line_override" if line.price_mode == "override" else "shared_ingredient"
         if q.status == "assumed" or quote.amount_jpy.status == "assumed":
             estimated = True
