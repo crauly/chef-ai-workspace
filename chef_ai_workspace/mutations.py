@@ -1,8 +1,7 @@
 """Validated, all-or-nothing recipe edits. Persistence is a separate future boundary."""
 from dataclasses import dataclass, replace
 from typing import Mapping
-from uuid import UUID
-from .models import Recipe, MaterialLine, TrackedValue, PriceQuote, Ingredient, decimal
+from .models import Recipe, TrackedValue, Ingredient, decimal
 from .costing import calculate_cost
 
 class MutationError(ValueError):
@@ -29,9 +28,11 @@ def _fields(op: dict, required: set[str], optional: set[str] = frozenset()) -> N
 def prepare_mutation(recipe: Recipe, proposal: Proposal, *, user_confirmed: bool,
                      catalog: Mapping[str, Ingredient] | None = None) -> Recipe:
     """Pure preparation only. Caller must perform durable revision/ID dedup atomically."""
+    if not isinstance(proposal.base_revision, int) or isinstance(proposal.base_revision, bool):
+        raise MutationError("Invalid revision")
     if recipe.id != proposal.recipe_id or recipe.revision != proposal.base_revision:
         raise MutationError("Recipe ID or revision mismatch")
-    if not proposal.request_id or not proposal.operations:
+    if not isinstance(proposal.request_id, str) or not proposal.request_id.strip() or not proposal.operations:
         raise MutationError("Request ID and operations required")
     candidate = recipe
     for op in proposal.operations:
