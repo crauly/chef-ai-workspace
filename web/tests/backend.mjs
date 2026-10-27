@@ -14,6 +14,7 @@ createServer(async (req, res) => {
   const path = new URL(req.url, "http://localhost").pathname;
   function send(status, value) {res.writeHead(status, {"Content-Type": "application/json"}); res.end(JSON.stringify(value));}
   if (path === "/test/reset") {reset(); return send(200, {});}
+  if (path === "/test/advance") {recipe.revision++; recipe.materials[0].quantity = tracked("20"); return send(200, {});}
   if (path === "/test/state") return send(200, {confirms, corrections, revision: recipe.revision});
   if (req.headers["x-demo-access"] !== "test-only-backend-token") return send(403, {detail: "denied"});
   if (path === "/demo/recipes") return send(200, {items: [{id, title: recipe.title.value, revision: recipe.revision}]});

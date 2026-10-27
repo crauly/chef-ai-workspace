@@ -73,3 +73,18 @@ test("uncertain save retries the exact request ID without a second commit", asyn
   expect(payloads).toHaveLength(2); expect(payloads[0]).toEqual(payloads[1]);
   expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).confirms).toHaveLength(1);
 });
+test("a concurrent revision refreshes the selected recipe and permits a fresh review without reopening", async ({page, request}) => {
+  await page.goto("/"); await page.getByRole("button", {name: "詳細を見る"}).click();
+  await page.getByLabel("料理人の指示", {exact: true}).fill("片栗粉15g、売価1800円に");
+  await page.getByRole("button", {name: "変更案を作る"}).click(); await page.getByRole("checkbox").check();
+  await request.post("http://127.0.0.1:8100/test/advance");
+  await page.getByRole("button", {name: "承認して保存・原価再計算"}).click();
+  await expect(page.getByRole("region", {name: "AIに変更を相談", exact: true}).getByRole("alert")).toContainText("最新のレシピを取得しました");
+  await expect(page.getByRole("button", {name: "承認して保存・原価再計算"})).toHaveCount(0);
+  await page.getByRole("button", {name: "変更案を作る"}).click();
+  await expect(page.getByRole("region", {name: "提案の差分"})).toContainText("20 g → 15 g");
+  await page.getByRole("checkbox").check(); await page.getByRole("button", {name: "承認して保存・原価再計算"}).click();
+  await expect(page.getByRole("region", {name: "Recipe cost summary"})).toContainText("¥15");
+  const state = await (await request.get("http://127.0.0.1:8100/test/state")).json();
+  expect(state.revision).toBe(2); expect(state.confirms).toHaveLength(1); expect(state.confirms[0].base_revision).toBe(1);
+});

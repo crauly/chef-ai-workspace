@@ -34,7 +34,8 @@ Deployment-provider restricted access may be added outside this gate.
    button. Only that action calls `/confirm`, with the proposal's base revision,
    one stable request UUID and `save_version=true`. Network retries reuse the UUID.
 5. FastAPI validates, recalculates deterministically and atomically persists the
-   revision/snapshot. The UI reloads current cost. Conflicts require a fresh proposal.
+   revision/snapshot. The UI reloads current cost. Conflicts reload the selected
+   recipe automatically and require a fresh proposal and approval.
 6. Optional: explicitly register original/preferred phrases in correction history.
    This does not mutate the recipe or automatically accept subsequent suggestions.
 

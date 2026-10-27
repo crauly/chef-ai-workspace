@@ -50,6 +50,12 @@ export default function AIEditor({recipe, locale, onSaved, onBusy}: {
   const lock = useRef(false);
   const changes = review ? describe(recipe, review.proposal.operations, locale) : null;
   const valid = review && review.proposal.recipe_id === recipe.id && review.proposal.base_revision === recipe.revision && changes !== null;
+  async function refreshAfterConflict() {
+    setReview(null); setApproved(false);
+    const latest = await request<Recipe>(`/api/recipes/${recipe.id}`);
+    onSaved(latest);
+    setError(locale === "ja" ? "最新のレシピを取得しました。変更案を作り直してください。" : "Recipe refreshed. Request a new proposal.");
+  }
   function working(value: boolean) {lock.current = value; setBusy(value); onBusy(value);}
   function report(e: unknown, uncertainSave = false) {
     const status = e instanceof Error ? e.message : "";
@@ -60,7 +66,10 @@ export default function AIEditor({recipe, locale, onSaved, onBusy}: {
     working(true); setError(""); setNotice(""); setReview(null); setApproved(false);
     try {
       const proposal = await request<AIProposal>(`/api/recipes/${recipe.id}/propose`, {method: "POST", body: JSON.stringify({instruction})});
-      if (proposal.requires_confirmation !== true || !Array.isArray(proposal.operations) || proposal.operations.length > 40 || describe(recipe, proposal.operations, locale) === null) throw new Error("invalid");
+      if (proposal.requires_confirmation !== true || !Array.isArray(proposal.operations) || proposal.operations.length > 40) throw new Error("invalid");
+      if (proposal.recipe_id !== recipe.id) throw new Error("invalid");
+      if (proposal.base_revision !== recipe.revision) {await refreshAfterConflict(); return;}
+      if (describe(recipe, proposal.operations, locale) === null) throw new Error("invalid");
       setReview({proposal, instruction, requestId: crypto.randomUUID()});
     } catch (e) {report(e);} finally {working(false);}
   }
@@ -72,7 +81,9 @@ export default function AIEditor({recipe, locale, onSaved, onBusy}: {
       setReview(null); setApproved(false); setNotice(t("savedRecalculated")); onSaved(result.recipe);
     } catch (e) {
       report(e, true);
-      if (e instanceof Error && e.message === "409") {setReview(null); setApproved(false);}
+      if (e instanceof Error && e.message === "409") {
+        try {await refreshAfterConflict();} catch {setError(t("failure"));}
+      }
       // Keep the same request ID on uncertain network outcomes: retry cannot apply twice.
     } finally {working(false);}
   }
