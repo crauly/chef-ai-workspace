@@ -17,3 +17,7 @@ production user accounts.
 
 The current UI only exposes title changes; material editing, pricing,
 AI proposals, voice and photo flows are not connected yet.
+
+## Ingredient presentation contract
+
+In a recipe, display the chef-facing per-line `material_name.value` as the **food/ingredient name** (食材名), not an internal ingredient-master category, purchasing item, or linked catalog `name`. For example, a chef's `片栗粉` should not be silently rewritten to `澱粉`. Preserve `ingredient_id` separately for shared pricing and later procurement details. Never infer or replace a missing chef-facing name with the catalog label; show `食材名未設定` until the chef supplies one. A linked product's supplier, last purchase and price history can be added later through a separate detail interaction without changing recipe wording.
