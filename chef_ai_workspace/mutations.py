@@ -65,7 +65,10 @@ def prepare_mutation(recipe: Recipe, proposal: Proposal, *, user_confirmed: bool
                 if candidate.cost_adjustment_jpy.value is None:
                     raise MutationError("Cannot increment unresolved adjustment")
                 number += decimal(candidate.cost_adjustment_jpy.value)
-            candidate = replace(candidate, cost_adjustment_jpy=_value(str(number), user_confirmed))
+            if kind == "adjust_cost_adjustment" and candidate.cost_adjustment_jpy.status == "assumed":
+                candidate = replace(candidate, cost_adjustment_jpy=TrackedValue(str(number), "assumed", "ai"))
+            else:
+                candidate = replace(candidate, cost_adjustment_jpy=_value(str(number), user_confirmed))
         elif kind == "set_title":
             _fields(op, {"op", "value"})
             candidate = replace(candidate, title=_value(op["value"], user_confirmed))
