@@ -40,3 +40,19 @@ The **service-role-only** SQL `commit_recipe_revision` RPC uses a row lock and c
 - GitHub Actions runs the Python unit suite and a **static SQL guardrail test** for RLS presence, restricted mutation RPC grants, expected snapshot and ID-dedup clauses. These are text assertions, **not SQL syntax checks, actual database execution or multi-account security verification**.
 - **Completed:** migration applied successfully, tables and RLS policies enumerated, Supabase security advisor returned zero findings.\n- **Not performed:** full Supabase Auth user A/B isolation, Storage bucket policy testing, transactional rollback/parallel request integration tests.
 - Dedicated project `chef-ai-workspace` (Tokyo, project ref `dfvryaybdelgjxihdmth`) was created separately from restaurant app `iwaka_project`. Initial migration `chef_ai_workspace_initial_schema` applied successfully on 2026-10-27. Five tables verified with RLS enabled; seven access policies inspected. Supabase security advisors returned no lints. No actual authenticated-user RLS test has yet been run.
+
+## Verified database tests — 2026-10-27
+
+**Environment:** dedicated Supabase project `chef-ai-workspace`, Tokyo (`dfvryaybdelgjxihdmth`). Temporary synthetic identities and recipe rows in a PL/pgSQL subtransaction, intentionally rolled back after checks; verified user/recipe/version/receipt counts all returned to zero.
+
+**Passed in actual PostgreSQL:**
+
+1. Revision RPC advances 0 → 1 and persists exactly one immutable version snapshot.
+2. Retry of identical request ID/payload hash returns the original result and does not insert another receipt.
+3. Stale revision raises `Stale recipe revision`.
+4. Missing cost snapshot when saving a version raises `Missing cost snapshot` and does not change the recipe's revision (transaction rollback).
+5. With simulated authenticated JWT identity B, owner A's recipe is invisible; with identity A, it is visible.
+6. Database EXECUTE permissions: `authenticated` cannot invoke the commit RPC, `service_role` can.
+7. Test data rollback confirmed: `auth.users`, `recipes`, `recipe_versions`, and `mutation_receipts` remained empty afterward.
+
+**Limitations:** Identity isolation was simulated inside SQL using `SET LOCAL ROLE authenticated` and `request.jwt.claim.sub`, not a full client-issued Supabase Auth JWT exchange. Browser integration, real authentication signup/login, image bucket RLS, simultaneous mutation races, user B write denial, mismatched request ID/payload hash, and trusted backend validation still require tests. No complete app end-to-end claim yet.
