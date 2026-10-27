@@ -14,7 +14,7 @@ export default function Library(){
  const reload=useCallback(async()=>{try{setItems((await request<{items:Item[]}>(`/api/recipes?page=${page}&page_size=20`)).items);setError("");}catch(e){setError(String(e));}},[page]);
  useEffect(()=>{void reload();},[reload]);
  async function create(e:React.FormEvent){e.preventDefault();if(!draft.trim())return;setBusy(true);
- try{const recipe=await request<Recipe>("/api/recipes",{method:"POST",body:JSON.stringify({title:draft.trim()})});setDraft("");setPage(1);setSelected(recipe);setRename(recipe.title.value||"");}
+ try{const recipe=await request<Recipe>("/api/recipes",{method:"POST",body:JSON.stringify({title:draft.trim()})});setDraft("");if(page===1){await reload();}else{setPage(1);}setSelected(recipe);setRename(recipe.title.value||"");}
  catch(e){setError(String(e));}finally{setBusy(false);}}
  async function open(id:string){if(busy)return;try{const recipe=await request<Recipe>(`/api/recipes/${id}`);setSelected(recipe);setRename(recipe.title.value||"");setError("");}catch(e){setError(String(e));}}
  async function change(e:React.FormEvent){e.preventDefault();if(!selected||!rename.trim())return;setBusy(true);
