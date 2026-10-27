@@ -40,6 +40,21 @@ class SupabasePersistence:
             raise ValueError("Recipe not found")
         return decode_recipe(response.data["state"])
 
+    def load_owned_catalog(self, owner_id, recipe):
+        ids = sorted({m.ingredient_id for m in recipe.materials
+                      if m.price_mode == "inherit" and m.ingredient_id})
+        if not ids:
+            return {}
+        response = (self.client.table("ingredients")
+                    .select("id,name,current_price").eq("owner_id", owner_id)
+                    .in_("id", ids).execute())
+        catalog = {}
+        for row in response.data or []:
+            catalog[row["id"]] = Ingredient(
+                id=row["id"], name=row["name"],
+                current_price=_quote(row.get("current_price")))
+        return catalog
+
     def get_mutation_receipt(self, owner_id, request_id):
         response = (self.client.table("mutation_receipts")
                     .select("payload_hash,resulting_revision").eq("owner_id", owner_id)
