@@ -107,3 +107,29 @@ def get_demo_recipe_cost(recipe_id: UUID, ctx=Depends(demo_context)):
     catalog = (repository.load_owned_catalog(owner, recipe)
                if any(m.price_mode == "inherit" for m in recipe.materials) else {})
     return _json(asdict(calculate_cost(recipe, catalog)))
+
+
+class AIProposalBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    instruction: str = Field(min_length=1, max_length=4000)
+
+
+@router.post("/recipes/{recipe_id}/propose")
+def propose_demo_change(recipe_id: UUID, body: AIProposalBody,
+                        request: Request, ctx=Depends(demo_context)):
+    """Untrusted suggestion only. Never commit or confirm AI output here."""
+    from .ai_provider import ProposalProviderError
+    owner, repository = ctx
+    provider = getattr(request.app.state, "ai_provider", None)
+    if provider is None:
+        raise HTTPException(503, "AI provider not configured")
+    try:
+        recipe = repository.load_owned_recipe(owner, str(recipe_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Recipe not found") from exc
+    try:
+        operations = provider.propose(body.instruction, asdict(recipe))
+    except ProposalProviderError as exc:
+        raise HTTPException(502, "AI provider unavailable or invalid response") from exc
+    return {"recipe_id":str(recipe_id),"base_revision":recipe.revision,
+            "operations":operations,"requires_confirmation":True}
