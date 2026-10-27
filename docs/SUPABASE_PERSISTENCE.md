@@ -19,7 +19,7 @@ The **service-role-only** SQL `commit_recipe_revision` RPC uses a row lock and c
 
 ## Important known blockers before production
 
-- Initial client INSERT is provisionally allowed only for own rows; validate creation server-side or narrow this permission before production. It is NOT a substitute for validated recipe creation.
+- Direct client INSERT/UPDATE/DELETE of recipes is now closed at the RLS policy level. A trusted recipe-creation API/RPC is required before this schema supports creating recipes.
 - `security definer` RPC trusts a **service-role-only trusted backend** to authenticate caller and verify proposed JSON/cost. Never pass a user-supplied owner identifier without verifying identity.
 - Cross-owner `ingredient_images` rows and object paths must stay consistent; SQL metadata RLS alone does not configure a Storage bucket or Storage RLS.
 - Image bucket creation/upload rules, MIME/size limits, signed reads and orphan cleanup need separate implementation.
@@ -34,3 +34,9 @@ The **service-role-only** SQL `commit_recipe_revision` RPC uses a row lock and c
 5. Rollback on snapshot insert failure leaves current recipe/revision unchanged.
 6. Version price snapshot stays unchanged when ingredient price changes.
 7. No-image recipes and ingredients remain valid.
+
+## Verification status
+
+- GitHub Actions runs the Python unit suite and a **static SQL guardrail test** for RLS presence, restricted mutation RPC grants, expected snapshot and ID-dedup clauses. These are text assertions, **not SQL syntax checks, actual database execution or multi-account security verification**.
+- **Not performed:** application of migration, SQL compile/runtime verification, Supabase Auth user A/B isolation, Storage bucket policy testing, transactional rollback/parallel request integration tests.
+- An existing connected Supabase project is not confirmed to be dedicated to Chef AI Workspace; therefore this migration is not applied there without explicit project selection.
