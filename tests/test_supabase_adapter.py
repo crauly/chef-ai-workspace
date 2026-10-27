@@ -12,10 +12,10 @@ class Query:
     def execute(self): return SimpleNamespace(data=self.result)
 
 class Client:
-    def __init__(self): self.tables={}; self.calls=[]
+    def __init__(self): self.tables={}; self.calls=[]; self.queries=[]
     def table(self,name):
         self.calls.append(name)
-        return Query(self.tables.get(name))
+        q=Query(self.tables.get(name)); self.queries.append(q); return q
     def rpc(self,name,params):
         self.rpc_name=name; self.params=params
         return Query(1)
@@ -66,7 +66,8 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(c.calls,["ingredients"])
         self.assertEqual(catalog["a"].current_price.amount_jpy.value,"150")
         self.assertIsNone(catalog["b"].current_price)
-        q=Query(c.tables["ingredients"])
+        self.assertIn(("owner_id","user-a"),c.queries[0].filters)
+        self.assertIn(("id",("a","b")),c.queries[0].filters)
         self.assertEqual(len({m.ingredient_id for m in data.materials}),2)
 
     def test_empty_catalog_does_not_hit_database(self):
