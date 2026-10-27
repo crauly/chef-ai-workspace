@@ -1,0 +1,21 @@
+name: Live Supabase Auth checks
+on:
+  push:
+    branches: [test/supabase-auth-actions]
+  pull_request:
+    paths:
+      - 'tests/test_live_supabase_auth.py'
+      - '.github/workflows/live-supabase-auth.yml'
+  workflow_dispatch:
+jobs:
+  live-auth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe real Supabase Auth and verify JWT when test account is configured
+        env:
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          AUTH_TEST_EMAIL: ${{ secrets.AUTH_TEST_EMAIL }}
+          AUTH_TEST_PASSWORD: ${{ secrets.AUTH_TEST_PASSWORD }}
+        run: python -m unittest -v tests.test_live_supabase_auth
