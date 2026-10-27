@@ -62,3 +62,7 @@ def confirm_recipe_mutation(recipe_id: UUID, body: MutationBody,
     return {"recipe": asdict(outcome.recipe),
             "revision": outcome.resulting_revision,
             "replayed": outcome.replayed}
+
+# Operator-gated hackathon library; independent of production Supabase login.
+from .demo_api import router as demo_router
+app.include_router(demo_router)
