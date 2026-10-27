@@ -97,7 +97,7 @@ declare v_owner uuid := p_owner_id;
 begin
  if v_owner is null then raise exception 'Owner required'; end if;
  if p_request_id is null or p_new_state is null or p_title is null or btrim(p_title) = ''
-   or p_payload_hash is null or p_payload_hash = '' or p_expected_revision < 0 then
+   or p_payload_hash is null or p_payload_hash = '' or p_expected_revision is null or p_expected_revision < 0 then
    raise exception 'Invalid mutation payload';
  end if;
  -- Lock recipe before checking receipts, serializing concurrent requests on this recipe.
