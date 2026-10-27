@@ -33,6 +33,7 @@ def canonical_json(value) -> str:
 class TrustedPersistence(Protocol):
     """Implemented only inside authenticated server code."""
     def load_owned_recipe(self, owner_id: str, recipe_id: str) -> Recipe: ...
+    def get_mutation_receipt(self, owner_id: str, request_id: str) -> tuple[str, int] | None: ...
     def commit_recipe_revision(self, *, owner_id: str, recipe_id: str,
                                request_id: str, base_revision: int,
                                state: dict, title: str, cost_snapshot: dict,
@@ -60,6 +61,19 @@ def save_validated_mutation(*, owner_id: str, trusted_user_confirmed: bool,
         raise MutationError("Verified user ID required")
     if type(trusted_user_confirmed) is not bool:
         raise MutationError("Trusted confirmation decision required")
+    payload_hash = sha256(canonical_json({
+        "proposal": asdict(proposal), "confirmed": trusted_user_confirmed,
+        "save_version": save_version,
+    }).encode("utf-8")).hexdigest()
+    receipt = repository.get_mutation_receipt(owner_id, proposal.request_id)
+    if receipt is not None:
+        saved_hash, saved_revision = receipt
+        if saved_hash != payload_hash:
+            raise MutationError("Request ID reused with different payload")
+        existing = repository.load_owned_recipe(owner_id, proposal.recipe_id)
+        if existing.revision < saved_revision:
+            raise MutationError("Stored receipt ahead of recipe revision")
+        return SavedMutation(existing, saved_revision, True)
     recipe = repository.load_owned_recipe(owner_id, proposal.recipe_id)
     candidate = prepare_mutation(recipe, proposal,
                                  user_confirmed=trusted_user_confirmed,
@@ -82,10 +96,6 @@ def save_validated_mutation(*, owner_id: str, trusted_user_confirmed: bool,
             }
         snapshot["effective_quotes"] = quotes
     state = asdict(candidate)
-    payload_hash = sha256(canonical_json({
-        "proposal": asdict(proposal), "confirmed": trusted_user_confirmed,
-        "save_version": save_version,
-    }).encode("utf-8")).hexdigest()
     revised = repository.commit_recipe_revision(
         owner_id=owner_id, recipe_id=recipe.id,
         request_id=proposal.request_id, base_revision=proposal.base_revision,
