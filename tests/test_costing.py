@@ -58,6 +58,13 @@ class CostTests(unittest.TestCase):
         self.assertEqual(result.total_cost_jpy, Decimal("0"))
         self.assertEqual(result.cost_rate_pct, Decimal("0.0"))
 
+    def test_half_yen_boundary_avoid_early_ratio_rounding(self):
+        line = MaterialLine("m1", known("でんぷん"), known("1"), "g", price_override=quote("121", "22", "g"))
+        result = calculate_cost(recipe(line, selling="100"))
+        self.assertEqual(result.line_costs["m1"], Decimal("5.5"))
+        self.assertEqual(result.total_cost_jpy, Decimal("6"))
+        self.assertEqual(result.cost_rate_pct, Decimal("6.0"))
+
     def test_reject_invalid_values(self):
         with self.assertRaises(ValueError):
             TrackedValue("100", "confirmed", "ai")
