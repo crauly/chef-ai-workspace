@@ -38,6 +38,16 @@ class AdapterTests(unittest.TestCase):
         r=decode_recipe(sample())
         self.assertEqual(r.materials[0].price_override.amount_jpy.value,"150")
         self.assertEqual(r.title.status,"confirmed")
+    def test_missing_postgrest_row_is_not_found(self):
+        class NotFound(Exception):
+            code = "PGRST116"
+        class BrokenQuery(Query):
+            def execute(self): raise NotFound("No rows")
+        class BrokenClient(Client):
+            def table(self, name): return BrokenQuery(None)
+        with self.assertRaises(ValueError):
+            SupabasePersistence(BrokenClient()).load_owned_recipe("owner","missing")
+
     def test_scoped_reads(self):
         c=Client();c.tables["recipes"]={"state":sample()}
         repo=SupabasePersistence(c)
