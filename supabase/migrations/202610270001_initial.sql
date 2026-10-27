@@ -61,15 +61,12 @@ alter table public.ingredients enable row level security;
 alter table public.ingredient_images enable row level security;
 
 create policy recipes_select on public.recipes for select to authenticated using (owner_id = (select auth.uid()));
--- Creation policy is temporary until server-side validated creation is implemented.
+-- Recipe creation must use a future trusted backend endpoint.
 -- No client INSERT/UPDATE/DELETE policy for recipes. Creation must pass through
 -- a future authenticated, server-validated creation endpoint.
 -- No table write privileges are granted to clients by the RLS policies.
 create policy versions_read on public.recipe_versions for select to authenticated using (owner_id = (select auth.uid()));
-create policy versions_insert on public.recipe_versions for insert to authenticated with check (
- owner_id = (select auth.uid()) and exists
- (select 1 from public.recipes r where r.id = recipe_id and r.owner_id = (select auth.uid()))
-);
+-- No direct client version inserts: snapshots are committed only by the trusted backend RPC.
 create policy receipts_read on public.mutation_receipts for select to authenticated using (owner_id = (select auth.uid()));
 -- Receipts are written by the transactional RPC only; do not allow direct user writes.
 create policy ingredients_owner on public.ingredients for all to authenticated using (owner_id = (select auth.uid())) with check (owner_id = (select auth.uid()));
