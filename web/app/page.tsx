@@ -29,7 +29,7 @@ export default function Library(){
  {selected&&<section className="card"><div className="toolbar"><h2>レシピ詳細</h2><button onClick={()=>setSelected(null)}>閉じる</button></div>
  <p className="tag">Revision {selected.revision}</p>
  <form onSubmit={change}><input aria-label="料理名を変更" value={rename} onChange={e=>setRename(e.target.value)}/><button disabled={busy||!rename.trim()}>変更して保存</button></form>
- <h2>材料</h2>{selected.materials.length===0?<p className="muted">材料はまだ登録されていません。</p>:<ul>{selected.materials.map(m=><li key={m.id}>{m.material_name.value} — {m.quantity.value??"未設定"} {m.unit??""}</li>)}</ul>}
+ <h2>食材・分量</h2>{selected.materials.length===0?<p className="muted">食材はまだ登録されていません。</p>:<ul>{selected.materials.map(m=><li key={m.id}><strong>{m.material_name.value?.trim() || "食材名未設定"}</strong> — {m.quantity.value??"未設定"} {m.unit??""}</li>)}</ul>}
  <p className="muted">売価：{selected.selling_price_jpy.value??"未設定"}</p>
  </section>}</main>;
 }
