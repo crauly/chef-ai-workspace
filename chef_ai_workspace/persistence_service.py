@@ -82,7 +82,7 @@ def save_validated_mutation(*, owner_id: str, trusted_user_confirmed: bool,
         candidate = prepare_mutation(recipe, proposal,
                                      user_confirmed=trusted_user_confirmed,
                                      catalog=catalog)
-    except MutationError:
+    except ValueError as exc:
         if recipe.revision != proposal.base_revision:
             late_receipt = repository.get_mutation_receipt(owner_id, proposal.request_id)
             if late_receipt is not None:
@@ -93,8 +93,11 @@ def save_validated_mutation(*, owner_id: str, trusted_user_confirmed: bool,
                 if canonical.revision < saved_revision:
                     raise MutationError("Stored receipt ahead of recipe revision")
                 return SavedMutation(canonical, saved_revision, True)
-        raise
-    cost = calculate_cost(candidate, catalog)
+        raise MutationError(str(exc)) from exc
+    try:
+        cost = calculate_cost(candidate, catalog)
+    except ValueError as exc:
+        raise MutationError(str(exc)) from exc
     snapshot = asdict(cost)
     # Resolve actual effective quotes when saving, not just the line costs.
     if save_version:
