@@ -35,6 +35,18 @@ class MutationTests(unittest.TestCase):
         b=apply(a,{"op":"set_cost_adjustment","value_jpy":"20"})
         self.assertEqual(b.cost_adjustment_jpy.value,"20")
         self.assertEqual(b.materials[0].price_override.amount_jpy.value,"150")
+    def test_assumed_adjustment_survives_confirmed_delta(self):
+        r = replace(fixture(), cost_adjustment_jpy=TrackedValue("50", "assumed", "ai"))
+        changed = apply(r, {"op":"adjust_cost_adjustment","delta_jpy":"10"})
+        self.assertEqual(changed.cost_adjustment_jpy.value, "60")
+        self.assertEqual(changed.cost_adjustment_jpy.status, "assumed")
+        absolute = apply(changed, {"op":"set_cost_adjustment","value_jpy":"60"})
+        self.assertEqual(absolute.cost_adjustment_jpy.status, "confirmed")
+
+    def test_assumed_delta_remains_assumed(self):
+        changed = apply(fixture(), {"op":"adjust_cost_adjustment","delta_jpy":"10"}, confirmed=False)
+        self.assertEqual(changed.cost_adjustment_jpy.status, "assumed")
+
     def test_atomic_invalid_second(self):
         r=fixture()
         with self.assertRaises(MutationError):
