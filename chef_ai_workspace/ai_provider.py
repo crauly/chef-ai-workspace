@@ -12,8 +12,7 @@ class ProposalProviderError(Exception):
 
 SYSTEM = """You translate a chef's instruction to candidate JSON recipe edits.
 Return a JSON object with exactly one key: operations.
-Allowed operations:
-set_title: {op,value}
+All numerical inputs MUST be decimal JSON strings, not JSON numbers.\nFor example: {"op":"set_selling_price","value_jpy":"1800"} and\n{"op":"set_material_quantity","material_id":"existing-id","value":"15","unit":"g"}.\nAllowed operations:\nset_title: {op,value}
 set_selling_price: {op,value_jpy}
 set_material_quantity: {op,material_id,value,unit}
 set_material_price: {op,material_id,price_jpy,price_quantity,price_unit}
