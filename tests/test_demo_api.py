@@ -40,6 +40,18 @@ class DemoLibraryTests(unittest.TestCase):
         self.assertEqual(self.repo.created[0][0],self.owner)
         self.assertIn("total_cost_jpy",self.repo.created[0][2])
 
+    def test_blank_title_rejected_before_database_call(self):
+        r=self.client.post("/demo/recipes",json={"title":"   "},
+                           headers={"X-Demo-Access":"a-secret-known-only-to-presenter"})
+        self.assertEqual(r.status_code,422)
+        self.assertEqual(self.repo.created,[])
+
+    def test_change_requires_demo_access(self):
+        r=self.client.post(f"/demo/recipes/{uuid4()}/confirm",
+              json={"base_revision":0,"request_id":str(uuid4()),
+                    "operations":[{"op":"set_title","value":"New"}]})
+        self.assertEqual(r.status_code,403)
+
     def test_access_denied_without_secret(self):
         self.assertEqual(self.client.get("/demo/recipes").status_code,403)
         self.assertEqual(self.repo.calls,[])
