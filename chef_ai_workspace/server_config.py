@@ -27,4 +27,13 @@ def configure_supabase(app_instance=app):
 
     app_instance.state.verify_token = verify_token
     app_instance.state.repository_factory = lambda: SupabasePersistence(client)
+    demo_owner = os.environ.get("DEMO_OWNER_ID")
+    demo_token = os.environ.get("DEMO_ACCESS_TOKEN")
+    if demo_owner or demo_token:
+        from uuid import UUID
+        if not demo_owner or not demo_token or len(demo_token) < 24:
+            raise RuntimeError("Demo owner and strong access token required together")
+        UUID(demo_owner)
+        app_instance.state.demo_owner_id = demo_owner
+        app_instance.state.demo_access_token = demo_token
     return app_instance
