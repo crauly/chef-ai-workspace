@@ -44,8 +44,13 @@ class SupabasePersistence:
         return response.data or []
 
     def load_owned_recipe(self, owner_id, recipe_id):
-        response = (self.client.table("recipes").select("state")
-                    .eq("owner_id", owner_id).eq("id", recipe_id).single().execute())
+        try:
+            response = (self.client.table("recipes").select("state")
+                        .eq("owner_id", owner_id).eq("id", recipe_id).single().execute())
+        except Exception as exc:
+            if getattr(exc, "code", None) == "PGRST116":
+                raise ValueError("Recipe not found") from exc
+            raise
         if not response.data:
             raise ValueError("Recipe not found")
         return decode_recipe(response.data["state"])
