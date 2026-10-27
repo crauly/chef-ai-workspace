@@ -36,6 +36,8 @@ def configure_supabase(app_instance=app):
         UUID(demo_owner)
         app_instance.state.demo_owner_id = demo_owner
         app_instance.state.demo_access_token = demo_token
+    from .correction_hints import SupabaseCorrectionHints
+    app_instance.state.correction_hints = SupabaseCorrectionHints(client)
     ai_key = os.environ.get("AI_API_KEY")
     if ai_key:
         from .ai_provider import ChatCompletionsProvider
