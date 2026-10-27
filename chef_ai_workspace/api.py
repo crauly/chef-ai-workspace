@@ -59,6 +59,8 @@ def confirm_recipe_mutation(recipe_id: UUID, body: MutationBody,
             save_version=body.save_version)
     except MutationError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Recipe not found or inaccessible") from exc
     return {"recipe": asdict(outcome.recipe),
             "revision": outcome.resulting_revision,
             "replayed": outcome.replayed}
