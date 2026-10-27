@@ -75,9 +75,22 @@ def save_validated_mutation(*, owner_id: str, trusted_user_confirmed: bool,
             raise MutationError("Stored receipt ahead of recipe revision")
         return SavedMutation(existing, saved_revision, True)
     recipe = repository.load_owned_recipe(owner_id, proposal.recipe_id)
-    candidate = prepare_mutation(recipe, proposal,
-                                 user_confirmed=trusted_user_confirmed,
-                                 catalog=catalog)
+    try:
+        candidate = prepare_mutation(recipe, proposal,
+                                     user_confirmed=trusted_user_confirmed,
+                                     catalog=catalog)
+    except MutationError:
+        if recipe.revision != proposal.base_revision:
+            late_receipt = repository.get_mutation_receipt(owner_id, proposal.request_id)
+            if late_receipt is not None:
+                saved_hash, saved_revision = late_receipt
+                if saved_hash != payload_hash:
+                    raise MutationError("Request ID reused with different payload")
+                canonical = repository.load_owned_recipe(owner_id, proposal.recipe_id)
+                if canonical.revision < saved_revision:
+                    raise MutationError("Stored receipt ahead of recipe revision")
+                return SavedMutation(canonical, saved_revision, True)
+        raise
     cost = calculate_cost(candidate, catalog)
     snapshot = asdict(cost)
     # Resolve actual effective quotes when saving, not just the line costs.
