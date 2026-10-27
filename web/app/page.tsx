@@ -1,13 +1,9 @@
 "use client";
 import {useCallback,useEffect,useState} from "react";
 import {label, type Locale} from "./i18n";
+import AIEditor from "./AIEditor";
+import {request, type Recipe} from "./types";
 type Item={id:string;title:string;revision:number;updated_at?:string};
-type Recipe={id:string;title:{value:string|null};revision:number;materials:{id:string;material_name:{value:string|null};quantity:{value:string|null;status:string};unit:string|null;price_override?:{amount_jpy:{value:string|null;status:string};per_quantity:string;per_unit:string}|null;price_mode:string}[];selling_price_jpy:{value:string|null;status:string}};
-async function request<T>(path:string,init?:RequestInit):Promise<T>{
- const r=await fetch(path,{...init,headers:{"Content-Type":"application/json",...(init?.headers||{})},cache:"no-store"});
- if(!r.ok)throw new Error("HTTP "+r.status);
- return r.json();
-}
 export default function Library(){
  const [items,setItems]=useState<Item[]>([]),[selected,setSelected]=useState<Recipe|null>(null);
  const [draft,setDraft]=useState(""),[rename,setRename]=useState(""),[error,setError]=useState("");
@@ -16,7 +12,7 @@ export default function Library(){
  const [food,setFood]=useState(""),[qty,setQty]=useState(""),[unit,setUnit]=useState("g"),[price,setPrice]=useState(""),[priceQty,setPriceQty]=useState("1"),[priceUnit,setPriceUnit]=useState("kg");
  const [locale,setLocale]=useState<Locale>("ja");
  const t=(key:Parameters<typeof label>[1])=>label(locale,key);
- useEffect(()=>{const current=localStorage.getItem("chef-ui-locale");if(current==="ja"||current==="en-US")setLocale(current);},[]);
+ useEffect(()=>{const current=localStorage.getItem("chef-ui-locale");if(current==="ja"||current==="en-US"){setLocale(current);document.documentElement.lang=current;}},[]);
  function switchLocale(next:Locale){setLocale(next);localStorage.setItem("chef-ui-locale",next);document.documentElement.lang=next;}
  useEffect(()=>{let active=true;setCost(null);if(selected){void request<{partial:boolean;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean}>(`/api/recipes/${selected.id}/cost`).then(result=>{if(active)setCost(result);}).catch(()=>{if(active)setCost(null);});}return()=>{active=false;};},[selected?.id,selected?.revision]);
  const reload=useCallback(async()=>{try{setItems((await request<{items:Item[]}>(`/api/recipes?page=${page}&page_size=20`)).items);setError("");}catch(e){setError(String(e));}},[page]);
@@ -24,7 +20,7 @@ export default function Library(){
  async function create(e:React.FormEvent){e.preventDefault();if(!draft.trim())return;setBusy(true);
  try{const recipe=await request<Recipe>("/api/recipes",{method:"POST",body:JSON.stringify({title:draft.trim()})});setDraft("");if(page===1){await reload();}else{setPage(1);}setSelected(recipe);setRename(recipe.title.value||"");}
  catch(e){setError(String(e));}finally{setBusy(false);}}
- async function open(id:string){if(busy)return;try{const recipe=await request<Recipe>(`/api/recipes/${id}`);setSelected(recipe);setRename(recipe.title.value||"");setError("");}catch(e){setError(String(e));}}
+ async function open(id:string){if(busy)return;setBusy(true);try{const recipe=await request<Recipe>(`/api/recipes/${id}`);setSelected(recipe);setRename(recipe.title.value||"");setError("");}catch(e){setError(String(e));}finally{setBusy(false);}}
  async function change(e:React.FormEvent){e.preventDefault();if(!selected||!rename.trim())return;setBusy(true);
  try{const result=await request<{recipe:Recipe}>(`/api/recipes/${selected.id}/confirm`,{method:"POST",body:JSON.stringify({base_revision:selected.revision,request_id:crypto.randomUUID(),operations:[{op:"set_title",value:rename.trim()}],save_version:true})});setSelected(result.recipe);await reload();}
  catch(e){setError(String(e));}finally{setBusy(false);}}
@@ -60,6 +56,7 @@ export default function Library(){
  <div className="toolbar"><button disabled={page===1} onClick={()=>setPage(p=>p-1)}>{t("previous")}</button><span>{t("page")} {page}</span><button disabled={items.length<20} onClick={()=>setPage(p=>p+1)}>{t("next")}</button></div>
  {selected&&<section className="card"><div className="toolbar"><h2>{t("detail")}</h2><button disabled={busy} onClick={()=>setSelected(null)}>{t("close")}</button></div>
  <p className="tag">Revision {selected.revision}</p>
+ <AIEditor key={selected.id} recipe={selected} locale={locale} onBusy={setBusy} onSaved={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");void reload();}} />
  <form onSubmit={change}><input aria-label={t("rename")} value={rename} onChange={e=>setRename(e.target.value)}/><button disabled={busy||!rename.trim()}>{t("save")}</button></form>
  <h2>{t("ingredients")}</h2>{selected.materials.length===0?<p className="muted">{t("noIngredients")}</p>:<ul>{selected.materials.map(m=><li key={m.id}><strong>{m.material_name.value?.trim() || t("unnamed")}</strong> — {m.quantity.value??t("missing")} {m.unit??""}{m.quantity.status==="assumed"?` (${t("assumed")})`:m.quantity.status==="unresolved"?` (${t("unresolved")})`:""} <button disabled={busy} type="button" onClick={()=>{const v=prompt(locale==="ja"?"新しい数量":"New quantity",m.quantity.value||"");if(v!==null&&v.trim())void updateQuantity(m.id,v,m.unit||"g");}}>{locale==="ja"?"数量変更":"Edit qty"}</button> <button disabled={busy} type="button" onClick={()=>{const p=m.price_override;const v=prompt(locale==="ja"?"新しい仕入単価（円）":"New price JPY",p?.amount_jpy.value||"");if(v!==null&&v.trim())void updatePrice(m.id,v,p?.per_quantity||"1",p?.per_unit||m.unit||"g");}}>{locale==="ja"?"単価変更":"Edit price"}</button></li>)}</ul>}
  <form onSubmit={addFood} className="material-form">

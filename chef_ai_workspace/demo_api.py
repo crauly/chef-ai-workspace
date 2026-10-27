@@ -10,7 +10,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, ConfigDict
 from .models import Recipe, TrackedValue
 from .costing import calculate_cost
-from .mutations import Proposal, MutationError
+from .mutations import Proposal, MutationError, prepare_mutation
 from .persistence_service import save_validated_mutation, _json
 from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -136,6 +136,16 @@ def propose_demo_change(recipe_id: UUID, body: AIProposalBody,
         operations = provider.propose(body.instruction, context)
     except ProposalProviderError as exc:
         raise HTTPException(502, "AI provider unavailable or invalid response") from exc
+    # Pure validation on a copy: reject malformed/unknown edits before showing a diff.
+    if operations:
+        try:
+            catalog = (repository.load_owned_catalog(owner, recipe)
+                       if any(m.price_mode == "inherit" for m in recipe.materials) else {})
+            prepare_mutation(recipe, Proposal(str(recipe_id), recipe.revision,
+                             str(uuid4()), tuple(operations)), user_confirmed=False,
+                             catalog=catalog)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(422, "AI proposal failed validation") from exc
     return {"recipe_id":str(recipe_id),"base_revision":recipe.revision,
             "operations":operations,"requires_confirmation":True}
 

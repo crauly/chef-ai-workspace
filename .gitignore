@@ -151,6 +151,12 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+node_modules/
+.next/
+playwright-report/
+test-results/
+*.tsbuildinfo
 .envrc
 .venv
 env/
