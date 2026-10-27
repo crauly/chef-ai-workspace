@@ -21,6 +21,7 @@ def convert_quantity(qty: Decimal, from_unit: str, to_unit: str) -> Decimal | No
 class CostResult:
     partial: bool
     line_costs: Mapping[str, Decimal]
+    line_price_sources: Mapping[str, str]
     unresolved_line_ids: tuple[str, ...]
     subtotal_jpy: Decimal
     total_cost_jpy: Decimal | None
@@ -31,6 +32,7 @@ class CostResult:
 def calculate_cost(recipe: Recipe, ingredients: Mapping[str, Ingredient] | None = None) -> CostResult:
     catalog = ingredients or {}
     costs: dict[str, Decimal] = {}
+    price_sources: dict[str, str] = {}
     unresolved: list[str] = []
     estimated = False
     for line in recipe.materials:
@@ -47,6 +49,7 @@ def calculate_cost(recipe: Recipe, ingredients: Mapping[str, Ingredient] | None 
             unresolved.append(line.id)
             continue
         costs[line.id] = qty / decimal(quote.per_quantity) * decimal(quote.amount_jpy.value)
+        price_sources[line.id] = "line_override" if line.price_mode == "override" else "shared_ingredient"
         if q.status == "assumed" or quote.amount_jpy.status == "assumed":
             estimated = True
     subtotal = sum(costs.values(), Decimal("0"))
@@ -55,7 +58,7 @@ def calculate_cost(recipe: Recipe, ingredients: Mapping[str, Ingredient] | None 
     if adj.status == "assumed":
         estimated = True
     if partial:
-        return CostResult(True, costs, tuple(unresolved), subtotal, None, None, estimated)
+        return CostResult(True, costs, price_sources, tuple(unresolved), subtotal, None, None, estimated)
     total_raw = subtotal + decimal(adj.value)
     if total_raw < 0:
         raise ValueError("Adjusted total cost cannot be negative")
@@ -66,4 +69,4 @@ def calculate_cost(recipe: Recipe, ingredients: Mapping[str, Ingredient] | None 
         rate = (total / decimal(selling.value) * Decimal("100")).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
         if selling.status == "assumed":
             estimated = True
-    return CostResult(False, costs, (), subtotal, total, rate, estimated)
+    return CostResult(False, costs, price_sources, (), subtotal, total, rate, estimated)
