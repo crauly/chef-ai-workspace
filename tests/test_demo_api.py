@@ -8,7 +8,9 @@ if not any(getattr(route, "path", None) == "/demo/recipes" for route in app.rout
     app.include_router(router)
 
 class FakeRepo:
-    def __init__(self): self.calls=[]
+    def __init__(self): self.calls=[]; self.created=[]
+    def create_owned_recipe(self, owner, recipe, snapshot):
+        self.created.append((owner,recipe,snapshot))
     def list_owned_recipes(self, owner, *, offset, limit):
         self.calls.append((owner,offset,limit))
         return [{"id":str(uuid4()),"title":"Pasta","revision":0}]
@@ -26,6 +28,18 @@ class DemoLibraryTests(unittest.TestCase):
         del app.state.demo_access_token
         del app.state.repository_factory
         self.client.close()
+    def test_create_recipe_is_guarded_and_snapshotted(self):
+        blocked=self.client.post("/demo/recipes",json={"title":"Risotto"})
+        self.assertEqual(blocked.status_code,403)
+        self.assertEqual(self.repo.created,[])
+        response=self.client.post("/demo/recipes",json={"title":"Risotto"},
+             headers={"X-Demo-Access":"a-secret-known-only-to-presenter"})
+        self.assertEqual(response.status_code,201,response.text)
+        self.assertEqual(response.json()["title"]["value"],"Risotto")
+        self.assertEqual(len(self.repo.created),1)
+        self.assertEqual(self.repo.created[0][0],self.owner)
+        self.assertIn("total_cost_jpy",self.repo.created[0][2])
+
     def test_access_denied_without_secret(self):
         self.assertEqual(self.client.get("/demo/recipes").status_code,403)
         self.assertEqual(self.repo.calls,[])
