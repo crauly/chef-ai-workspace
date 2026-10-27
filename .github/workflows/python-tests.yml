@@ -10,5 +10,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Run standard library unit tests
+      - name: Install API test dependencies
+        run: pip install -r requirements-api.txt
+      - name: Run unit and API tests
         run: python -m unittest discover -s tests -v

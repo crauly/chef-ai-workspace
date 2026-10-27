@@ -6,15 +6,16 @@ class Query:
     def __init__(self, result): self.result=result; self.filters=[]
     def select(self, fields): return self
     def eq(self,key,value): self.filters.append((key,value)); return self
+    def in_(self,key,values): self.filters.append((key,tuple(values))); return self
     def single(self): return self
     def limit(self,n): return self
     def execute(self): return SimpleNamespace(data=self.result)
 
 class Client:
-    def __init__(self): self.tables={}; self.calls=[]
+    def __init__(self): self.tables={}; self.calls=[]; self.queries=[]
     def table(self,name):
         self.calls.append(name)
-        return Query(self.tables.get(name))
+        q=Query(self.tables.get(name)); self.queries.append(q); return q
     def rpc(self,name,params):
         self.rpc_name=name; self.params=params
         return Query(1)
@@ -48,6 +49,33 @@ class AdapterTests(unittest.TestCase):
         self.assertIsNone(repo.get_mutation_receipt("user-a","req"))
         c.tables["mutation_receipts"]=[{"payload_hash":"abc","resulting_revision":4}]
         self.assertEqual(repo.get_mutation_receipt("user-a","req"),("abc",4))
+    def test_catalog_batch_query_deduplicates_ingredient_ids(self):
+        from chef_ai_workspace import Recipe, MaterialLine, TrackedValue
+        from dataclasses import replace
+        c=Client()
+        c.tables["ingredients"]=[
+            {"id":"a","name":"海老","current_price":{"amount_jpy":value("150"),"per_quantity":"1","per_unit":"尾","source":"shared-ingredient"}},
+            {"id":"b","name":"塩","current_price":None}]
+        repo=SupabasePersistence(c)
+        base=decode_recipe(sample())
+        first=replace(base.materials[0],ingredient_id="a",price_mode="inherit",price_override=None)
+        rows=[replace(first,id=f"m{i}") for i in range(50)]
+        rows.append(replace(first,id="m50",ingredient_id="b"))
+        data=replace(base,materials=tuple(rows))
+        catalog=repo.load_owned_catalog("user-a",data)
+        self.assertEqual(c.calls,["ingredients"])
+        self.assertEqual(catalog["a"].current_price.amount_jpy.value,"150")
+        self.assertIsNone(catalog["b"].current_price)
+        self.assertIn(("owner_id","user-a"),c.queries[0].filters)
+        self.assertIn(("id",("a","b")),c.queries[0].filters)
+        self.assertEqual(len({m.ingredient_id for m in data.materials}),2)
+
+    def test_empty_catalog_does_not_hit_database(self):
+        c=Client()
+        repo=SupabasePersistence(c)
+        self.assertEqual(repo.load_owned_catalog("user-a",decode_recipe(sample())),{})
+        self.assertEqual(c.calls,[])
+
     def test_commit_rpc_parameter_names(self):
         c=Client();repo=SupabasePersistence(c)
         out=repo.commit_recipe_revision(owner_id="user-a",recipe_id="r1",
