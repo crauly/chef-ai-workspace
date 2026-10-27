@@ -40,6 +40,7 @@ class CostTests(unittest.TestCase):
         result = calculate_cost(recipe(line), {"i1": product})
         self.assertEqual(result.total_cost_jpy, Decimal("50"))
         self.assertEqual(line.material_name.value, "でんぷん")
+        self.assertEqual(result.line_price_sources["m1"], "shared_ingredient")
 
     def test_unsupported_unit_is_partial(self):
         line = MaterialLine("m1", known("海老"), known("3"), "尾", price_override=quote("300", "100", "g"))
@@ -49,6 +50,7 @@ class CostTests(unittest.TestCase):
         line = MaterialLine("m1", known("海老"), known("3"), "尾", ingredient_id="i1", price_override=quote("150"), price_mode="override")
         result = calculate_cost(recipe(line, adjustment="50"), {"i1": Ingredient("i1", "別の海老", quote("10"))})
         self.assertEqual(result.total_cost_jpy, Decimal("500"))
+        self.assertEqual(result.line_price_sources["m1"], "line_override")
 
     def test_rounding(self):
         line = MaterialLine("m1", known("海老"), known("1"), "尾", price_override=quote("1", "3"))
@@ -63,6 +65,22 @@ class CostTests(unittest.TestCase):
             quote("-1")
         with self.assertRaises(ValueError):
             Recipe("r", known("test"), selling_price_jpy=known("0"))
+
+    def test_reject_unknown_price_mode(self):
+        with self.assertRaises(ValueError):
+            MaterialLine("m1", known("海老"), known("1"), "尾", price_mode="unexpected")
+
+    def test_reject_nonnumeric_adjustment(self):
+        with self.assertRaises(ValueError):
+            Recipe("r1", known("パスタ"), cost_adjustment_jpy=known("not-a-number"))
+
+    def test_reject_known_quantity_without_unit(self):
+        with self.assertRaises(ValueError):
+            MaterialLine("m1", known("海老"), known("2"), None)
+
+    def test_reject_nonfinite_adjustment(self):
+        with self.assertRaises(ValueError):
+            Recipe("r1", known("パスタ"), cost_adjustment_jpy=known("NaN"))
 
     def test_unresolved_adjustment(self):
         line = MaterialLine("m1", known("海老"), known("1"), "尾", price_override=quote("100"))
