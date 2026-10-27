@@ -13,6 +13,15 @@ def apply(r, *ops, confirmed=True, revision=None):
     return prepare_mutation(r, Proposal("r1", r.revision if revision is None else revision, "req-one", ops), user_confirmed=confirmed)
 
 class MutationTests(unittest.TestCase):
+    def test_request_id_and_revision_type_validation(self):
+        r = fixture()
+        for bad_id in ("", None, "  "):
+            with self.subTest(request_id=bad_id), self.assertRaises(MutationError):
+                prepare_mutation(r, Proposal("r1", 0, bad_id, ({"op":"set_title","value":"new"},)), user_confirmed=True)
+        for bad_revision in (True, "0"):
+            with self.subTest(revision=bad_revision), self.assertRaises(MutationError):
+                prepare_mutation(r, Proposal("r1", bad_revision, "unique", ({"op":"set_title","value":"new"},)), user_confirmed=True)
+
     def test_quantity_and_revision(self):
         r=fixture()
         out=apply(r, {"op":"set_material_quantity","material_id":"m1","value":"4","unit":"尾"})
