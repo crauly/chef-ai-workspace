@@ -3,6 +3,7 @@
 This module never reads credentials or creates a browser-facing service-role client.
 A trusted backend supplies the transport and derives owner_id from verified auth.
 """
+from dataclasses import asdict
 from .models import Recipe, MaterialLine, Ingredient, PriceQuote, TrackedValue
 
 def _tracked(raw):
@@ -32,6 +33,18 @@ class SupabasePersistence:
     def __init__(self, trusted_client):
         """trusted_client must be a server-owned Supabase SDK client."""
         self.client = trusted_client
+
+    def create_owned_recipe(self, owner_id, recipe, cost_snapshot):
+        response = self.client.rpc("create_owned_recipe", {
+            "p_owner_id": owner_id,
+            "p_recipe_id": recipe.id,
+            "p_title": recipe.title.value,
+            "p_initial_state": asdict(recipe),
+            "p_cost_snapshot": cost_snapshot
+        }).execute()
+        if str(response.data) != recipe.id:
+            raise RuntimeError("Unexpected create RPC result")
+        return recipe.id
 
     def list_owned_recipes(self, owner_id, *, offset=0, limit=20):
         if offset < 0 or limit < 1 or limit > 50:
