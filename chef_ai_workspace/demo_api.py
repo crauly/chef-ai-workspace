@@ -111,7 +111,7 @@ def get_demo_recipe_cost(recipe_id: UUID, ctx=Depends(demo_context)):
 
 class AIProposalBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    instruction: str = Field(min_length=1, max_length=4000)
+    instruction: str = Field(min_length=1, max_length=4000, pattern=r".*\\S.*")
 
 
 @router.post("/recipes/{recipe_id}/propose")
