@@ -3,9 +3,9 @@
 **Status:** SQL migration drafted; not deployed or integration-tested.
 **Depends on:** [Storage decision](IMAGE_STORAGE_DECISION.md), [Core contracts](CORE_CONTRACTS.md).
 
-## Data ownership assumption requiring confirmation
+## Data ownership — confirmed
 
-This migration assumes **Supabase Auth user identities**, with each user's recipes, ingredients and images private to that user by default. A shared restaurant/workspace account model would require a different ownership/RLS policy. Do not deploy until this product decision is confirmed.
+**Individual ownership**: every Supabase Auth user owns only their own recipes, shared-ingredient catalogue, saved versions and images. No restaurant/team sharing in MVP. RLS isolates users.
 
 ## Database schema
 
@@ -15,12 +15,12 @@ This migration assumes **Supabase Auth user identities**, with each user's recip
 - `ingredients`: optional shared-ingredient catalog for the account, no required photo.
 - `ingredient_images`: optional object paths. Does **not** include the actual image bytes.
 
-The SQL `commit_recipe_revision` RPC uses a row lock and compare-and-swap revision to update state, insert an optional version, and record replay receipt atomically. Application still must validate operations, provenance, quote sources, and cost **before** calling. A server-side trust boundary is needed before treating submitted JSON as authoritative; direct client writes to `recipes` should be removed/limited before a production deployment.
+The **service-role-only** SQL `commit_recipe_revision` RPC uses a row lock and compare-and-swap revision to update state, insert an optional version, and record replay receipt atomically. A trusted backend must authenticate the end user, derive `p_owner_id` from the verified identity, validate operations, provenance, quote sources and cost **before** calling with service-role credentials. Never allow a browser to provide authoritative owner IDs or access the service-role key. The RPC is not callable as `authenticated` or `anon`. Direct client updates/deletes to `recipes` are barred.
 
 ## Important known blockers before production
 
-- Current broad `recipes_owner` policy permits authenticated owner updates directly, bypassing the RPC. **Must tighten to select/insert only** and use a restricted server/RPC write path after initial creation.
-- The RPC is security-definer, and any client with owner access can submit arbitrary `p_new_state`/cost JSON. Validate those server-side or have trusted backend issue the calls.
+- Initial client INSERT is provisionally allowed only for own rows; validate creation server-side or narrow this permission before production. It is NOT a substitute for validated recipe creation.
+- `security definer` RPC trusts a **service-role-only trusted backend** to authenticate caller and verify proposed JSON/cost. Never pass a user-supplied owner identifier without verifying identity.
 - Cross-owner `ingredient_images` rows and object paths must stay consistent; SQL metadata RLS alone does not configure a Storage bucket or Storage RLS.
 - Image bucket creation/upload rules, MIME/size limits, signed reads and orphan cleanup need separate implementation.
 - Initial recipe creation and safe version selection remain a separate feature; this PR is schema groundwork, not feature completion.
