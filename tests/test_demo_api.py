@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from chef_ai_workspace.api import app
 from chef_ai_workspace.demo_api import router
 
-if not any(route.path == "/demo/recipes" for route in app.routes):
+if not any(getattr(route, "path", None) == "/demo/recipes" for route in app.routes):
     app.include_router(router)
 
 class FakeRepo:
