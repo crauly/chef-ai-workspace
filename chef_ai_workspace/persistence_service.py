@@ -34,6 +34,7 @@ class TrustedPersistence(Protocol):
     """Implemented only inside authenticated server code."""
     def load_owned_recipe(self, owner_id: str, recipe_id: str) -> Recipe: ...
     def get_mutation_receipt(self, owner_id: str, request_id: str) -> tuple[str, int] | None: ...
+    def load_owned_catalog(self, owner_id: str, recipe: Recipe) -> Mapping[str, Ingredient]: ...
     def commit_recipe_revision(self, *, owner_id: str, recipe_id: str,
                                request_id: str, base_revision: int,
                                state: dict, title: str, cost_snapshot: dict,
@@ -75,6 +76,8 @@ def save_validated_mutation(*, owner_id: str, trusted_user_confirmed: bool,
             raise MutationError("Stored receipt ahead of recipe revision")
         return SavedMutation(existing, saved_revision, True)
     recipe = repository.load_owned_recipe(owner_id, proposal.recipe_id)
+    if catalog is None and any(m.price_mode == "inherit" for m in recipe.materials):
+        catalog = repository.load_owned_catalog(owner_id, recipe)
     try:
         candidate = prepare_mutation(recipe, proposal,
                                      user_confirmed=trusted_user_confirmed,
