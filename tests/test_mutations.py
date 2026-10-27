@@ -22,6 +22,45 @@ class MutationTests(unittest.TestCase):
             with self.subTest(revision=bad_revision), self.assertRaises(MutationError):
                 prepare_mutation(r, Proposal("r1", bad_revision, "unique", ({"op":"set_title","value":"new"},)), user_confirmed=True)
 
+    def test_add_material_and_price_recompute(self):
+        from uuid import uuid4
+        from chef_ai_workspace.costing import calculate_cost
+        mid = str(uuid4())
+        r = fixture()
+        created = apply(r, {"op":"add_material","material_id":mid,"name":"片栗粉",
+            "quantity":"100","unit":"g","price_jpy":"500",
+            "price_quantity":"1","price_unit":"kg"})
+        self.assertEqual(created.materials[1].material_name.value,"片栗粉")
+        self.assertIsNone(created.materials[1].ingredient_id)
+        self.assertEqual(calculate_cost(created).total_cost_jpy, 500)
+        priced = apply(created, {"op":"set_material_price","material_id":mid,
+            "price_jpy":"600","price_quantity":"1","price_unit":"kg"})
+        self.assertEqual(calculate_cost(priced).total_cost_jpy, 510)
+        changed = apply(priced, {"op":"set_material_quantity","material_id":mid,"value":"200","unit":"g"})
+        self.assertEqual(calculate_cost(changed).total_cost_jpy, 570)
+
+    def test_add_material_invalid_batch_remains_atomic(self):
+        from uuid import uuid4
+        r=fixture()
+        mid=str(uuid4())
+        base={"op":"add_material","material_id":mid,"name":"片栗粉","quantity":"100",
+              "unit":"g","price_jpy":"500","price_quantity":"1","price_unit":"kg"}
+        for altered in (dict(base, price_jpy="-2"),dict(base,material_id="invalid"),
+                        dict(base,price_quantity="0")):
+            with self.subTest(altered=altered),self.assertRaises((MutationError,ValueError)):
+                apply(r,altered)
+        with self.assertRaises(MutationError):
+            apply(r,base,base)
+        self.assertEqual(len(r.materials),1)
+
+    def test_unconfirmed_ai_material_is_assumed(self):
+        from uuid import uuid4
+        r=apply(fixture(), {"op":"add_material","material_id":str(uuid4()),"name":"片栗粉",
+             "quantity":"10","unit":"g","price_jpy":"500","price_quantity":"1",
+             "price_unit":"kg"},confirmed=False)
+        self.assertEqual(r.materials[-1].material_name.status,"assumed")
+        self.assertEqual(r.materials[-1].price_override.amount_jpy.status,"assumed")
+
     def test_quantity_and_revision(self):
         r=fixture()
         out=apply(r, {"op":"set_material_quantity","material_id":"m1","value":"4","unit":"尾"})

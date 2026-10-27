@@ -1,7 +1,8 @@
 """Validated, all-or-nothing recipe edits. Persistence is a separate future boundary."""
 from dataclasses import dataclass, replace
+from uuid import UUID
 from typing import Mapping
-from .models import Recipe, TrackedValue, Ingredient, decimal
+from .models import Recipe, TrackedValue, Ingredient, MaterialLine, PriceQuote, decimal
 from .costing import calculate_cost
 
 class MutationError(ValueError):
@@ -39,7 +40,36 @@ def prepare_mutation(recipe: Recipe, proposal: Proposal, *, user_confirmed: bool
         if not isinstance(op, dict):
             raise MutationError("Operation must be an object")
         kind = op.get("op")
-        if kind == "set_material_quantity":
+        if kind == "add_material":
+            _fields(op, {"op", "material_id", "name", "quantity", "unit", "price_jpy", "price_quantity", "price_unit"})
+            try:
+                UUID(op["material_id"])
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise MutationError("Invalid material ID") from exc
+            if any(m.id == op["material_id"] for m in candidate.materials):
+                raise MutationError("Duplicate material ID")
+            name = _value(op["name"], user_confirmed)
+            quantity = _value(op["quantity"], user_confirmed)
+            amount = _value(op["price_jpy"], user_confirmed)
+            unit = op["unit"]
+            if decimal(quantity.value) < 0 or not isinstance(unit, str) or not unit.strip():
+                raise MutationError("Invalid material quantity")
+            quote = PriceQuote(amount_jpy=amount, per_quantity=op["price_quantity"],
+                               per_unit=op["price_unit"], source="manual" if user_confirmed else "estimated")
+            line = MaterialLine(id=op["material_id"], material_name=name, quantity=quantity,
+                                unit=unit, price_override=quote)
+            candidate = replace(candidate, materials=candidate.materials + (line,))
+        elif kind == "set_material_price":
+            _fields(op, {"op", "material_id", "price_jpy", "price_quantity", "price_unit"})
+            if not any(m.id == op["material_id"] for m in candidate.materials):
+                raise MutationError("Unknown material ID")
+            quote = PriceQuote(amount_jpy=_value(op["price_jpy"], user_confirmed),
+                               per_quantity=op["price_quantity"], per_unit=op["price_unit"],
+                               source="manual" if user_confirmed else "estimated")
+            candidate = replace(candidate, materials=tuple(
+                replace(m, price_mode="override", price_override=quote)
+                if m.id == op["material_id"] else m for m in candidate.materials))
+        elif kind == "set_material_quantity":
             _fields(op, {"op", "material_id", "value", "unit"})
             value = _value(op["value"], user_confirmed)
             if decimal(value.value) < 0 or not isinstance(op["unit"], str) or not op["unit"]:
