@@ -1,5 +1,9 @@
 # Recipe library frontend
 
+For the current AI proposal/approval UI, operator access protection and test
+instructions, see [README_WORKFLOW.md](README_WORKFLOW.md). It supersedes the
+initial prototype limitations below where implementation has since advanced.
+
 Next.js UI prototype with recipe cards, create recipe, detail, and rename-and-save.
 
 Run `cd web && npm install && npm run dev`. Configure **server-only**
