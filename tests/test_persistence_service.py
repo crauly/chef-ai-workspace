@@ -71,6 +71,32 @@ class BridgeTests(unittest.TestCase):
             self.run_mutation(db, Proposal("r1",0,"req-1",({"op":"set_title","value":"Different"},)))
         self.assertEqual(len(db.commits), 1)
 
+    def test_overlapping_retry_rechecks_receipt(self):
+        from dataclasses import asdict
+        from hashlib import sha256
+        from chef_ai_workspace.persistence_service import canonical_json
+        proposal = self.proposal()
+        digest = sha256(canonical_json({
+            "proposal": asdict(proposal), "confirmed": True,
+            "save_version": False
+        }).encode("utf-8")).hexdigest()
+        class RacingRepository(FakeRepository):
+            def __init__(self):
+                super().__init__()
+                self.reads = 0
+            def get_mutation_receipt(self, owner_id, request_id):
+                self.reads += 1
+                if self.reads == 1:
+                    self.current = replace(self.current, revision=1)
+                    self.receipts[request_id] = (digest, 1)
+                    return None
+                return super().get_mutation_receipt(owner_id, request_id)
+        db = RacingRepository()
+        result = self.run_mutation(db, proposal)
+        self.assertTrue(result.replayed)
+        self.assertEqual(result.resulting_revision, 1)
+        self.assertEqual(db.commits, [])
+
     def test_bad_batch_never_calls_database(self):
         db=FakeRepository()
         bad=Proposal("r1",0,"req-1",({"op":"unknown"},))
