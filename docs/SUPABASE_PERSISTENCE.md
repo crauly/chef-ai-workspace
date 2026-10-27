@@ -1,6 +1,6 @@
 # Supabase Persistence Integration — First Implementation Slice
 
-**Status:** SQL migration drafted; not deployed or integration-tested.
+**Status:** Initial migration applied to isolated Chef AI Workspace Supabase project; runtime integration tests pending.
 **Depends on:** [Storage decision](IMAGE_STORAGE_DECISION.md), [Core contracts](CORE_CONTRACTS.md).
 
 ## Data ownership — confirmed
@@ -38,5 +38,5 @@ The **service-role-only** SQL `commit_recipe_revision` RPC uses a row lock and c
 ## Verification status
 
 - GitHub Actions runs the Python unit suite and a **static SQL guardrail test** for RLS presence, restricted mutation RPC grants, expected snapshot and ID-dedup clauses. These are text assertions, **not SQL syntax checks, actual database execution or multi-account security verification**.
-- **Not performed:** application of migration, SQL compile/runtime verification, Supabase Auth user A/B isolation, Storage bucket policy testing, transactional rollback/parallel request integration tests.
-- An existing connected Supabase project is not confirmed to be dedicated to Chef AI Workspace; therefore this migration is not applied there without explicit project selection.
+- **Completed:** migration applied successfully, tables and RLS policies enumerated, Supabase security advisor returned zero findings.\n- **Not performed:** full Supabase Auth user A/B isolation, Storage bucket policy testing, transactional rollback/parallel request integration tests.
+- Dedicated project `chef-ai-workspace` (Tokyo, project ref `dfvryaybdelgjxihdmth`) was created separately from restaurant app `iwaka_project`. Initial migration `chef_ai_workspace_initial_schema` applied successfully on 2026-10-27. Five tables verified with RLS enabled; seven access policies inspected. Supabase security advisors returned no lints. No actual authenticated-user RLS test has yet been run.
