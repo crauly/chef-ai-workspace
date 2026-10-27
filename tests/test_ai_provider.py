@@ -22,6 +22,7 @@ class ProviderTests(unittest.TestCase):
             req=fn.call_args.args[0]
             self.assertEqual(req.get_header("Authorization"),"Bearer secret")
             self.assertIn(b"Rename",req.data)
+            self.assertIn("decimal JSON strings", json.loads(req.data)["messages"][0]["content"])
     def test_missing_key_or_non_https_rejected(self):
         for u,k in (("http://example.com","secret"),("https://example.com","")):
             with self.assertRaises(ValueError):ChatCompletionsProvider(u,k,"test")
@@ -41,6 +42,7 @@ class ProviderTests(unittest.TestCase):
             rid=str(uuid4())
             body={"instruction":"Rename"}
             self.assertEqual(client.post(f"/demo/recipes/{rid}/propose",json=body).status_code,403)
+            self.assertEqual(client.post(f"/demo/recipes/{rid}/propose",json={"instruction":"   "},headers={"X-Demo-Access":"test-long-secret"}).status_code,422)
             r=client.post(f"/demo/recipes/{rid}/propose",json=body,
               headers={"X-Demo-Access":"test-long-secret"})
             self.assertEqual(r.status_code,200,r.text)
