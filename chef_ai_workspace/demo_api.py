@@ -94,3 +94,16 @@ def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
         raise HTTPException(404, "Recipe not found or inaccessible") from exc
     return {"recipe": asdict(saved.recipe), "revision": saved.resulting_revision,
             "replayed": saved.replayed}
+
+
+@router.get("/recipes/{recipe_id}/cost")
+def get_demo_recipe_cost(recipe_id: UUID, ctx=Depends(demo_context)):
+    """Calculate current cost from saved recipe and one batch catalog lookup."""
+    owner, repository = ctx
+    try:
+        recipe = repository.load_owned_recipe(owner, str(recipe_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Recipe not found") from exc
+    catalog = (repository.load_owned_catalog(owner, recipe)
+               if any(m.price_mode == "inherit" for m in recipe.materials) else {})
+    return _json(asdict(calculate_cost(recipe, catalog)))
