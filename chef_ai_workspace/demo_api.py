@@ -6,6 +6,12 @@ the demo routes without an isolated demo owner and a long random secret.
 """
 import hmac
 from dataclasses import asdict
+from uuid import uuid4
+from pydantic import BaseModel, Field, ConfigDict
+from .models import Recipe, TrackedValue
+from .costing import calculate_cost
+from .mutations import Proposal, MutationError
+from .persistence_service import save_validated_mutation, _json
 from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
@@ -44,3 +50,47 @@ def get_demo_recipe(recipe_id: UUID, ctx=Depends(demo_context)):
         return asdict(repository.load_owned_recipe(owner, str(recipe_id)))
     except ValueError:
         raise HTTPException(404, "Recipe not found")
+
+
+class CreateRecipeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=200)
+
+
+class ConfirmChangeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    base_revision: int = Field(ge=0)
+    request_id: UUID
+    operations: list[dict] = Field(min_length=1, max_length=40)
+    save_version: bool = True
+
+
+@router.post("/recipes", status_code=201)
+def create_demo_recipe(body: CreateRecipeBody, ctx=Depends(demo_context)):
+    owner, repository = ctx
+    name = body.title.strip()
+    if not name:
+        raise HTTPException(422, "Recipe title required")
+    recipe = Recipe(str(uuid4()), TrackedValue(name, "confirmed", "user"))
+    snapshot = _json(asdict(calculate_cost(recipe)))
+    repository.create_owned_recipe(owner, recipe, snapshot)
+    return asdict(recipe)
+
+
+@router.post("/recipes/{recipe_id}/confirm")
+def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
+                        ctx=Depends(demo_context)):
+    owner, repository = ctx
+    proposal = Proposal(str(recipe_id), body.base_revision, str(body.request_id),
+                        tuple(body.operations))
+    try:
+        saved = save_validated_mutation(
+            owner_id=owner, trusted_user_confirmed=True,
+            proposal=proposal, repository=repository,
+            save_version=body.save_version)
+    except MutationError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(404, "Recipe not found or inaccessible") from exc
+    return {"recipe": asdict(saved.recipe), "revision": saved.resulting_revision,
+            "replayed": saved.replayed}
