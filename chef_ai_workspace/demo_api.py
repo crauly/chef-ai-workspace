@@ -128,8 +128,38 @@ def propose_demo_change(recipe_id: UUID, body: AIProposalBody,
     except ValueError as exc:
         raise HTTPException(404, "Recipe not found") from exc
     try:
-        operations = provider.propose(body.instruction, asdict(recipe))
+        hints = getattr(request.app.state, "correction_hints", None)
+        suggestions = hints.relevant(owner, str(recipe_id), body.instruction) if hints else []
+        context = asdict(recipe)
+        if suggestions:
+            context["correction_suggestions"] = suggestions
+        operations = provider.propose(body.instruction, context)
     except ProposalProviderError as exc:
         raise HTTPException(502, "AI provider unavailable or invalid response") from exc
     return {"recipe_id":str(recipe_id),"base_revision":recipe.revision,
             "operations":operations,"requires_confirmation":True}
+
+
+class CorrectionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    heard: str = Field(min_length=1, max_length=200)
+    preferred: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/recipes/{recipe_id}/corrections", status_code=201)
+def record_demo_correction(recipe_id: UUID, body: CorrectionBody,
+                           request: Request, ctx=Depends(demo_context)):
+    """An explicit chef correction; never inferred from a model suggestion."""
+    owner, repository = ctx
+    hints = getattr(request.app.state, "correction_hints", None)
+    if hints is None:
+        raise HTTPException(503, "Correction memory not configured")
+    try:
+        repository.load_owned_recipe(owner, str(recipe_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Recipe not found") from exc
+    try:
+        hints.record(owner, str(recipe_id), body.heard, body.preferred)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"saved":True}
