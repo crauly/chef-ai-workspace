@@ -9,6 +9,10 @@ if not any(getattr(route, "path", None) == "/demo/recipes" for route in app.rout
 
 class FakeRepo:
     def __init__(self): self.calls=[]; self.created=[]
+    def load_owned_recipe(self, owner, recipe_id):
+        from chef_ai_workspace.models import Recipe, TrackedValue
+        self.calls.append(("recipe",owner,recipe_id))
+        return Recipe(recipe_id,TrackedValue("Risotto","confirmed","user"))
     def create_owned_recipe(self, owner, recipe, snapshot):
         self.created.append((owner,recipe,snapshot))
     def list_owned_recipes(self, owner, *, offset, limit):
@@ -28,6 +32,15 @@ class DemoLibraryTests(unittest.TestCase):
         del app.state.demo_access_token
         del app.state.repository_factory
         self.client.close()
+    def test_cost_endpoint_requires_access_and_returns_deterministic_snapshot(self):
+        rid=str(uuid4())
+        self.assertEqual(self.client.get(f"/demo/recipes/{rid}/cost").status_code,403)
+        r=self.client.get(f"/demo/recipes/{rid}/cost",
+                          headers={"X-Demo-Access":"a-secret-known-only-to-presenter"})
+        self.assertEqual(r.status_code,200,r.text)
+        self.assertEqual(r.json()["total_cost_jpy"],"0")
+        self.assertEqual(self.repo.calls,[("recipe",self.owner,rid)])
+
     def test_create_recipe_is_guarded_and_snapshotted(self):
         blocked=self.client.post("/demo/recipes",json={"title":"Risotto"})
         self.assertEqual(blocked.status_code,403)
