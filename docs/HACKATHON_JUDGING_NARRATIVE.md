@@ -58,6 +58,27 @@ represented as a Muse-powered demo**. Once accessible, observe Muse's
 actual response formats, error modes and strengths and adapt the
 model-specific harness accordingly.
 
+## An adaptive software layer, not just a speech interface
+
+The underlying innovation is a **lightweight, correction-aware harness**:
+a spoken or typed instruction becomes a proposed, reviewable update to
+structured business records. Unlike a fixed voice command, the application
+can remember **user-confirmed** corrections—for example, a chef preferring
+"片栗粉" in a given recipe context—and use that information to prioritize
+better interpretations next time. The system preserves the original input
+and the chef's correction separately; it never treats a single correction
+as a universal synonym or silently rewrites ingredient names.
+
+This offers a path to improvement through ordinary work without bespoke
+sensors, specialized hardware or extensive model retraining for every
+industry. The same approach could support small-business stocktakes and
+wholesale inventory recording; clinical records are only a possible future
+research direction requiring additional safety, privacy and regulatory
+controls. **The goal is to measurably reduce repeated mistakes with use,
+not a claim that the current app has already achieved that outcome.**
+Measure correction frequency and acceptance of suggestions over repeated
+tasks before claiming any accuracy improvement.
+
 ## Four things a judge should understand
 
 1. **Hidden burden:** price volatility and portion decisions quietly
@@ -68,7 +89,7 @@ model-specific harness accordingly.
 3. **Trust:** the proposed edit is visible before approval; unknown
    purchase prices are not fabricated; reproducible calculations and
    revision records distinguish this from a chat answer.
-4. **Reach:** the reusable idea is a guarded voice/natural-language-to-
+4. **Growth and reach:** user-confirmed corrections provide bounded,\n   context-aware software memory so the tool can be evaluated for fewer\n   repeat errors over time. The reusable idea is a guarded voice/natural-language-to-
    structured-action harness. Inventory counts, small wholesalers and,
    with substantially stronger safety and regulatory safeguards, clinical
    documentation are possible **future application domains**—not existing
@@ -111,7 +132,7 @@ the AI proposes an exact edit, while a deterministic engine validates
 inputs, recalculates food cost and saves versioned results. Corrections
 can become scoped knowledge to improve future interpretation.
 
-**Why it matters.** The product makes invisible operating costs visible
+**Why it matters.** A correction-aware software layer can adapt to real\nworking vocabulary and habits without building specialized hardware for\neach domain. This is a testable direction for reducing repeat mistakes,\nnot a proven improvement claim. The product makes invisible operating costs visible
 at the moment of creative decision-making. Its larger insight is a
 human-approved, auditable harness for converting natural-language
 instructions into dependable records—potentially useful beyond
