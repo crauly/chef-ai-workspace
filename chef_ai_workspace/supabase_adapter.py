@@ -33,6 +33,16 @@ class SupabasePersistence:
         """trusted_client must be a server-owned Supabase SDK client."""
         self.client = trusted_client
 
+    def list_owned_recipes(self, owner_id, *, offset=0, limit=20):
+        if offset < 0 or limit < 1 or limit > 50:
+            raise ValueError("Invalid pagination")
+        response = (self.client.table("recipes")
+                    .select("id,title,revision,updated_at")
+                    .eq("owner_id", owner_id)
+                    .order("updated_at", desc=True)
+                    .range(offset,offset+limit-1).execute())
+        return response.data or []
+
     def load_owned_recipe(self, owner_id, recipe_id):
         response = (self.client.table("recipes").select("state")
                     .eq("owner_id", owner_id).eq("id", recipe_id).single().execute())
