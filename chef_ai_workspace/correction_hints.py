@@ -7,13 +7,12 @@ class SupabaseCorrectionHints:
         if not 1 <= limit <= 10: raise ValueError("Invalid limit")
         if not instruction.strip(): return []
         context="recipe:"+recipe_id
-        response=(self.client.table("correction_preferences")
-                  .select("heard_phrase,preferred_phrase,context,confirmed")
-                  .eq("owner_id",owner_id).eq("context",context).eq("confirmed",True)
-                  .order("created_at",desc=True).limit(50).execute())
+        response=self.client.rpc("find_relevant_corrections", {
+            "p_owner_id":owner_id,"p_context":context,
+            "p_instruction":instruction,"p_limit":limit}).execute()
         return [{"heard":row["heard_phrase"],"candidate":row["preferred_phrase"]}
-                for row in (response.data or [])
-                if row["heard_phrase"] and row["heard_phrase"] in instruction][:limit]
+                for row in (response.data or [])]
+
     def record(self, owner_id: str, recipe_id: str, heard: str, preferred: str):
         if not heard.strip() or not preferred.strip() or heard.strip()==preferred.strip():
             raise ValueError("Meaningful correction required")
