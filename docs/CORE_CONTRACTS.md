@@ -1,4 +1,4 @@
-# Core Contracts — Recipe, Cost, Mutation (v0.2 — self-reviewed)
+# Core Contracts — Recipe, Cost, Mutation (v0.3 — review addressed)
 
 **Status: Proposed for implementation; not code.** [MVP](MVP.md) / [Architecture](ARCHITECTURE.md) に従う。Metaモデル・フレームワークに非依存。
 
@@ -41,7 +41,9 @@ The Meta adapter returns **proposals only**. Proposed envelope:
 
 The incoming AI proposal **does not determine confirmation status**. The application binds its source user utterance / approval and assigns `confirmed` only to directly attributable instructions; generated values are `assumed`. If evidence is missing, ask for confirmation. A claimed `origin` or `status` in model output is untrusted and ignored/rejected.
 
-MVP operations: `add_material`, `set_material_quantity`, `set_material_price`, `set_selling_price`, `set_title`, `set_steps`, `link_ingredient`, `unlink_ingredient`, `save_version`. Read/retrieve intent is handled separately, never as mutation.
+MVP operations: `add_material`, `set_material_quantity`, `set_material_price`, `set_selling_price`, `adjust_cost_adjustment`, `set_cost_adjustment`, `set_title`, `set_steps`, `link_ingredient`, `unlink_ingredient`, `save_version`. Read/retrieve intent is handled separately, never as mutation.
+
+Adjustment semantics: `adjust_cost_adjustment` with signed `delta_jpy` is **relative** to the stored `cost_adjustment_jpy` (e.g. 「概算原価を50円高めにして」→ `+50`; retrying the same mutation must not apply twice; use an idempotent request ID). `set_cost_adjustment` with `value_jpy` is **absolute** (e.g. 「調整額を50円にして」→ `50`). Both modify **only** `cost_adjustment_jpy`; never alter any ingredient or material unit price. The adjustment is a separate cost component, shown independently on screen and in saved snapshots, and does not get distributed across lines. Unresolved adjustment cannot be incremented without a user-confirmed base. Negative adjustment is permitted only if the resulting full cost is nonnegative; reject otherwise. Preserve status provenance from user evidence just like other mutations. Examples: initial 0 + 50 → 50; current 50 + 50 → 100; set to 50 → 50 regardless of previous value. Replayed request IDs do not repeat a relative delta.
 
 Apply pipeline: parse as schema → reject unknown operation/fields and invalid Decimal/units → verify recipe and exact line IDs → verify `base_revision` (stale proposals rejected) → check status/origin evidence and price-source rules → prepare all operations on a copy → recalculate and validate derived state → atomically persist recipe and revision (and snapshot when requested) in one transaction only if **every operation** validates. A persistence failure must leave both state and revision unchanged. A failed batch changes nothing.
 
@@ -61,6 +63,8 @@ A bare model assertion that a value is `confirmed` is insufficient. `confirmed` 
 10. Spoofed `confirmed`/`origin` from AI is rejected; user-evidence-bound update is confirmed; inferred values remain assumed.
 11. Separate saved version preserves original, effective quote and provenance even after shared catalog price changes.
 12. Persist/transaction fails during a batch or version save: original state and revision remain unchanged.
+13. From initial adjustment 0, `adjust_cost_adjustment(+50)` makes 50, repeated distinct user instruction makes 100, but retried identical request ID remains 50. `set_cost_adjustment(50)` produces 50 regardless of previous adjustment; ingredient unit prices unchanged.
+14. An unresolved adjustment cannot be incremented without resolving its baseline; invalid negative resulting total is rejected.
 
 ## 5. Decisions deferred before implementation
 
@@ -79,3 +83,7 @@ The feature implementation deadline / hackathon operational timeline is managed 
 - **P1 fixed:** Unit test wording mixed quantity and price changes; assertions now use fixed 150円/尾 basis.
 - **P1 fixed:** Atomicity needed to include recalculation, revision, and persistence; no commit before validation.
 - **P2 open:** Exact storage schema, framework/deployment, voice integration and UX require implementation decisions and tests. No runtime verification has been performed.
+
+## 7. External review response (2026-10-27)
+
+- **Codex P2 addressed:** README's “Increase the estimated total cost by 50 yen” could not be represented by the previous allowed operations. Added relative `adjust_cost_adjustment` and absolute `set_cost_adjustment`, provenance, idempotency, and acceptance cases. These apply only to the explicit cost adjustment field, not material unit prices.
