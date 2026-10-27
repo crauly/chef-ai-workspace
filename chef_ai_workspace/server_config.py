@@ -36,4 +36,12 @@ def configure_supabase(app_instance=app):
         UUID(demo_owner)
         app_instance.state.demo_owner_id = demo_owner
         app_instance.state.demo_access_token = demo_token
+    ai_key = os.environ.get("AI_API_KEY")
+    if ai_key:
+        from .ai_provider import ChatCompletionsProvider
+        app_instance.state.ai_provider = ChatCompletionsProvider(
+            endpoint=os.environ.get("AI_CHAT_COMPLETIONS_URL",
+                "https://api.openai.com/v1/chat/completions"),
+            api_key=ai_key,
+            model=os.environ.get("AI_MODEL", "gpt-4o-mini"))
     return app_instance
