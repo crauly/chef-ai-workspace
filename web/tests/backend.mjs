@@ -22,7 +22,7 @@ createServer(async (req, res) => {
   if (path.endsWith("/propose")) {
     if (body.instruction === "failure") return send(502, {detail: "private-test-only-backend-token"});
     const revision = body.instruction === "stale" ? recipe.revision + 1 : recipe.revision;
-    return send(200, {recipe_id: id, base_revision: revision, requires_confirmation: true, operations: body.instruction === "empty" ? [] : [{op: "set_material_quantity", material_id: materialId, value: "15", unit: "g"}, {op: "set_selling_price", value_jpy: "1800"}]});
+    return send(200, {recipe_id: id, base_revision: revision, requires_confirmation: true, provider: {name: "meta_responses", model: "muse-spark-1.3"}, operations: body.instruction === "empty" ? [] : [{op: "set_material_quantity", material_id: materialId, value: "15", unit: "g"}, {op: "set_selling_price", value_jpy: "1800"}]});
   }
   if (path.endsWith("/confirm")) {
     if (receipts.has(body.request_id)) return send(200, {recipe, replayed: true});

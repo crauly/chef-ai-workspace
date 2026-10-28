@@ -39,10 +39,12 @@ Deployment-provider restricted access may be added outside this gate.
 6. Optional: explicitly register original/preferred phrases in correction history.
    This does not mutate the recipe or automatically accept subsequent suggestions.
 
-Meta Muse remains blocked by the previously observed 401 authentication error.
-Real Muse inference is unverified. A configured substitute adapter or mocked
-browser test is not evidence of Muse behavior. No automatic provider fallback
-is introduced. Voice/photo and real-device/live-database E2E remain separate work.
+The backend supports a dedicated Meta Responses adapter through server-only
+`MODEL_API_KEY`; see [Meta integration](../docs/META_RESPONSES.md). Model attribution
+is displayed with each proposal. Substitute adapters and browser fixtures are
+not evidence of Muse behavior; no automatic fallback is introduced. Codex CLI's
+401 is a separate authentication path. Voice/photo and real-device/live-database
+E2E remain separate work.
 
 ## Verification
 

@@ -9,6 +9,22 @@ from .api import app
 from .supabase_adapter import SupabasePersistence
 
 
+def configure_ai(app_instance):
+    """Choose the native Meta adapter when MODEL_API_KEY is set. Never fall back on error."""
+    meta_key = os.environ.get("MODEL_API_KEY")
+    if meta_key:
+        from .meta_responses import MetaResponsesProvider
+        app_instance.state.ai_provider = MetaResponsesProvider(api_key=meta_key)
+    elif os.environ.get("AI_API_KEY"):
+        from .ai_provider import ChatCompletionsProvider
+        app_instance.state.ai_provider = ChatCompletionsProvider(
+            endpoint=os.environ.get("AI_CHAT_COMPLETIONS_URL", "https://api.openai.com/v1/chat/completions"),
+            api_key=os.environ["AI_API_KEY"], model=os.environ.get("AI_MODEL", "gpt-4o-mini"))
+    elif hasattr(app_instance.state, "ai_provider"):
+        delattr(app_instance.state, "ai_provider")
+    return app_instance
+
+
 def configure_supabase(app_instance=app):
     from supabase import create_client
 
@@ -38,12 +54,4 @@ def configure_supabase(app_instance=app):
         app_instance.state.demo_access_token = demo_token
     from .correction_hints import SupabaseCorrectionHints
     app_instance.state.correction_hints = SupabaseCorrectionHints(client)
-    ai_key = os.environ.get("AI_API_KEY")
-    if ai_key:
-        from .ai_provider import ChatCompletionsProvider
-        app_instance.state.ai_provider = ChatCompletionsProvider(
-            endpoint=os.environ.get("AI_CHAT_COMPLETIONS_URL",
-                "https://api.openai.com/v1/chat/completions"),
-            api_key=ai_key,
-            model=os.environ.get("AI_MODEL", "gpt-4o-mini"))
-    return app_instance
+    return configure_ai(app_instance)

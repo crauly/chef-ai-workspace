@@ -8,6 +8,7 @@ test("Japanese chef reviews, explicitly approves, saves, recalculates and record
   const proposal = page.getByRole("region", {name: "提案の差分"});
   await expect(proposal).toContainText("10 g → 15 g");
   await expect(proposal).toContainText("¥1000 → ¥1800");
+  await expect(proposal).toContainText("Meta Muse · muse-spark-1.3");
   const save = page.getByRole("button", {name: "承認して保存・原価再計算"});
   await expect(save).toBeDisabled();
   await page.screenshot({path: "test-results/japanese-proposal.png", fullPage: true});
@@ -38,7 +39,7 @@ test("English mobile: edit/discard invalidates approval; empty, stale and unavai
     await expect(page.getByRole("button", {name: "Approve, save & recalculate"})).toHaveCount(0);
     await expect(page.getByRole("button", {name: "Suggest changes"})).toBeEnabled();
   }
-  await expect(page.getByText(/Meta Muse: authentication blocked/)).toBeVisible();
+  await expect(page.getByText("The model is shown with each proposal. Review the changes and approve before saving.")).toBeVisible();
   await page.screenshot({path: "test-results/english-mobile.png", fullPage: true});
   expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).confirms).toHaveLength(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

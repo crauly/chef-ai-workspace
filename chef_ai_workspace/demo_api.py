@@ -147,7 +147,8 @@ def propose_demo_change(recipe_id: UUID, body: AIProposalBody,
         except (ValueError, TypeError, KeyError) as exc:
             raise HTTPException(422, "AI proposal failed validation") from exc
     return {"recipe_id":str(recipe_id),"base_revision":recipe.revision,
-            "operations":operations,"requires_confirmation":True}
+            "operations":operations,"requires_confirmation":True,
+            "provider":getattr(provider, "identity", None)}
 
 
 class CorrectionBody(BaseModel):

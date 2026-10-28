@@ -1,5 +1,10 @@
 # Headless API runtime (initial slice)
 
+This page describes the initial production-auth slice. For the current protected
+single-workspace UI and real Meta inference path, see
+[the UI workflow](../web/README_WORKFLOW.md) and [Meta Responses](META_RESPONSES.md).
+The historical incomplete items below are not a current implementation inventory.
+
 `chef_ai_workspace.api:app` provides `GET /health` and `POST /recipes/{recipe_id}/confirm`.
 The endpoint is an **explicit authenticated confirmation action**: the user
 reviews the proposal in the frontend and presses Confirm. AI-generated proposals
