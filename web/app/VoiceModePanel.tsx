@@ -14,7 +14,7 @@ export function classifyVoiceCommand(input: string): VoiceMode | "unknown" {
 
 export function playVoiceCue(kind: Cue, volume: number): void {
   if (volume <= 0) return;
-  type AudioWindow = Window & {webkitAudioContext?: typeof AudioContext};
+  type AudioWindow = Window & {AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext};
   const w = window as AudioWindow;
   const Ctx = w.AudioContext || w.webkitAudioContext;
   if (!Ctx) return;
