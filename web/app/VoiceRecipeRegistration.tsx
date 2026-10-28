@@ -70,7 +70,7 @@ export default function VoiceRecipeRegistration({locale,onCreated}:{locale:Local
  function enqueue(s:string){pending.current=pending.current.then(()=>handle(s)).catch(()=>say("音声処理でエラーが発生しました。"));}
  function flushSpeech(){if(speechTimer.current)clearTimeout(speechTimer.current);speechTimer.current=null;const chunks=speechChunks.current.splice(0);if(chunks.length)enqueue(chunks.join("、"));}
  function collectSpeech(chunk:string){
-  const normalized=chunk.normalize("NFKC").replace(/[\\s　、。．.!！?？,]+/g,"");
+  const normalized=chunk.normalize("NFKC").replace(/[\s　、。．.!！?？,]+/g,"");
   if(/^(内容を確認|内容を確認して|確認して|確認|登録を確定|登録を確定して|保存を確定|登録して|保存して|キャンセル|破棄|最初から)$/i.test(normalized)){
    flushSpeech();enqueue(chunk);return;
   }
