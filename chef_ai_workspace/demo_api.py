@@ -220,3 +220,14 @@ def check_demo_model_inference(body: ModelInferenceCheckBody, request: Request, 
     if not hasattr(provider, "check_inference"):
         return {"status": "unsupported_provider"}
     return provider.check_inference(body.model)
+
+
+@router.post("/model-chat-check")
+def check_demo_chat_completions(request: Request, ctx=Depends(demo_context)):
+    """Operator-only official Chat Completions comparison; no recipe data."""
+    provider = getattr(request.app.state, "ai_provider", None)
+    if provider is None:
+        return {"status": "not_configured"}
+    if not hasattr(provider, "check_chat_completions"):
+        return {"status": "unsupported_provider"}
+    return provider.check_chat_completions()

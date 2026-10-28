@@ -53,13 +53,26 @@ export default function VoiceModePanel({locale, onMode}: {
     try {
       const results = await Promise.all(models.map(async (model) => {
         try {
-          const response = await fetch("/api/model-inference-check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model})});
+          const response = await fetch("/api/model-inference-check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model}),signal:AbortSignal.timeout(35000)});
           const data: {status?:string;reason?:string} = await response.json();
           return model + ": " + [data.status || "unknown",data.reason && data.reason !== "unspecified" ? data.reason : ""].filter(Boolean).join(" / ");
         } catch {return model + ": proxy_transport_error";}
       }));
       setDiagnostic(results.join(" | "));
     } finally {setChecking(false);}
+  }
+  async function checkChat() {
+    if (checking) return;
+    setChecking(true);setDiagnostic("");
+    try {
+      const response=await fetch("/api/model-inference-check",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"muse-spark-1.3",protocol:"chat"}),signal:AbortSignal.timeout(35000)
+      });
+      const data: {status?:string;reason?:string}=await response.json();
+      setDiagnostic("Chat Completions 1.3: "+[data.status||"unknown",data.reason&&data.reason!=="unspecified"?data.reason:""].filter(Boolean).join(" / "));
+    } catch {setDiagnostic("Chat Completions 1.3: proxy_transport_error");}
+    finally {setChecking(false);}
   }
   async function dispatch(value: string) {
     if (busy) return;
@@ -95,6 +108,8 @@ export default function VoiceModePanel({locale, onMode}: {
     <label>{ja ? "通知音の音量" : "Cue volume"} <input type="range" min="0" max="1" step="0.1" value={volume} onChange={e => setVolume(Number(e.target.value))} aria-label={ja ? "通知音の音量" : "Cue volume"}/></label>
     <button type="button" onClick={() => setVolume(volume ? 0 : 0.5)}>{volume ? (ja ? "通知音をミュート" : "Mute cues") : (ja ? "通知音をオン" : "Unmute cues")}</button>
     <button type="button" disabled={checking} onClick={()=>void checkModel()}>{ja ? "Muse 1.3 / 1.2 / 1.1 比較テスト" : "Compare Muse 1.3 / 1.2 / 1.1"}</button>
+    <button type="button" disabled={checking} onClick={()=>void checkChat()}>{ja ? "Muse Chat Completions APIテスト" : "Test Muse Chat Completions API"}</button>
+    {checking && <p role="status">{ja ? "APIを検査しています（最大35秒）…" : "Checking API (up to 35 seconds)…"}</p>}
     {diagnostic && <p role="status">Meta inference: <strong>{diagnostic}</strong></p>}
     {command && <p className="muted">{ja ? "認識した指示" : "Recognized"}: {command}</p>}
     {error && <p role="alert" className="error">{error}</p>}
