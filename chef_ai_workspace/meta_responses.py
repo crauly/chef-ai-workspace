@@ -281,3 +281,51 @@ class MetaResponsesProvider:
             return {"status": "invalid_response"}
         except OSError:
             return {"status": "connection_error"}
+
+    def check_chat_completions(self) -> dict:
+        """One minimal official Chat Completions call using the same Render key."""
+        payload = json.dumps({
+            "model": "muse-spark-1.3",
+            "messages": [{"role": "user", "content": "Reply with one word: ready"}],
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.meta.ai/v1/chat/completions", data=payload, method="POST",
+            headers={"Authorization": "Bearer " + self.api_key, "Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.build_opener(_NoRedirect()).open(req, timeout=22) as response:
+                data = response.read(32769)
+            if len(data) > 32768:
+                return {"status": "response_too_large"}
+            obj = json.loads(data)
+            if not isinstance(obj, dict) or not isinstance(obj.get("choices"), list) or not obj["choices"]:
+                return {"status": "invalid_response"}
+            choice = obj["choices"][0]
+            if not isinstance(choice, dict) or not isinstance(choice.get("message"), dict):
+                return {"status": "invalid_response"}
+            if not isinstance(choice["message"].get("content"), str) or not choice["message"]["content"].strip():
+                return {"status": "invalid_response"}
+            return {"status": "inference_ready"}
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            reason = "unspecified"
+            try:
+                body = json.loads(exc.read(8193))
+                details = body.get("error", body) if isinstance(body, dict) else {}
+                if isinstance(details, dict):
+                    code = str(details.get("code") or "").lower()
+                    if "model" in code and "not_found" in code:
+                        reason = "model_not_found"
+                    elif "permission" in code or "access_denied" in code:
+                        reason = "model_access_denied"
+            except (ValueError, TypeError, OSError):
+                pass
+            finally:
+                exc.close()
+            statuses = {400: "request_rejected", 401: "unauthorized", 403: "forbidden",
+                        404: "model_unavailable", 429: "rate_limited"}
+            return {"status": statuses.get(status, "provider_error"), "reason": reason}
+        except (ValueError, TypeError, KeyError):
+            return {"status": "invalid_response"}
+        except OSError:
+            return {"status": "connection_error"}
