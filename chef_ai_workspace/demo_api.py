@@ -208,7 +208,7 @@ def check_demo_model_connection(request: Request, ctx=Depends(demo_context)):
 
 class ModelInferenceCheckBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    model: str = Field(default="muse-spark-1.3", pattern=r"^muse-spark-1\\.[123]$")
+    model: str = Field(default="muse-spark-1.3", pattern=r"^muse-spark-1\.[123]$")
 
 
 @router.post("/model-inference-check")
