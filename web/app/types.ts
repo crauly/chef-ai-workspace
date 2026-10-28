@@ -9,6 +9,20 @@ export type Recipe = {
 export type Operation = Record<string, string>;
 export type AIProposal = {recipe_id: string; base_revision: number; operations: Operation[]; requires_confirmation: true;
   provider?: {name: string; model: string} | null};
+// Only idempotent reads may retry while the free backend resumes from sleep.
+// Never retry POST: an ambiguous response may already have committed a mutation.
+export async function startupRead<T>(path: string, onWaiting: () => void): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await request<T>(path);
+    } catch (error) {
+      const status = error instanceof Error ? error.message : "";
+      if (!["502", "503", "504"].includes(status) || attempt >= 7) throw error;
+      onWaiting();
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+  }
+}
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {...init, headers: {"Content-Type": "application/json"}, cache: "no-store"});
   if (!response.ok) throw new Error(String(response.status));
