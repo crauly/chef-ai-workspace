@@ -60,7 +60,7 @@ export default function VoiceModePanel({locale, onMode}: {
       return;
     }
     setError("");
-    if (next !== mode) playVoiceCue(next, volume);
+    if (next !== mode && next !== "idle") playVoiceCue(next, volume);
     setMode(next);
     onMode(next, value);
   }
