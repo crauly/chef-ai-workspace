@@ -193,3 +193,14 @@ def classify_demo_intent(body: IntentBody, request: Request, ctx=Depends(demo_co
         return provider.classify_intent(body.utterance, body.current_mode)
     except ProposalProviderError as exc:
         raise HTTPException(502, "Voice intent model unavailable") from exc
+
+
+@router.get("/model-connection")
+def check_demo_model_connection(request: Request, ctx=Depends(demo_context)):
+    """Authorized operator-only connectivity check. No credentials or raw errors."""
+    provider = getattr(request.app.state, "ai_provider", None)
+    if provider is None:
+        return {"status": "not_configured"}
+    if not hasattr(provider, "check_connection"):
+        return {"status": "unsupported_provider"}
+    return provider.check_connection()
