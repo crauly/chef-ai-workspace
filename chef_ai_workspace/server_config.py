@@ -4,6 +4,7 @@ SUPABASE_SERVICE_ROLE_KEY must never be shipped to browsers or committed.
 JWT identity is retrieved from Supabase Auth, never decoded without verification.
 """
 import os
+from urllib.parse import urlsplit
 
 from .api import app
 from .supabase_adapter import SupabasePersistence
@@ -30,8 +31,14 @@ def configure_supabase(app_instance=app):
 
     url = os.environ["SUPABASE_URL"]
     service_role = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-    if not url.startswith("https://") or not service_role:
-        raise RuntimeError("Valid Supabase service URL and key required")
+    parsed = urlsplit(url)
+    # This backend carries a privileged key: reject every project except the
+    # dedicated Chef AI sandbox before instantiating a database client.
+    if (parsed.scheme != "https" or parsed.hostname != "dfvryaybdelgjxihdmth.supabase.co"
+            or parsed.port is not None or parsed.username is not None
+            or parsed.password is not None or parsed.path not in ("", "/")
+            or parsed.query or parsed.fragment or not service_role):
+        raise RuntimeError("Dedicated Chef AI Supabase configuration required")
     client = create_client(url, service_role)
 
     def verify_token(access_token: str) -> str:

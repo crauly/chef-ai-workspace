@@ -2,12 +2,13 @@
 import {useCallback,useEffect,useState} from "react";
 import {label, type Locale} from "./i18n";
 import AIEditor from "./AIEditor";
-import {request, type Recipe} from "./types";
+import {request, startupRead, type Recipe} from "./types";
 type Item={id:string;title:string;revision:number;updated_at?:string};
 export default function Library(){
  const [items,setItems]=useState<Item[]>([]),[selected,setSelected]=useState<Recipe|null>(null);
  const [draft,setDraft]=useState(""),[rename,setRename]=useState(""),[error,setError]=useState("");
  const [busy,setBusy]=useState(false),[page,setPage]=useState(1);
+ const [waking,setWaking]=useState(false);
  const [cost,setCost]=useState<{partial:boolean;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean}|null>(null);
  const [food,setFood]=useState(""),[qty,setQty]=useState(""),[unit,setUnit]=useState("g"),[price,setPrice]=useState(""),[priceQty,setPriceQty]=useState("1"),[priceUnit,setPriceUnit]=useState("kg");
  const [locale,setLocale]=useState<Locale>("ja");
@@ -15,7 +16,7 @@ export default function Library(){
  useEffect(()=>{const current=localStorage.getItem("chef-ui-locale");if(current==="ja"||current==="en-US"){setLocale(current);document.documentElement.lang=current;}},[]);
  function switchLocale(next:Locale){setLocale(next);localStorage.setItem("chef-ui-locale",next);document.documentElement.lang=next;}
  useEffect(()=>{let active=true;setCost(null);if(selected){void request<{partial:boolean;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean}>(`/api/recipes/${selected.id}/cost`).then(result=>{if(active)setCost(result);}).catch(()=>{if(active)setCost(null);});}return()=>{active=false;};},[selected?.id,selected?.revision]);
- const reload=useCallback(async()=>{try{setItems((await request<{items:Item[]}>(`/api/recipes?page=${page}&page_size=20`)).items);setError("");}catch(e){setError(String(e));}},[page]);
+ const reload=useCallback(async()=>{setWaking(false);try{setItems((await startupRead<{items:Item[]}>(`/api/recipes?page=${page}&page_size=20`,()=>setWaking(true))).items);setError("");}catch(e){setError(String(e));}finally{setWaking(false);}},[page]);
  useEffect(()=>{void reload();},[reload]);
  async function create(e:React.FormEvent){e.preventDefault();if(!draft.trim())return;setBusy(true);
  try{const recipe=await request<Recipe>("/api/recipes",{method:"POST",body:JSON.stringify({title:draft.trim()})});setDraft("");if(page===1){await reload();}else{setPage(1);}setSelected(recipe);setRename(recipe.title.value||"");}
@@ -50,6 +51,7 @@ export default function Library(){
  }
  return <main><header><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">日本語</option><option value="en-US">English (US)</option></select></label></div><h1>{t("library")}</h1><p className="muted">{t("intro")}</p></header>
  <form onSubmit={create}><input aria-label={t("newName")} placeholder={t("newName")} value={draft} onChange={e=>setDraft(e.target.value)}/><button disabled={busy||!draft.trim()}>{t("create")}</button></form>
+ {waking&&<p role="status" aria-live="polite">{locale==="ja"?"サーバーを起動しています。接続を再試行しています…":"Starting the server. Retrying connection…"}</p>}
  {error&&<p role="alert" className="error">{error}</p>}
  <div className="grid">{items.map(item=><section className="card" key={item.id}><h2>{item.title}</h2><p className="muted">Version {item.revision}</p><button disabled={busy} onClick={()=>void open(item.id)}>{t("details")}</button></section>)}</div>
  {items.length===0&&!error&&<p className="muted">{t("empty")}</p>}
