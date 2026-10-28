@@ -38,6 +38,8 @@ export default function VoiceModePanel({locale, onMode}: {
 }) {
   const [mode, setMode] = useState<VoiceMode>("idle");
   const [busy, setBusy] = useState(false);
+  const [diagnostic, setDiagnostic] = useState("");
+  const [checking, setChecking] = useState(false);
   const [volume, setVolume] = useState(0.5);
   const [error, setError] = useState("");
   const [command, setCommand] = useState("");
@@ -45,6 +47,15 @@ export default function VoiceModePanel({locale, onMode}: {
   const modeLabels: Record<VoiceMode, string> = ja
     ? {idle:"待機",create:"新規作成",browse:"レシピ参照",edit:"編集"}
     : {idle:"Idle",create:"Create",browse:"Browse",edit:"Edit"};
+  async function checkModel() {
+    setChecking(true);setDiagnostic("");
+    try {
+      const response = await fetch("/api/model-connection",{cache:"no-store"});
+      const data: {status?:string} = await response.json();
+      setDiagnostic(data.status || "unknown");
+    } catch {setDiagnostic("proxy_transport_error");}
+    finally {setChecking(false);}
+  }
   async function dispatch(value: string) {
     if (busy) return;
     setBusy(true);setCommand(value);setError("");
@@ -78,6 +89,8 @@ export default function VoiceModePanel({locale, onMode}: {
     {busy && <p aria-live="polite">{ja ? "Museが内容を確認しています…" : "Muse is interpreting…"}</p>}
     <label>{ja ? "通知音の音量" : "Cue volume"} <input type="range" min="0" max="1" step="0.1" value={volume} onChange={e => setVolume(Number(e.target.value))} aria-label={ja ? "通知音の音量" : "Cue volume"}/></label>
     <button type="button" onClick={() => setVolume(volume ? 0 : 0.5)}>{volume ? (ja ? "通知音をミュート" : "Mute cues") : (ja ? "通知音をオン" : "Unmute cues")}</button>
+    <button type="button" disabled={checking} onClick={()=>void checkModel()}>{ja ? "Muse API接続診断" : "Check Muse API connection"}</button>
+    {diagnostic && <p role="status">Meta API: <strong>{diagnostic}</strong></p>}
     {command && <p className="muted">{ja ? "認識した指示" : "Recognized"}: {command}</p>}
     {error && <p role="alert" className="error">{error}</p>}
   </section>;
