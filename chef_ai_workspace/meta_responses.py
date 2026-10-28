@@ -163,3 +163,34 @@ class MetaResponsesProvider:
             raise ProposalProviderError("Meta intent request failed") from None
         except (ValueError, KeyError, TypeError, OSError):
             raise ProposalProviderError("Meta intent response invalid") from None
+
+    def check_connection(self) -> dict:
+        """Explicit, authenticated diagnostic. Never expose key or response content."""
+        req = urllib.request.Request(
+            "https://api.meta.ai/v1/models",
+            method="GET",
+            headers={"Authorization": "Bearer " + self.api_key},
+        )
+        try:
+            with urllib.request.build_opener(_NoRedirect()).open(req, timeout=12) as response:
+                data = response.read(65537)
+            if len(data) > 65536:
+                return {"status": "invalid_response"}
+            decoded = json.loads(data)
+            models = decoded.get("data") if isinstance(decoded, dict) else None
+            if not isinstance(models, list):
+                return {"status": "invalid_response"}
+            available = any(isinstance(m, dict) and m.get("id") == self.model for m in models)
+            return {"status": "ready" if available else "model_unavailable"}
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            exc.close()
+            if status == 401:
+                return {"status": "unauthorized"}
+            if status == 403:
+                return {"status": "forbidden"}
+            if status == 429:
+                return {"status": "rate_limited"}
+            return {"status": "provider_error"}
+        except (OSError, ValueError, TypeError):
+            return {"status": "connection_error"}
