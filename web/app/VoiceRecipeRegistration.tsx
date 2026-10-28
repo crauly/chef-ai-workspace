@@ -49,7 +49,7 @@ export default function VoiceRecipeRegistration({locale,onCreated}:{locale:Local
   finally{if(alive.current)setBusy(false);}
  }
  async function handle(utterance:string){
-  const value=utterance.trim();if(!value||phaseRef.current==="saving")return;
+  const value=utterance.trim().replace(/[。．.!！?？、，,]+$/g,"").trim();if(!value||phaseRef.current==="saving")return;
   if(/^(キャンセル|破棄|最初から|cancel)$/i.test(value)){clear();return;}
   if(/^(内容を確認|確認して|確認|review)$/i.test(value)){
    const d=draftRef.current;
@@ -71,7 +71,7 @@ export default function VoiceRecipeRegistration({locale,onCreated}:{locale:Local
   active.current=true;setListening(true);
   function open(){
    if(!active.current||!alive.current)return;
-   const r=new Constructor();recognition.current=r;lastIndex.current=0;
+   const r=new Constructor!();recognition.current=r;lastIndex.current=0;
    r.lang=ja?"ja-JP":"en-US";r.continuous=true;r.interimResults=false;
    r.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){if(i<lastIndex.current||!e.results[i].isFinal)continue;lastIndex.current=i+1;enqueue(e.results[i][0].transcript);}};
    r.onerror=e=>{if(e.error==="not-allowed"||e.error==="service-not-allowed"){active.current=false;setListening(false);say("マイクへのアクセスが許可されていません。");}};
