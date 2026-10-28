@@ -1,6 +1,7 @@
 "use client";
 import {useRef, useState} from "react";
 import {label, type Locale} from "./i18n";
+import VoiceInput from "./VoiceInput";
 import {request, type AIProposal, type Operation, type Recipe} from "./types";
 
 type Review = {proposal: AIProposal; instruction: string; requestId: string};
@@ -101,7 +102,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy}: {
     <form onSubmit={propose} className="instruction-form">
       <label htmlFor="ai-instruction">{t("instructionLabel")}</label>
       <textarea id="ai-instruction" maxLength={4000} rows={3} value={instruction} disabled={busy} placeholder={t("instructionExample")} onChange={e => {setInstruction(e.target.value); setReview(null); setApproved(false);}} required />
-      <button disabled={busy || !instruction.trim()}>{busy ? t("processing") : t("getProposal")}</button>
+      <VoiceInput locale={locale} disabled={busy} onTranscript={text => {setInstruction(text); setReview(null); setApproved(false);}}/><button disabled={busy || !instruction.trim()}>{busy ? t("processing") : t("getProposal")}</button>
     </form>
     {error && <p className="error" role="alert">{error}</p>}
     <p role="status">{notice}</p>
