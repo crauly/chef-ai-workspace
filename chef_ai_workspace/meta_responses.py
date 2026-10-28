@@ -202,7 +202,7 @@ class MetaResponsesProvider:
         """One actual Muse Responses completion; sanitized operator diagnostic."""
         payload = json.dumps({
             "model": self.model,
-            "instructions": "Return only the exact JSON object {\\"intent\\":\\"browse\\",\\"target\\":\\"\\"}.",
+            "instructions": 'Return only JSON: {"intent":"browse","target":""}.',
             "input": "レシピを見せて",
             "store": False,
             "max_output_tokens": 128,
