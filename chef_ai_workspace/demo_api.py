@@ -100,7 +100,7 @@ class CompleteRecipeBody(BaseModel):
 def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_context)):
     """Validate every field before a single durable create. Idempotent recipe UUID."""
     from .mutations import prepare_mutation
-    from .models import decimal
+    from dataclasses import replace
     owner, repository = ctx
     title = body.title.strip()
     if not title:
@@ -132,6 +132,8 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
                 user_confirmed=True)
         except (MutationError, ValueError, TypeError, KeyError) as exc:
             raise HTTPException(422, "Invalid spoken recipe values") from exc
+    # The Supabase create_owned_recipe RPC requires initial revision 0.
+    recipe = replace(recipe, revision=0)
     try:
         snapshot = _json(asdict(calculate_cost(recipe)))
         repository.create_owned_recipe(owner, recipe, snapshot)
