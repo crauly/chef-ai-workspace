@@ -110,3 +110,56 @@ class MetaResponsesProvider:
         except (ValueError, OSError):
             raise ProposalProviderError("Meta Responses request or response failed") from None
         return parse_response(raw)
+
+    def classify_intent(self, utterance: str, current_mode: str = "idle") -> dict:
+        """Classify conversational navigation only. Never authorize mutations."""
+        if not utterance.strip() or len(utterance) > 1000 or current_mode not in ("idle", "create", "browse", "edit"):
+            raise ValueError("Invalid voice intent context")
+        instructions = (
+            "You classify a professional chef's spoken navigation instruction, in Japanese or English. "
+            "Understand paraphrases and natural requests; do not require exact keywords. "
+            "Return ONLY JSON with exactly keys intent and target. "
+            "intent must be one of create, browse, edit, clarify. "
+            "target must be a string (recipe name only when explicitly stated, otherwise empty). "
+            "Create means start a new recipe; browse means view/search an existing recipe; "
+            "edit means modify the currently selected recipe; clarify means unclear or conflicting speech. "
+            "Never execute changes, delete, approve, or save anything. "
+            "If the transcript is garbled or ambiguous return clarify."
+        )
+        payload = json.dumps({
+            "model": self.model, "instructions": instructions,
+            "input": json.dumps({"utterance": utterance, "current_mode": current_mode}, ensure_ascii=False),
+            "store": False, "max_output_tokens": 120, "reasoning": {"effort": "low"},
+        }, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(ENDPOINT, data=payload, method="POST", headers={
+            "Content-Type": "application/json", "Authorization": "Bearer " + self.api_key,
+        })
+        try:
+            with urllib.request.build_opener(_NoRedirect()).open(req, timeout=18) as response:
+                data = response.read(8193)
+            if len(data) > 8192:
+                raise ProposalProviderError("Voice intent response too large")
+            raw = json.loads(data)
+            if not isinstance(raw, dict) or raw.get("status") != "completed" or raw.get("error"):
+                raise ValueError("Incomplete response")
+            output = raw["output"]
+            if not isinstance(output, list):
+                raise ValueError("Invalid output")
+            parts = []
+            for item in output:
+                if item.get("type") == "reasoning":
+                    continue
+                if item.get("type") != "message" or item.get("role") != "assistant" or item.get("status") != "completed":
+                    raise ValueError("Invalid message")
+                parts.extend(p["text"] for p in item["content"] if p.get("type") == "output_text" and isinstance(p.get("text"), str))
+            result = json.loads("".join(parts))
+            if (not isinstance(result, dict) or set(result) != {"intent", "target"}
+                    or result["intent"] not in ("create", "browse", "edit", "clarify")
+                    or not isinstance(result["target"], str) or len(result["target"]) > 200):
+                raise ValueError("Invalid intent JSON")
+            return result
+        except urllib.error.HTTPError as exc:
+            exc.close()
+            raise ProposalProviderError("Meta intent request failed") from None
+        except (ValueError, KeyError, TypeError, OSError):
+            raise ProposalProviderError("Meta intent response invalid") from None
