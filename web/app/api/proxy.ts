@@ -10,12 +10,12 @@ export async function forward(req: NextRequest, id?: string, action: Action = ""
   if (!await previewAuthorized(req)) return failure(403);
   if (id !== undefined && !uuid.test(id)) return failure(400);
   if (req.method === "POST" && req.headers.get("origin") !== req.nextUrl.origin) return failure(403);
-  const api = process.env.FASTAPI_BASE_URL;
+  const api = process.env.CHEF_FASTAPI_INTERNAL_URL;
   const key = process.env.DEMO_ACCESS_TOKEN;
   if (!api || !key) return failure(503);
   try {
     const base = new URL(api);
-    if (base.protocol !== "https:" && !(base.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(base.hostname))) return failure(503);
+    if (!["https:","http:"].includes(base.protocol) || base.username || base.password) return failure(503);
     const body = req.method === "POST" ? await req.text() : undefined;
     if (body && new TextEncoder().encode(body).length > 65536) return failure(413);
     const path = "/demo/recipes" + (id ? "/" + encodeURIComponent(id) + action : "");
