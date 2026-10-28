@@ -240,18 +240,41 @@ class MetaResponsesProvider:
             return {"status": "unexpected_model_output"}
         except urllib.error.HTTPError as exc:
             status = exc.code
-            exc.close()
+            # Classify the provider's structured error without exposing raw body,
+            # arbitrary messages, identifiers, credentials, or account metadata.
+            error_kind = "unspecified"
+            try:
+                body = json.loads(exc.read(8193))
+                details = body.get("error", body) if isinstance(body, dict) else {}
+                if isinstance(details, dict):
+                    code = str(details.get("code") or "").lower()
+                    category = str(details.get("type") or "").lower()
+                    message = str(details.get("message") or "").lower()
+                    if "model" in code and ("not_found" in code or "unavailable" in code):
+                        error_kind = "model_not_found"
+                    elif any(x in code for x in ("access_denied", "permission", "not_authorized")):
+                        error_kind = "model_access_denied"
+                    elif "not available" in message and "model" in message:
+                        error_kind = "model_not_found_or_no_access"
+                    elif "not found" in message and ("endpoint" in message or "route" in message):
+                        error_kind = "endpoint_not_found"
+                    elif category in ("authentication_error", "permission_error"):
+                        error_kind = category
+            except (ValueError, TypeError, OSError):
+                pass
+            finally:
+                exc.close()
             if status == 401:
-                return {"status": "unauthorized"}
+                return {"status": "unauthorized", "reason": error_kind}
             if status == 403:
-                return {"status": "forbidden"}
+                return {"status": "forbidden", "reason": error_kind}
             if status == 404:
-                return {"status": "model_unavailable"}
+                return {"status": "model_unavailable", "reason": error_kind}
             if status == 429:
-                return {"status": "rate_limited"}
+                return {"status": "rate_limited", "reason": error_kind}
             if status in (400, 422):
-                return {"status": "request_rejected"}
-            return {"status": "provider_error"}
+                return {"status": "request_rejected", "reason": error_kind}
+            return {"status": "provider_error", "reason": error_kind}
         except (ValueError, TypeError, KeyError):
             return {"status": "invalid_response"}
         except OSError:
