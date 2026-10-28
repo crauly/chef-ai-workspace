@@ -198,10 +198,12 @@ class MetaResponsesProvider:
         except (OSError, ValueError, TypeError):
             return {"status": "connection_error"}
 
-    def check_inference(self) -> dict:
-        """One actual Muse Responses completion; sanitized operator diagnostic."""
+    def check_inference(self, model: str = "muse-spark-1.3") -> dict:
+        """One actual Muse Responses completion for an allowlisted model."""
+        if model not in ("muse-spark-1.3", "muse-spark-1.2", "muse-spark-1.1"):
+            raise ValueError("Unsupported diagnostic model")
         payload = json.dumps({
-            "model": self.model,
+            "model": model,
             "instructions": 'Return only JSON: {"intent":"browse","target":""}.',
             "input": "レシピを見せて",
             "store": False,
