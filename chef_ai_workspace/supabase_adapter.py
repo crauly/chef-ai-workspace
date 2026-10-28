@@ -48,14 +48,17 @@ class SupabasePersistence:
             raise RuntimeError("Unexpected create RPC result")
         return recipe.id
 
-    def list_owned_recipes(self, owner_id, *, offset=0, limit=20):
+    def list_owned_recipes(self, owner_id, *, offset=0, limit=20, search=""):
         if offset < 0 or limit < 1 or limit > 50:
             raise ValueError("Invalid pagination")
-        response = (self.client.table("recipes")
-                    .select("id,title,revision,updated_at")
-                    .eq("owner_id", owner_id)
-                    .order("updated_at", desc=True)
-                    .range(offset,offset+limit-1).execute())
+        query = (self.client.table("recipes")
+                 .select("id,title,revision,updated_at").eq("owner_id", owner_id))
+        if search:
+            if len(search) > 200:
+                raise ValueError("Search too long")
+            pattern = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            query = query.ilike("title", "%" + pattern + "%")
+        response = query.order("updated_at", desc=True).range(offset, offset+limit-1).execute()
         return response.data or []
 
     def load_owned_recipe(self, owner_id, recipe_id):

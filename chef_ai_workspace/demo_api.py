@@ -13,7 +13,7 @@ from .costing import calculate_cost
 from .mutations import Proposal, MutationError, prepare_mutation
 from .persistence_service import save_validated_mutation, _json
 from uuid import UUID
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Query
 
 router = APIRouter(prefix="/demo", tags=["Hackathon demo"])
 
@@ -34,12 +34,14 @@ def demo_context(request: Request, x_demo_access: str | None = Header(default=No
 
 
 @router.get("/recipes")
-def list_demo_recipes(page: int = 1, page_size: int = 20, ctx=Depends(demo_context)):
+def list_demo_recipes(page: int = 1, page_size: int = 20,
+                      q: str = Query(default="", max_length=200), ctx=Depends(demo_context)):
     if page < 1 or page_size < 1 or page_size > 50:
         raise HTTPException(422, "Invalid pagination")
     owner, repository = ctx
+    search = {"search": q.strip()} if q.strip() else {}
     return {"items": repository.list_owned_recipes(owner, offset=(page-1)*page_size,
-                                                   limit=page_size),
+                                                   limit=page_size, **search),
             "page":page, "page_size":page_size}
 
 

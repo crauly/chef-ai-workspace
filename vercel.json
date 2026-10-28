@@ -1,7 +1,8 @@
 {
   "git": {
     "deploymentEnabled": {
-      "feat/muse-voice-transcription": false
+      "feat/muse-voice-transcription": false,
+      "fix/voice-recipe-retrieval": false
     }
   },
   "services": {

@@ -51,6 +51,13 @@ physical-device validation are outside this voice change.
 
 ## Audio input
 
+Voice browse commands now use Muse's recipe-name target to search the owner's
+saved library before pagination. A single match opens its detail read-only;
+multiple matches remain visible for selection. The name search field offers
+the same lookup, with clear/no-match behavior. Queries are bounded to 200
+characters; old responses cannot replace a newer search. Search never calls
+creation, proposal approval or save endpoints.
+
 All microphone entry points use Web Audio, not browser speech recognition.
 HTTPS (or localhost), microphone permission and AudioWorklet support are
 required; typed input remains available. Audio is sent to Meta through the
@@ -68,7 +75,8 @@ See [ADR-007](../docs/ADR_007_MUSE_VOICE_INPUT_BOUNDARY.md).
 
 The repository-root `vercel.json` disables automatic Git deployments for the review branch
 `feat/muse-voice-transcription` only, honoring the no-deployment scope of this
-PR. Other branches retain their existing behavior. This follows Vercel's
+initial PR. The follow-up review branch `fix/voice-recipe-retrieval` is also
+disabled; other branches retain their existing behavior. This follows Vercel's
 [branch deployment configuration](https://vercel.com/docs/project-configuration/git-configuration).
 
 `tests/voice-transcription.spec.ts` covers transport/schema failures, route
