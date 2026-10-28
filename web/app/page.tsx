@@ -51,11 +51,10 @@ export default function Library(){
    await saveOperations([{op:"set_material_price",material_id:materialId,
      price_jpy:newPrice,price_quantity:perQuantity,price_unit:perUnit}]);
  }
- function handleVoiceMode(mode: VoiceMode, command: string) {
+ function handleVoiceMode(mode: VoiceMode, target: string) {
    if(mode === "create") {
      setSelected(null);setPage(1);
-     const title = command.replace(/^(新規(登録|作成)?|新しいレシピ(を)?(作って|作成)?|レシピ(を)?作(成|って))([、,:：\s]*)/,"").trim();
-     if(title && title !== command) setDraft(title);
+     if (target.trim()) setDraft(target.trim());
    } else if(mode === "browse") {setSelected(null);setPage(1);void reload();}
    else if(mode === "edit" && !selected && items.length === 1) {void open(items[0].id);}
  }
