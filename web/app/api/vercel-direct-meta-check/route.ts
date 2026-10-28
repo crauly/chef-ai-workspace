@@ -26,6 +26,9 @@ export async function POST(req:NextRequest) {
       return report(status[upstream.status]??"provider_error",200,reason);
     }
     const choices=body&&typeof body==="object"?(body as {choices?:unknown}).choices:null;
-    return report(Array.isArray(choices)&&choices.length>0?"inference_ready":"invalid_response");
+    const choice=Array.isArray(choices)&&choices.length===1?choices[0]:null;
+    const message=choice&&typeof choice==="object"?(choice as {message?:unknown}).message:null;
+    const content=message&&typeof message==="object"?(message as {content?:unknown}).content:null;
+    return report(typeof content==="string"&&content.trim().length>0?"inference_ready":"invalid_response");
   } catch {return report("transport_or_parse_error");}
 }
