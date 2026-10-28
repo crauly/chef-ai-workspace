@@ -50,13 +50,15 @@ export default function VoiceRecipeRegistration({locale,onCreated}:{locale:Local
  }
  async function handle(utterance:string){
   const value=utterance.trim().replace(/[。．.!！?？、，,]+$/g,"").trim();if(!value||phaseRef.current==="saving")return;
-  if(/^(キャンセル|破棄|最初から|cancel)$/i.test(value)){clear();return;}
-  if(/^(内容を確認|確認して|確認|review)$/i.test(value)){
+  // ASR often inserts spaces between Japanese words: 「登録 を 確定」.
+  const command=value.normalize("NFKC").replace(/[\\s　、。．.!！?？,]+/g,"");
+  if(/^(キャンセル|破棄|最初から|cancel)$/i.test(command)){clear();return;}
+  if(/^(内容を確認|内容を確認して|確認して|確認|review)$/i.test(command)){
    const d=draftRef.current;
    if(!d||!d.title||d.missing.length||d.notes.length){say("登録内容が未完成です。不足している項目を補ってください。");return;}
    setStage("review");say("下書きを確認してください。正しければ「登録を確定」と話してください。");return;
   }
-  if(/^(登録を確定|保存を確定|登録して|保存して|confirm save)$/i.test(value)){
+  if(/^(登録を確定|登録を確定して|保存を確定|登録して|保存して|confirmsave)$/i.test(command)){
    if(phaseRef.current!=="review"){say("先に「内容を確認」と話してください。");return;}
    await save();return;
   }
