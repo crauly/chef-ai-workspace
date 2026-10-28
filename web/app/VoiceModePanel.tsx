@@ -74,6 +74,20 @@ export default function VoiceModePanel({locale, onMode}: {
     } catch {setDiagnostic("Chat Completions 1.3: proxy_transport_error");}
     finally {setChecking(false);}
   }
+  async function checkVercelPython() {
+    if(checking)return;
+    setChecking(true);setDiagnostic("");
+    try {
+      const response=await fetch("/api/vercel-python-probe",{
+        method:"POST",headers:{"Content-Type":"application/json"},body:"{}",
+        signal:AbortSignal.timeout(35000)
+      });
+      const data:{status?:string;reason?:string}=await response.json();
+      setDiagnostic("Vercel Python / Chat 1.3: "+[data.status||"unknown",
+        data.reason&&data.reason!=="unspecified"?data.reason:""].filter(Boolean).join(" / "));
+    } catch {setDiagnostic("Vercel Python / Chat 1.3: proxy_transport_error");}
+    finally {setChecking(false);}
+  }
   async function dispatch(value: string) {
     if (busy) return;
     setBusy(true);setCommand(value);setError("");
@@ -109,6 +123,7 @@ export default function VoiceModePanel({locale, onMode}: {
     <button type="button" onClick={() => setVolume(volume ? 0 : 0.5)}>{volume ? (ja ? "通知音をミュート" : "Mute cues") : (ja ? "通知音をオン" : "Unmute cues")}</button>
     <button type="button" disabled={checking} onClick={()=>void checkModel()}>{ja ? "Muse 1.3 / 1.2 / 1.1 比較テスト" : "Compare Muse 1.3 / 1.2 / 1.1"}</button>
     <button type="button" disabled={checking} onClick={()=>void checkChat()}>{ja ? "Muse Chat Completions APIテスト" : "Test Muse Chat Completions API"}</button>
+    <button type="button" disabled={checking} onClick={()=>void checkVercelPython()}>{ja ? "Vercel PythonでMuse接続テスト" : "Test Muse from Vercel Python"}</button>
     {checking && <p role="status">{ja ? "APIを検査しています（最大35秒）…" : "Checking API (up to 35 seconds)…"}</p>}
     {diagnostic && <p role="status">Meta inference: <strong>{diagnostic}</strong></p>}
     {command && <p className="muted">{ja ? "認識した指示" : "Recognized"}: {command}</p>}
