@@ -13,7 +13,7 @@ export async function forward(req: NextRequest, id?: string, action: Action = ""
   // Browser tests use only the loopback mock; production never falls back to Render.
   const localMock = process.env.FASTAPI_BASE_URL;
   const api = process.env.CHEF_FASTAPI_INTERNAL_URL ||
-    (localMock && /^http:\\/\\/(127\\.0\\.0\\.1|localhost):\\d+$/.test(localMock) ? localMock : undefined);
+    (localMock && (localMock.startsWith("http://127.0.0.1:") || localMock.startsWith("http://localhost:")) ? localMock : undefined);
   const key = process.env.DEMO_ACCESS_TOKEN;
   if (!api || !key) return failure(503);
   try {
