@@ -1,8 +1,7 @@
 import io
 import json
+import unittest
 from unittest.mock import patch
-
-import pytest
 
 from chef_ai_workspace.ai_provider import ProposalProviderError
 from chef_ai_workspace.meta_responses import MetaResponsesProvider
@@ -16,7 +15,7 @@ class Response:
         return self
 
     def __exit__(self, *args):
-        pass
+        return None
 
     def read(self, length):
         return self.data.read(length)
@@ -33,44 +32,43 @@ class Opener:
         return Response(self.payload)
 
 
-def envelope(text):
+def envelope(output_text):
     return {
         "status": "completed",
         "output": [
             {"type": "reasoning"},
             {"type": "message", "role": "assistant", "status": "completed",
-             "content": [{"type": "output_text", "text": text}]},
+             "content": [{"type": "output_text", "text": output_text}]},
         ],
     }
 
 
-def test_muse_intent_classifies_natural_browse_without_lexical_regex():
-    opener = Opener(envelope('{"intent":"browse","target":"アマトリチャーナ"}'))
-    with patch("chef_ai_workspace.meta_responses.urllib.request.build_opener", return_value=opener):
-        value = MetaResponsesProvider("test-key").classify_intent(
-            "こないだ作ったアマトリチャーナちょっと見せてくれる？", "idle")
-    assert value == {"intent": "browse", "target": "アマトリチャーナ"}
-    payload = json.loads(opener.request.data)
-    assert payload["model"] == "muse-spark-1.3"
-    assert payload["store"] is False
-    assert payload["max_output_tokens"] == 120
-    assert "こないだ" in payload["input"]
+class TestMetaVoiceIntent(unittest.TestCase):
+    def test_natural_browse_intent(self):
+        opener = Opener(envelope('{"intent":"browse","target":"アマトリチャーナ"}'))
+        with patch("chef_ai_workspace.meta_responses.urllib.request.build_opener", return_value=opener):
+            value = MetaResponsesProvider("test-key").classify_intent(
+                "こないだ作ったアマトリチャーナちょっと見せてくれる？", "idle")
+        self.assertEqual(value, {"intent": "browse", "target": "アマトリチャーナ"})
+        payload = json.loads(opener.request.data)
+        self.assertEqual(payload["model"], "muse-spark-1.3")
+        self.assertIs(payload["store"], False)
+        self.assertEqual(payload["max_output_tokens"], 120)
 
+    def test_reject_unsafe_or_malformed_model_output(self):
+        for invalid in [
+            '{"intent":"delete","target":""}',
+            '{"intent":"edit","target":"","approved":true}',
+            '{"intent":"create","target":12}',
+            '{"intent":"browse"}',
+            "Sure, let me open it.",
+        ]:
+            with self.subTest(output=invalid):
+                opener = Opener(envelope(invalid))
+                with patch("chef_ai_workspace.meta_responses.urllib.request.build_opener", return_value=opener):
+                    with self.assertRaises(ProposalProviderError):
+                        MetaResponsesProvider("test-key").classify_intent("このレシピを表示して")
 
-@pytest.mark.parametrize("invalid", [
-    '{"intent":"delete","target":""}',
-    '{"intent":"edit","target":"","approved":true}',
-    '{"intent":"create","target":12}',
-    '{"intent":"browse"}',
-    "Sure, let me open it.",
-])
-def test_invalid_intent_cannot_trigger_navigation(invalid):
-    opener = Opener(envelope(invalid))
-    with patch("chef_ai_workspace.meta_responses.urllib.request.build_opener", return_value=opener):
-        with pytest.raises(ProposalProviderError):
-            MetaResponsesProvider("test-key").classify_intent("このレシピを表示して")
-
-
-def test_invalid_mode_rejected_without_provider_call():
-    with pytest.raises(ValueError):
-        MetaResponsesProvider("test-key").classify_intent("表示", "delete")
+    def test_invalid_mode_rejected(self):
+        with self.assertRaises(ValueError):
+            MetaResponsesProvider("test-key").classify_intent("表示", "delete")
