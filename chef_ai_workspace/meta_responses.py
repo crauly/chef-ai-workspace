@@ -197,3 +197,62 @@ class MetaResponsesProvider:
             return {"status": "provider_error"}
         except (OSError, ValueError, TypeError):
             return {"status": "connection_error"}
+
+    def check_inference(self) -> dict:
+        """One actual Muse Responses completion; sanitized operator diagnostic."""
+        payload = json.dumps({
+            "model": self.model,
+            "instructions": "Return only the exact JSON object {\\"intent\\":\\"browse\\",\\"target\\":\\"\\"}.",
+            "input": "レシピを見せて",
+            "store": False,
+            "max_output_tokens": 128,
+            "reasoning": {"effort": "low"},
+        }, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(ENDPOINT, data=payload, method="POST",
+            headers={"Authorization": "Bearer " + self.api_key, "Content-Type": "application/json"})
+        try:
+            with urllib.request.build_opener(_NoRedirect()).open(req, timeout=22) as response:
+                data = response.read(32769)
+            if len(data) > 32768:
+                return {"status": "response_too_large"}
+            raw = json.loads(data)
+            if not isinstance(raw, dict):
+                return {"status": "invalid_response"}
+            if raw.get("status") != "completed" or raw.get("error"):
+                return {"status": "incomplete_response"}
+            output = raw.get("output")
+            if not isinstance(output, list):
+                return {"status": "invalid_response"}
+            parts = []
+            for item in output:
+                if not isinstance(item, dict):
+                    return {"status": "invalid_response"}
+                if item.get("type") == "reasoning":
+                    continue
+                if item.get("type") != "message" or item.get("role") != "assistant":
+                    return {"status": "invalid_response"}
+                for part in item.get("content", []):
+                    if isinstance(part, dict) and part.get("type") == "output_text" and isinstance(part.get("text"), str):
+                        parts.append(part["text"])
+            parsed = json.loads("".join(parts))
+            if isinstance(parsed, dict) and parsed.get("intent") == "browse" and parsed.get("target") == "":
+                return {"status": "inference_ready"}
+            return {"status": "unexpected_model_output"}
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            exc.close()
+            if status == 401:
+                return {"status": "unauthorized"}
+            if status == 403:
+                return {"status": "forbidden"}
+            if status == 404:
+                return {"status": "model_unavailable"}
+            if status == 429:
+                return {"status": "rate_limited"}
+            if status in (400, 422):
+                return {"status": "request_rejected"}
+            return {"status": "provider_error"}
+        except (ValueError, TypeError, KeyError):
+            return {"status": "invalid_response"}
+        except OSError:
+            return {"status": "connection_error"}
