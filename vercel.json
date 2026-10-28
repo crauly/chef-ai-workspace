@@ -1,4 +1,9 @@
 {
+  "git": {
+    "deploymentEnabled": {
+      "feat/muse-voice-transcription": false
+    }
+  },
   "services": {
     "frontend": {
       "root": "web/",

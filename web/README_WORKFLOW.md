@@ -12,9 +12,11 @@ it is separate from future Supabase Auth accounts. Use HTTPS in deployments.
 - `FASTAPI_BASE_URL`: trusted backend HTTPS origin; HTTP is allowed only for loopback development.
 - `DEMO_ACCESS_TOKEN`: backend-only demo token, distinct from the preview password.
 
-Never prefix these with `NEXT_PUBLIC_`. No Supabase or AI credentials belong
-in the web environment. The backend owns all database/model access and the
-fixed demo owner. Keep that backend's demo endpoints token-protected.
+Never prefix these with `NEXT_PUBLIC_`. `MODEL_API_KEY` is server-only in the
+Next.js runtime for the existing intent/draft routes and new Muse Voice route;
+never expose it to client components. Supabase credentials remain in the
+Python backend, which owns persistence and the fixed demo owner. Keep that
+backend's demo endpoints token-protected.
 Use only dedicated Supabase project `dfvryaybdelgjxihdmth`.
 Restaurant operations project `jfaxjgvqfsacprenodkg` is strictly out of scope.
 This UI change requires no schema migration.
@@ -43,8 +45,40 @@ The backend supports a dedicated Meta Responses adapter through server-only
 `MODEL_API_KEY`; see [Meta integration](../docs/META_RESPONSES.md). Model attribution
 is displayed with each proposal. Substitute adapters and browser fixtures are
 not evidence of Muse behavior; no automatic fallback is introduced. Codex CLI's
-401 is a separate authentication path. Voice/photo and real-device/live-database
-E2E remain separate work.
+401 is a separate authentication path. Live voice/database evidence is tracked
+separately in [VOICE_ACCEPTANCE.md](../docs/VOICE_ACCEPTANCE.md); photo and
+physical-device validation are outside this voice change.
+
+## Audio input
+
+All microphone entry points use Web Audio, not browser speech recognition.
+HTTPS (or localhost), microphone permission and AudioWorklet support are
+required; typed input remains available. Audio is sent to Meta through the
+protected server-only `/api/voice/transcribe` route. The app does not retain
+recordings. Pause 3.5 seconds between recipe turns, especially between review
+and explicit save. The stop button flushes the last voiced segment. Changing
+microphones, discarding a draft, navigation or a transcription error cancels
+pending audio. On failure, review the visible draft before restarting.
+
+The route accepts canonical mono PCM WAV at 16/24 kHz, up to 30 seconds, and
+validates bytes before calling Muse Voice. Web emits 24 kHz WAV; a future native
+client may reuse the same authenticated contract. No new server secret or
+deployment configuration is required beyond the existing `MODEL_API_KEY`.
+See [ADR-007](../docs/ADR_007_MUSE_VOICE_INPUT_BOUNDARY.md).
+
+The repository-root `vercel.json` disables automatic Git deployments for the review branch
+`feat/muse-voice-transcription` only, honoring the no-deployment scope of this
+PR. Other branches retain their existing behavior. This follows Vercel's
+[branch deployment configuration](https://vercel.com/docs/project-configuration/git-configuration).
+
+`tests/voice-transcription.spec.ts` covers transport/schema failures, route
+access/size/format protection and actual Chromium audio encoding with fixture
+transcription. It does not send real recordings to Meta or touch Supabase.
+`tests/live-voice.spec.ts` is separately opt-in and has passed with actual Muse
+Voice/Spark and dedicated Supabase. It uses Japanese synthetic speech through
+the actual Web Audio capture path. The Web hackathon scope does not require a
+native app or a physical smartphone. Real kitchen noise and arbitrary speakers
+remain usability evaluation, not a claim of these automated tests.
 
 ## Verification
 
@@ -54,3 +88,6 @@ use an isolated local fixture backend with no database or real model. Python
 tests additionally exercise real FastAPI validation, deterministic mutation/cost,
 explicit confirmation, replay, conflicts and correction registration using an
 in-memory repository. These do not prove live Supabase or real inference.
+
+For the separately executed live test, dedicated test-owner creation and
+verified cleanup, see [VOICE_ACCEPTANCE.md](../docs/VOICE_ACCEPTANCE.md).

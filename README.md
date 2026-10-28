@@ -67,9 +67,24 @@ Natural language and voice are the primary interaction methods. Structured forms
 
 ## Meta AI Integration
 
-Meta AI models will power meaningful parts of the recipe interpretation and editing workflow.
+The audio pipeline separates three responsibilities: Web Audio captures speech,
+the server sends WAV audio to **Muse Voice Transcribe**, and **Muse Spark**
+interprets professional recipe meaning and self-corrections. This keeps the
+audio input contract reusable by a future native client. Browser speech
+recognition is no longer required.
+
+Transcription creates input, never authorization. The chef reviews the draft
+or proposed changes and explicitly approves saving through the existing Human
+Gate. Recordings are sent to Meta and are not stored by the application.
 
 Cost calculation and data validation remain deterministic application responsibilities.
+
+See [ADR-007](docs/ADR_007_MUSE_VOICE_INPUT_BOUNDARY.md) for the verified API
+contract and limits. [Live Web acceptance](docs/VOICE_ACCEPTANCE.md) verified
+Japanese synthetic speech through actual Voice/Spark APIs, explicit approval,
+dedicated Supabase persistence and reload. This is a Web hackathon submission;
+native apps and physical smartphone testing are outside this change's scope.
+The test does not establish general recognition accuracy in kitchen noise.
 
 ## Project Background
 

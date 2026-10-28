@@ -1,5 +1,6 @@
 "use client";
-import {useEffect, useRef, useState} from "react";
+import {useState} from "react";
+import {useVoiceCapture} from "./useVoiceCapture";
 import type {Locale} from "./i18n";
 
 export type VoiceMode = "idle" | "create" | "browse" | "edit";
@@ -85,30 +86,13 @@ export default function VoiceModePanel({locale, onMode}: {
   </section>;
 }
 
-type SpeechEvent = {resultIndex:number;results:ArrayLike<ArrayLike<{transcript:string}> & {isFinal:boolean}>};
-type Recognition = {
- lang:string;continuous:boolean;interimResults:boolean;
- onresult:((e:SpeechEvent)=>void)|null;onerror:((e:{error:string})=>void)|null;onend:(()=>void)|null;
- start:()=>void;stop:()=>void;abort:()=>void;
-};
-type SpeechWindow = Window & {SpeechRecognition?:new()=>Recognition;webkitSpeechRecognition?:new()=>Recognition};
 function ModeMicrophone({locale,onCommand,disabled}:{locale:Locale;onCommand:(text:string)=>void;disabled:boolean}) {
- const [listening,setListening]=useState(false),[supported,setSupported]=useState<boolean|null>(null),[message,setMessage]=useState("");
- const ref=useRef<Recognition|null>(null), final=useRef("");
- useEffect(()=>{const w=window as SpeechWindow;setSupported(Boolean(w.SpeechRecognition||w.webkitSpeechRecognition));return()=>{ref.current?.abort();ref.current=null;};},[]);
- function start() {
-  const w=window as SpeechWindow;const C=w.SpeechRecognition||w.webkitSpeechRecognition;
-  if(!C)return;
-  const r=new C();ref.current=r;final.current="";setMessage("");
-  r.lang=locale==="ja"?"ja-JP":"en-US";r.continuous=false;r.interimResults=true;
-  r.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++)if(e.results[i].isFinal)final.current+=e.results[i][0].transcript+" ";};
-  r.onerror=e=>{if(e.error!=="aborted")setMessage(locale==="ja"?"マイクまたは音声認識に問題が発生しました。":"Microphone or recognition failed.");};
-  r.onend=()=>{setListening(false);if(ref.current===r){ref.current=null;if(final.current.trim())onCommand(final.current.trim());}};
-  try{r.start();setListening(true);}catch{setMessage(locale==="ja"?"マイクを開始できませんでした。":"Could not start microphone.");}
- }
+ const voice=useVoiceCapture(locale,onCommand);
  return <div>
-   <button type="button" disabled={supported===false || disabled} onClick={()=>listening?ref.current?.stop():start()} aria-pressed={listening}>{listening?(locale==="ja"?"■ 指示の聞き取りを終了":"■ Stop listening"):(locale==="ja"?"🎙 音声コマンドを話す":"🎙 Say command")}</button>
-   {message&&<p role="alert">{message}</p>}
-   {supported===false&&<p className="muted">{locale==="ja"?"このブラウザは音声認識に対応していません。":"Speech recognition unavailable."}</p>}
+   <button type="button" disabled={!voice.recording&&(voice.supported===false||voice.busy||disabled)} onClick={()=>voice.recording?voice.stop():void voice.start()} aria-pressed={voice.recording}>{voice.recording?(locale==="ja"?"■ 指示の聞き取りを終了":"■ Stop listening"):(locale==="ja"?"🎙 音声コマンドを話す":"🎙 Say command")}</button>
+   <p className="muted">{locale==="ja"?"音声はMetaへ送信して文字起こしします。アプリには録音を保存しません。":"Audio is sent to Meta for transcription. The app does not store recordings."}</p>
+   {voice.busy&&<p aria-live="polite">{locale==="ja"?"音声を文字にしています…":"Transcribing…"}</p>}
+   {voice.error&&<p role="alert">{voice.error}</p>}
+   {voice.supported===false&&<p className="muted">{locale==="ja"?"このブラウザでは音声入力を利用できません。":"Audio input unavailable."}</p>}
  </div>;
 }
