@@ -62,7 +62,7 @@ export default function VoiceModePanel({locale, onMode}: {
         setError(ja ? "指示を確認できませんでした。別の言い方でお願いします。" : "Please rephrase the request.");
         playVoiceCue("error",volume);return;
       }
-      const next = intent as VoiceMode;
+      const next = intent as Exclude<VoiceMode, "idle">;
       if (next !== mode) playVoiceCue(next,volume);
       setMode(next);onMode(next,target);
     } catch {
