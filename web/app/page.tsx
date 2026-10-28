@@ -4,6 +4,7 @@ import {label, type Locale} from "./i18n";
 import AIEditor from "./AIEditor";
 import VoiceInput from "./VoiceInput";
 import VoiceModePanel, {type VoiceMode} from "./VoiceModePanel";
+import VoiceRecipeRegistration from "./VoiceRecipeRegistration";
 import {request, startupRead, type Recipe} from "./types";
 type Item={id:string;title:string;revision:number;updated_at?:string};
 export default function Library(){
@@ -60,6 +61,7 @@ export default function Library(){
  }
  return <main><header><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">日本語</option><option value="en-US">English (US)</option></select></label></div><h1>{t("library")}</h1><p className="muted">{t("intro")}</p></header>
  <VoiceModePanel locale={locale} onMode={handleVoiceMode}/>
+ <VoiceRecipeRegistration locale={locale} onCreated={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");setError("");void reload();}}/>
  <form onSubmit={create}><input aria-label={t("newName")} placeholder={t("newName")} value={draft} onChange={e=>setDraft(e.target.value)}/><VoiceInput locale={locale} disabled={busy} onTranscript={setDraft}/><button disabled={busy||!draft.trim()}>{t("create")}</button></form>
  {waking&&<p role="status" aria-live="polite">{locale==="ja"?"サーバーを起動しています。接続を再試行しています…":"Starting the server. Retrying connection…"}</p>}
  {error&&<p role="alert" className="error">{error}</p>}
