@@ -19,11 +19,12 @@ export default function VoiceRecipeRegistration({locale,onCreated}:{locale:Local
  const active=useRef(false),recognition=useRef<Recognizer|null>(null),lastIndex=useRef(0);
  const turnsRef=useRef<string[]>([]),draftRef=useRef<Draft|null>(null),phaseRef=useRef<"dictating"|"review"|"saving">("dictating");
  const pending=useRef<Promise<void>>(Promise.resolve()),requestId=useRef<string|null>(null);
+ const speechChunks=useRef<string[]>([]),speechTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
  const alive=useRef(true);
- useEffect(()=>{return()=>{alive.current=false;active.current=false;recognition.current?.abort();};},[]);
+ useEffect(()=>{return()=>{alive.current=false;active.current=false;if(speechTimer.current)clearTimeout(speechTimer.current);recognition.current?.abort();};},[]);
  function setStage(next:"dictating"|"review"|"saving"){phaseRef.current=next;setPhase(next);}
  function say(s:string){if(alive.current)setMessage(s);}
- function clear(){if(phaseRef.current==="saving")return;turnsRef.current=[];setTurns([]);draftRef.current=null;setDraft(null);requestId.current=null;setStage("dictating");say("下書きを破棄しました。新しいレシピを話してください。");}
+ function clear(){if(phaseRef.current==="saving")return;if(speechTimer.current)clearTimeout(speechTimer.current);speechChunks.current=[];turnsRef.current=[];setTurns([]);draftRef.current=null;setDraft(null);requestId.current=null;setStage("dictating");say("下書きを破棄しました。新しいレシピを話してください。");}
  async function parse(next:string[]){
   setBusy(true);
   try{
@@ -42,7 +43,7 @@ export default function VoiceRecipeRegistration({locale,onCreated}:{locale:Local
   try{
    const recipe=await request<Recipe>("/api/recipes/full",{method:"POST",body:JSON.stringify({request_id:requestId.current,title:d.title,materials:d.materials,selling_price_jpy:d.selling_price_jpy||null})});
    if(!alive.current)return;
-   active.current=false;recognition.current?.stop();setListening(false);
+   active.current=false;recognition.current?.stop();setListening(false);if(speechTimer.current)clearTimeout(speechTimer.current);speechChunks.current=[];
    say("レシピを保存しました。");onCreated(recipe);
    turnsRef.current=[];setTurns([]);draftRef.current=null;setDraft(null);requestId.current=null;setStage("dictating");
   }catch{setStage("review");say("保存結果を確認できませんでした。再送しても同じ登録IDを使用します。レシピ一覧を確認してから再試行してください。");}
@@ -67,6 +68,18 @@ export default function VoiceRecipeRegistration({locale,onCreated}:{locale:Local
   await parse(next);
  }
  function enqueue(s:string){pending.current=pending.current.then(()=>handle(s)).catch(()=>say("音声処理でエラーが発生しました。"));}
+ function flushSpeech(){if(speechTimer.current)clearTimeout(speechTimer.current);speechTimer.current=null;const chunks=speechChunks.current.splice(0);if(chunks.length)enqueue(chunks.join("、"));}
+ function collectSpeech(chunk:string){
+  const normalized=chunk.normalize("NFKC").replace(/[\s　、。．.!！?？,]+/g,"");
+  if(/^(内容を確認|内容を確認して|確認して|確認|登録を確定|登録を確定して|保存を確定|登録して|保存して|キャンセル|破棄|最初から)$/i.test(normalized)){
+   flushSpeech();enqueue(chunk);return;
+  }
+  speechChunks.current.push(chunk);
+  if(speechTimer.current)clearTimeout(speechTimer.current);
+  // SpeechRecognition final results are phrase fragments, not full sentences.
+  // Accumulate across pauses and transcribe as one coherent instruction.
+  speechTimer.current=setTimeout(flushSpeech,3500);
+ }
  function start(){
   const w=window as SpeechBrowser;const Constructor=w.SpeechRecognition||w.webkitSpeechRecognition;
   if(!Constructor){say("このブラウザは音声認識に対応していません。Chromeをご利用ください。");return;}
@@ -75,14 +88,14 @@ export default function VoiceRecipeRegistration({locale,onCreated}:{locale:Local
    if(!active.current||!alive.current)return;
    const r=new Constructor!();recognition.current=r;lastIndex.current=0;
    r.lang=ja?"ja-JP":"en-US";r.continuous=true;r.interimResults=false;
-   r.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){if(i<lastIndex.current||!e.results[i].isFinal)continue;lastIndex.current=i+1;enqueue(e.results[i][0].transcript);}};
+   r.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){if(i<lastIndex.current||!e.results[i].isFinal)continue;lastIndex.current=i+1;collectSpeech(e.results[i][0].transcript);}};
    r.onerror=e=>{if(e.error==="not-allowed"||e.error==="service-not-allowed"){active.current=false;setListening(false);say("マイクへのアクセスが許可されていません。");}};
    r.onend=()=>{if(recognition.current===r)recognition.current=null;if(active.current&&alive.current){try{open();}catch{active.current=false;setListening(false);say("マイクを再開できません。もう一度開始してください。");}}};
    r.start();
   }
   try{open();}catch{active.current=false;setListening(false);say("マイクを開始できませんでした。");}
  }
- function stop(){active.current=false;recognition.current?.stop();setListening(false);}
+ function stop(){active.current=false;recognition.current?.stop();flushSpeech();setListening(false);}
  return <section className="card" aria-label="音声レシピ一括登録">
   <h2>{ja?"音声でレシピを一括登録":"Full recipe by voice"}</h2>
   <p>料理名、食材、分量、仕入単価、売価を自然な言葉で伝えてください。訂正は続けて話せます。勝手に補完・保存しません。</p>
