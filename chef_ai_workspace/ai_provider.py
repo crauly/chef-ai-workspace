@@ -27,6 +27,10 @@ class ChatCompletionsProvider:
     api_key: str
     model: str
 
+    @property
+    def identity(self):
+        return {"name": "chat_completions", "model": self.model}
+
     def __post_init__(self):
         if not self.endpoint.startswith("https://") or not self.api_key or not self.model:
             raise ValueError("HTTPS endpoint, secret API key and model required")

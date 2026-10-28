@@ -107,6 +107,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy}: {
     <p role="status">{notice}</p>
     {review && <section className="proposal" aria-label={t("proposalDiff")}>
       <h3>{t("proposalDiff")}</h3><p className="muted">{t("originalInstruction")}: {review.instruction}</p>
+      {review.proposal.provider && <p className="tag">{review.proposal.provider.name === "meta_responses" ? "Meta Muse" : (locale === "ja" ? "代替モデル" : "Substitute model")} · {review.proposal.provider.model}</p>}
       {!valid ? <p role="alert">{t("staleProposal")}</p> : changes?.length ? <>
         <ol>{changes.map((change, i) => <li key={i}>{change}</li>)}</ol>
         <p>{t("proposalOnly")}</p>
