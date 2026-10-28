@@ -74,6 +74,20 @@ export default function VoiceModePanel({locale, onMode}: {
     } catch {setDiagnostic("Chat Completions 1.3: proxy_transport_error");}
     finally {setChecking(false);}
   }
+  async function checkVercelDirect() {
+    if(checking)return;
+    setChecking(true);setDiagnostic("");
+    try {
+      const response=await fetch("/api/vercel-direct-meta-check",{
+        method:"POST",headers:{"Content-Type":"application/json"},body:"{}",
+        signal:AbortSignal.timeout(30000)
+      });
+      const data:{status?:string;reason?:string}=await response.json();
+      setDiagnostic("Vercel Next.js → Meta Chat 1.3: "+[data.status||"unknown",
+        data.reason&&data.reason!=="unspecified"?data.reason:""].filter(Boolean).join(" / "));
+    }catch{setDiagnostic("Vercel Next.js → Meta Chat 1.3: transport_error");}
+    finally{setChecking(false);}
+  }
   async function checkVercelPython() {
     if(checking)return;
     setChecking(true);setDiagnostic("");
@@ -84,7 +98,8 @@ export default function VoiceModePanel({locale, onMode}: {
       });
       const data:{status?:string;reason?:string}=await response.json();
       setDiagnostic("Vercel Python / Chat 1.3: "+[data.status||"unknown",
-        data.reason&&data.reason!=="unspecified"?data.reason:""].filter(Boolean).join(" / "));
+        data.reason&&data.reason!=="unspecified"?data.reason:"",
+        typeof (data as {http_status?:unknown}).http_status==="number"?"HTTP "+(data as {http_status:number}).http_status:""].filter(Boolean).join(" / "));
     } catch {setDiagnostic("Vercel Python / Chat 1.3: proxy_transport_error");}
     finally {setChecking(false);}
   }
@@ -123,6 +138,7 @@ export default function VoiceModePanel({locale, onMode}: {
     <button type="button" onClick={() => setVolume(volume ? 0 : 0.5)}>{volume ? (ja ? "通知音をミュート" : "Mute cues") : (ja ? "通知音をオン" : "Unmute cues")}</button>
     <button type="button" disabled={checking} onClick={()=>void checkModel()}>{ja ? "Muse 1.3 / 1.2 / 1.1 比較テスト" : "Compare Muse 1.3 / 1.2 / 1.1"}</button>
     <button type="button" disabled={checking} onClick={()=>void checkChat()}>{ja ? "Muse Chat Completions APIテスト" : "Test Muse Chat Completions API"}</button>
+    <button type="button" disabled={checking} onClick={()=>void checkVercelDirect()}>{ja ? "Vercel直接Muse APIテスト" : "Test Muse directly from Vercel"}</button>
     <button type="button" disabled={checking} onClick={()=>void checkVercelPython()}>{ja ? "Vercel PythonでMuse接続テスト" : "Test Muse from Vercel Python"}</button>
     {checking && <p role="status">{ja ? "APIを検査しています（最大35秒）…" : "Checking API (up to 35 seconds)…"}</p>}
     {diagnostic && <p role="status">Meta inference: <strong>{diagnostic}</strong></p>}
