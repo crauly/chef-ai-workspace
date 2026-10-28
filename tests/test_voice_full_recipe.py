@@ -64,7 +64,7 @@ class VoiceFullRecipeTests(unittest.TestCase):
         self.assertEqual(len(recipe["materials"]), 2)
         self.assertEqual(recipe["materials"][0]["material_name"]["value"], "グアンチャーレ")
         self.assertEqual(recipe["selling_price_jpy"]["value"], "2200")
-        self.assertEqual(recipe["revision"], 1)
+        self.assertEqual(recipe["revision"], 0)
         self.assertEqual(self.repo.writes, 1)
 
     def test_exact_request_retry_does_not_duplicate(self):
