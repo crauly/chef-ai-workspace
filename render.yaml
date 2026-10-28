@@ -1,0 +1,23 @@
+# Chef AI Workspace hackathon demo only.
+# Import from Render Dashboard after PR review/merge; never deploy automatically.
+services:
+  - type: web
+    name: chef-ai-workspace-api
+    runtime: python
+    plan: free
+    branch: main
+    autoDeployTrigger: off
+    buildCommand: pip install -r requirements-api.txt
+    startCommand: uvicorn chef_ai_workspace.deploy_server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: SUPABASE_URL
+        value: https://dfvryaybdelgjxihdmth.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: MODEL_API_KEY
+        sync: false
+      - key: DEMO_OWNER_ID
+        sync: false
+      - key: DEMO_ACCESS_TOKEN
+        sync: false
