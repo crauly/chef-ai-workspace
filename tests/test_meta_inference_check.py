@@ -55,3 +55,12 @@ class TestMuseInferenceDiagnostic(unittest.TestCase):
             with self.subTest(code=code):
                 err=urllib.error.HTTPError("https://api.meta.ai/v1/responses",code,"secret raw error",{},None)
                 self.assertEqual(self.probe(error=err),expected)
+
+    def test_provider_404_exposes_only_safe_reason(self):
+        payload = b'{"error":{"type":"invalid_request_error","code":"model_not_found","message":"private account data"}}'
+        err = urllib.error.HTTPError("https://api.meta.ai/v1/responses",404,"not found",{},io.BytesIO(payload))
+        with patch("chef_ai_workspace.meta_responses.urllib.request.build_opener",
+                   return_value=Opener(error=err)):
+            result = MetaResponsesProvider("test-key").check_inference()
+        self.assertEqual(result, {"status":"model_unavailable","reason":"model_not_found"})
+        self.assertNotIn("private",str(result))

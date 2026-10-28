@@ -16,10 +16,12 @@ export async function POST(req:NextRequest){
   if(!upstream.ok)return response(upstream.status===404?"backend_outdated":"backend_error",502);
   const value:unknown=await upstream.json();
   const status=value&&typeof value==="object"?(value as {status?:unknown}).status:null;
+  const reason=value&&typeof value==="object"?(value as {reason?:unknown}).reason:null;
   const allowed=["inference_ready","unauthorized","forbidden","model_unavailable","rate_limited","request_rejected",
    "provider_error","connection_error","invalid_response","incomplete_response","unexpected_model_output",
    "response_too_large","not_configured","unsupported_provider"];
   if(typeof status!=="string"||!allowed.includes(status))return response("invalid_backend_response",502);
-  return response(status);
+  const reasons=["unspecified","model_not_found","model_access_denied","model_not_found_or_no_access","endpoint_not_found","authentication_error","permission_error"];
+  return NextResponse.json({status,reason:typeof reason==="string"&&reasons.includes(reason)?reason:"unspecified"},{headers:{"Cache-Control":"no-store"}});
  }catch{return response("proxy_transport_error",502);}
 }
