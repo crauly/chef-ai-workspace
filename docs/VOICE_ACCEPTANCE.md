@@ -113,7 +113,10 @@ source, audio, logs or committed environment files.
 
 ## User's next step
 
-No setup, API-key replacement or smartphone preparation is required to review
-this change. PR #48 contains the implementation, tests and evidence. The
-current hosted application remains unchanged. Merge and deployment require an
-explicit user instruction under the task's original release restriction.
+No setup, API-key replacement or smartphone preparation is required. Following
+the user's explicit merge instruction, PR #48 was merged as
+`6764daaa992705e942934ad34dd838fd557b0cbb` on 2026-10-29. Its automatic Vercel
+production deployment reached READY; GitHub's Vercel status for that SHA was
+successful. The existing hosted URL and access credentials are unchanged.
+The integration evidence above records local pre-release acceptance, not a
+claim that a new hosted live-database test was performed after deployment.

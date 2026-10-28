@@ -9,6 +9,9 @@ class Query:
     def in_(self,key,values): self.filters.append((key,tuple(values))); return self
     def single(self): return self
     def limit(self,n): return self
+    def ilike(self,key,value): self.filters.append(("ilike",key,value)); return self
+    def order(self,key,**kwargs): return self
+    def range(self,start,end): self.filters.append(("range",start,end)); return self
     def execute(self): return SimpleNamespace(data=self.result)
 
 class Client:
@@ -34,6 +37,13 @@ def sample():
         "cost_adjustment_jpy":value("0")}
 
 class AdapterTests(unittest.TestCase):
+    def test_name_search_retains_owner_filter_and_paginates_after_search(self):
+        c=Client();c.tables["recipes"]=[]
+        repo=SupabasePersistence(c)
+        self.assertEqual(repo.list_owned_recipes("user-a",offset=20,limit=20,search="50%_パスタ"),[])
+        self.assertIn(("owner_id","user-a"),c.queries[0].filters)
+        self.assertIn(("ilike","title","%50\\%\\_パスタ%"),c.queries[0].filters)
+        self.assertIn(("range",20,39),c.queries[0].filters)
     def test_decoding_preserves_provenance_and_quotes(self):
         r=decode_recipe(sample())
         self.assertEqual(r.materials[0].price_override.amount_jpy.value,"150")

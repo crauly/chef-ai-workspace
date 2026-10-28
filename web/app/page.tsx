@@ -1,5 +1,5 @@
 "use client";
-import {useCallback,useEffect,useState} from "react";
+import {useCallback,useEffect,useRef,useState} from "react";
 import {label, type Locale} from "./i18n";
 import AIEditor from "./AIEditor";
 import VoiceInput from "./VoiceInput";
@@ -11,6 +11,10 @@ export default function Library(){
  const [items,setItems]=useState<Item[]>([]),[selected,setSelected]=useState<Recipe|null>(null);
  const [draft,setDraft]=useState(""),[rename,setRename]=useState(""),[error,setError]=useState("");
  const [busy,setBusy]=useState(false),[page,setPage]=useState(1);
+ const [query,setQuery]=useState(""),[searchInput,setSearchInput]=useState("");
+ const listRequest=useRef(0);
+ const voiceTarget=useRef<string|null>(null);
+ const [loadingList,setLoadingList]=useState(false);
  const [waking,setWaking]=useState(false);
  const [cost,setCost]=useState<{partial:boolean;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean}|null>(null);
  const [food,setFood]=useState(""),[qty,setQty]=useState(""),[unit,setUnit]=useState("g"),[price,setPrice]=useState(""),[priceQty,setPriceQty]=useState("1"),[priceUnit,setPriceUnit]=useState("kg");
@@ -19,8 +23,29 @@ export default function Library(){
  useEffect(()=>{const current=localStorage.getItem("chef-ui-locale");if(current==="ja"||current==="en-US"){setLocale(current);document.documentElement.lang=current;}},[]);
  function switchLocale(next:Locale){setLocale(next);localStorage.setItem("chef-ui-locale",next);document.documentElement.lang=next;}
  useEffect(()=>{let active=true;setCost(null);if(selected){void request<{partial:boolean;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean}>(`/api/recipes/${selected.id}/cost`).then(result=>{if(active)setCost(result);}).catch(()=>{if(active)setCost(null);});}return()=>{active=false;};},[selected?.id,selected?.revision]);
- const reload=useCallback(async()=>{setWaking(false);try{setItems((await startupRead<{items:Item[]}>(`/api/recipes?page=${page}&page_size=20`,()=>setWaking(true))).items);setError("");}catch(e){setError(String(e));}finally{setWaking(false);}},[page]);
- useEffect(()=>{void reload();},[reload]);
+ const reload=useCallback(async()=>{
+   const current=++listRequest.current;setWaking(false);setLoadingList(true);
+   try{
+     const result=await startupRead<{items:Item[]}>(`/api/recipes?page=${page}&page_size=20&q=${encodeURIComponent(query)}`,()=>{if(current===listRequest.current)setWaking(true);});
+     if(current===listRequest.current){
+       setItems(result.items);setError("");
+       const fromVoice=voiceTarget.current===query;
+       if(fromVoice)voiceTarget.current=null;
+       if(fromVoice&&page===1&&result.items.length===1){
+         const recipe=await request<Recipe>(`/api/recipes/${result.items[0].id}`);
+         if(current===listRequest.current){setSelected(recipe);setRename(recipe.title.value||"");}
+       }
+     }
+   }catch(e){if(current===listRequest.current)setError(String(e));}
+   finally{if(current===listRequest.current){setWaking(false);setLoadingList(false);}}
+ },[page,query]);
+ useEffect(()=>{void reload();return()=>{listRequest.current++;};},[reload]);
+ function search(name:string,fromVoice=false){
+   voiceTarget.current=fromVoice&&name.trim()?name.trim():null;
+   listRequest.current++;setItems([]);setSelected(null);setPage(1);setLoadingList(true);
+   setSearchInput(name.trim());setQuery(name.trim());
+   if(page===1&&query===name.trim())void reload();
+ }
  async function create(e:React.FormEvent){e.preventDefault();if(!draft.trim())return;setBusy(true);
  try{const recipe=await request<Recipe>("/api/recipes",{method:"POST",body:JSON.stringify({title:draft.trim()})});setDraft("");if(page===1){await reload();}else{setPage(1);}setSelected(recipe);setRename(recipe.title.value||"");}
  catch(e){setError(String(e));}finally{setBusy(false);}}
@@ -56,17 +81,23 @@ export default function Library(){
    if(mode === "create") {
      setSelected(null);setPage(1);
      if (target.trim()) setDraft(target.trim());
-   } else if(mode === "browse") {setSelected(null);setPage(1);void reload();}
+   } else if(mode === "browse") {search(target,true);}
    else if(mode === "edit" && !selected && items.length === 1) {void open(items[0].id);}
  }
  return <main><header><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">日本語</option><option value="en-US">English (US)</option></select></label></div><h1>{t("library")}</h1><p className="muted">{t("intro")}</p></header>
  <VoiceModePanel locale={locale} onMode={handleVoiceMode}/>
  <VoiceRecipeRegistration locale={locale} onCreated={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");setError("");void reload();}}/>
  <form onSubmit={create}><input aria-label={t("newName")} placeholder={t("newName")} value={draft} onChange={e=>setDraft(e.target.value)}/><VoiceInput locale={locale} disabled={busy} onTranscript={setDraft}/><button disabled={busy||!draft.trim()}>{t("create")}</button></form>
+ <form onSubmit={e=>{e.preventDefault();search(searchInput);}}>
+  <input aria-label={locale==="ja"?"レシピ名で検索":"Search recipes by name"} maxLength={200} value={searchInput} onChange={e=>setSearchInput(e.target.value)}/>
+  <button type="submit" disabled={busy}>{locale==="ja"?"検索":"Search"}</button>
+  {query&&<button type="button" disabled={busy} onClick={()=>search("")}>{locale==="ja"?"検索を解除":"Clear search"}</button>}
+ </form>
+ {query&&<p role="status">{locale==="ja"?"検索中の料理名":"Recipe search"}: {query}</p>}
  {waking&&<p role="status" aria-live="polite">{locale==="ja"?"サーバーを起動しています。接続を再試行しています…":"Starting the server. Retrying connection…"}</p>}
  {error&&<p role="alert" className="error">{error}</p>}
- <div className="grid">{items.map(item=><section className="card" key={item.id}><h2>{item.title}</h2><p className="muted">Version {item.revision}</p><button disabled={busy} onClick={()=>void open(item.id)}>{t("details")}</button></section>)}</div>
- {items.length===0&&!error&&<p className="muted">{t("empty")}</p>}
+ <div className="grid" aria-busy={loadingList}>{items.map(item=><section className="card" key={item.id}><h2>{item.title}</h2><p className="muted">Version {item.revision}</p><button disabled={busy} onClick={()=>void open(item.id)}>{t("details")}</button></section>)}</div>
+ {items.length===0&&!error&&!loadingList&&<p className="muted">{query?(locale==="ja"?"一致するレシピがありません。":"No recipes match this name."):t("empty")}</p>}
  <div className="toolbar"><button disabled={page===1} onClick={()=>setPage(p=>p-1)}>{t("previous")}</button><span>{t("page")} {page}</span><button disabled={items.length<20} onClick={()=>setPage(p=>p+1)}>{t("next")}</button></div>
  {selected&&<section className="card"><div className="toolbar"><h2>{t("detail")}</h2><button disabled={busy} onClick={()=>setSelected(null)}>{t("close")}</button></div>
  <p className="tag">Revision {selected.revision}</p>

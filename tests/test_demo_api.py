@@ -15,8 +15,9 @@ class FakeRepo:
         return Recipe(recipe_id,TrackedValue("Risotto","confirmed","user"))
     def create_owned_recipe(self, owner, recipe, snapshot):
         self.created.append((owner,recipe,snapshot))
-    def list_owned_recipes(self, owner, *, offset, limit):
+    def list_owned_recipes(self, owner, *, offset, limit, search=""):
         self.calls.append((owner,offset,limit))
+        self.search = search
         return [{"id":str(uuid4()),"title":"Pasta","revision":0}]
 
 class DemoLibraryTests(unittest.TestCase):
@@ -79,6 +80,16 @@ class DemoLibraryTests(unittest.TestCase):
         r=self.client.get("/demo/recipes?page_size=999",
                           headers={"X-Demo-Access":"a-secret-known-only-to-presenter"})
         self.assertEqual(r.status_code,422)
+        self.assertEqual(self.repo.calls,[])
+
+    def test_search_is_scoped_and_validated_before_repository_access(self):
+        headers={"X-Demo-Access":"a-secret-known-only-to-presenter"}
+        response=self.client.get("/demo/recipes",params={"q":" 片栗粉 ","page":2},headers=headers)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(self.repo.search,"片栗粉")
+        self.assertEqual(self.repo.calls,[(self.owner,20,20)])
+        self.repo.calls=[]
+        self.assertEqual(self.client.get("/demo/recipes",params={"q":"x"*201},headers=headers).status_code,422)
         self.assertEqual(self.repo.calls,[])
 
 if __name__=="__main__": unittest.main()

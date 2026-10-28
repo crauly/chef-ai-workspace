@@ -23,7 +23,7 @@ export async function forward(req: NextRequest, id?: string, action: Action = ""
     if (body && new TextEncoder().encode(body).length > 65536) return failure(413);
     const path = "/demo/recipes" + (id ? "/" + encodeURIComponent(id) + action : action === "/full" ? action : "");
     const url = new URL(path, base);
-    if (!id) for (const name of ["page", "page_size"]) {
+    if (!id) for (const name of ["page", "page_size", "q"]) {
       const value = req.nextUrl.searchParams.get(name);
       if (value) url.searchParams.set(name, value);
     }

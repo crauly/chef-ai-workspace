@@ -2,10 +2,11 @@
 import {createServer} from "node:http";
 const id = "11111111-1111-4111-8111-111111111111", materialId = "22222222-2222-4222-8222-222222222222";
 const tracked = value => ({value, status: "confirmed", origin: "user"});
-let recipe, confirms, corrections, receipts;
+let recipe, confirms, corrections, receipts, browseItems, listQueries;
 function reset() {
   recipe = {id, title: tracked("片栗粉のレシピ"), revision: 0, materials: [{id: materialId, material_name: tracked("片栗粉"), quantity: tracked("10"), unit: "g", price_mode: "override", price_override: {amount_jpy: tracked("1000"), per_quantity: "1", per_unit: "kg"}}], selling_price_jpy: tracked("1000")};
   confirms = []; corrections = []; receipts = new Map();
+  browseItems = [{id, title: recipe.title.value, revision: recipe.revision}]; listQueries = [];
 }
 reset();
 createServer(async (req, res) => {
@@ -15,9 +16,19 @@ createServer(async (req, res) => {
   function send(status, value) {res.writeHead(status, {"Content-Type": "application/json"}); res.end(JSON.stringify(value));}
   if (path === "/test/reset") {reset(); return send(200, {});}
   if (path === "/test/advance") {recipe.revision++; recipe.materials[0].quantity = tracked("20"); return send(200, {});}
-  if (path === "/test/state") return send(200, {confirms, corrections, revision: recipe.revision});
+  if (path === "/test/search-fixtures") {
+    browseItems = [...Array.from({length: 21}, (_, i) => ({id: `00000000-0000-4000-8000-${String(i).padStart(12,"0")}`, title: "別の料理" + i, revision: 0})), {id, title: recipe.title.value, revision: 0}];
+    return send(200, {});
+  }
+  if (path === "/test/state") return send(200, {confirms, corrections, revision: recipe.revision, listQueries});
   if (req.headers["x-demo-access"] !== "test-only-backend-token") return send(403, {detail: "denied"});
-  if (path === "/demo/recipes") return send(200, {items: [{id, title: recipe.title.value, revision: recipe.revision}]});
+  if (path === "/demo/recipes") {
+    const params = new URL(req.url, "http://localhost").searchParams;
+    const q = params.get("q") || "", page = Number(params.get("page") || 1), size = Number(params.get("page_size") || 20);
+    listQueries.push({q, page});
+    const items = browseItems.filter(item => item.title.toLowerCase().includes(q.toLowerCase()));
+    return send(200, {items: items.slice((page - 1) * size, page * size)});
+  }
   if (path.endsWith("/cost")) return send(200, {total_cost_jpy: recipe.materials[0].quantity.value, cost_rate_pct: "1.0", estimated: false, partial: false});
   if (path.endsWith("/propose")) {
     if (body.instruction === "failure") return send(502, {detail: "private-test-only-backend-token"});
