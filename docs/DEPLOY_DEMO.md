@@ -2,6 +2,11 @@
 
 Target: **Vercel** for `web/` (Next.js), **Render Free** for FastAPI, and **only** the Chef AI Supabase project `dfvryaybdelgjxihdmth`. Never configure the restaurant operations database.
 
+## Render (manual Blueprint creation)
+- After review and merge of PR #27, select **New > Blueprint** in Render, connect the GitHub repository and use the root-level `render.yaml` on `main`. Review the proposed Free service before approving creation; no resource is created by committing the file.
+- `autoDeployTrigger: off` intentionally disables automatic releases. Set the four private values in the Render creation screen; never add them to `render.yaml` or GitHub.
+- If Render Blueprint import is unavailable, create one Python Web Service manually with the same build/start/health settings below.
+
 ## Render (manual web service)
 - Runtime: Python; root directory: repository root.
 - Build: `pip install -r requirements-api.txt`
