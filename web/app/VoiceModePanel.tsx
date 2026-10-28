@@ -51,8 +51,8 @@ export default function VoiceModePanel({locale, onMode}: {
     setChecking(true);setDiagnostic("");
     try {
       const response = await fetch("/api/model-inference-check",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
-      const data: {status?:string} = await response.json();
-      setDiagnostic(data.status || "unknown");
+      const data: {status?:string;reason?:string} = await response.json();
+      setDiagnostic([data.status || "unknown",data.reason && data.reason!=="unspecified" ? data.reason : ""].filter(Boolean).join(" / "));
     } catch {setDiagnostic("proxy_transport_error");}
     finally {setChecking(false);}
   }
