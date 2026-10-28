@@ -23,7 +23,7 @@ class Opener:
         self.response, self.error = response, error
     def open(self, request, timeout):
         assert timeout == 12
-        assert request.full_url == "https://api.meta.ai/v1/models"
+        assert request.full_url == "https://api.meta.ai/v1/models/muse-spark-1.3"
         assert request.get_header("Authorization") == "Bearer test-key"
         if self.error:
             raise self.error
@@ -37,15 +37,15 @@ class CheckConnectionTest(unittest.TestCase):
             return MetaResponsesProvider("test-key").check_connection()
 
     def test_model_is_available(self):
-        self.assertEqual(self.check({"object":"list","data":[{"id":"muse-spark-1.3"}]}),
+        self.assertEqual(self.check({"id":"muse-spark-1.3","object":"model"}),
                          {"status":"ready"})
 
     def test_model_unavailable(self):
-        self.assertEqual(self.check({"object":"list","data":[{"id":"other"}]}),
+        self.assertEqual(self.check(error=urllib.error.HTTPError("https://api.meta.ai/v1/models/muse-spark-1.3",404,"not found",{},None)),
                          {"status":"model_unavailable"})
 
     def test_malformed_response(self):
-        self.assertEqual(self.check({"data":"invalid"}),{"status":"invalid_response"})
+        self.assertEqual(self.check({"id":"other"}),{"status":"invalid_response"})
 
     def test_unauthorized(self):
         error=urllib.error.HTTPError("https://api.meta.ai/v1/models",401,"unauthorized",{},None)
