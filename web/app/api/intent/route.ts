@@ -36,8 +36,7 @@ export async function POST(req:NextRequest) {
         messages:[
           {role:"system",content:INSTRUCTION},
           {role:"user",content:JSON.stringify({utterance:record.utterance,current_mode:record.current_mode})}
-        ],
-        temperature:0
+        ]
       }),
       redirect:"error",cache:"no-store",signal:AbortSignal.timeout(22000)
     });
