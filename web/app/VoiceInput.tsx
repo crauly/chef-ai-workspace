@@ -60,7 +60,7 @@ export default function VoiceInput({locale, onTranscript, disabled = false}: {
     <button type="button" disabled={disabled || supported === false} onClick={recording ? stop : start} aria-pressed={recording} aria-label={recording ? "音声入力を停止" : "音声入力を開始"}>
       {recording ? (locale === "ja" ? "■ 録音終了" : "■ Stop microphone") : (locale === "ja" ? "🎙 マイクで話す" : "🎙 Speak")}
     </button>
-    <span role="status" aria-live="polite">{recording ? (locale === "ja" ? "聞き取り中…終了して内容を確認してください" : "Listening… stop and review the transcript") : supported === false ? (locale === "ja" ? "このブラウザでは音声入力を利用できません" : "Speech input not supported") : ""}</span>
+    <span aria-live="polite">{recording ? (locale === "ja" ? "聞き取り中…終了して内容を確認してください" : "Listening… stop and review the transcript") : supported === false ? (locale === "ja" ? "このブラウザでは音声入力を利用できません" : "Speech input not supported") : ""}</span>
     {error && <p role="alert" className="error">{error}</p>}
   </div>;
 }
