@@ -174,3 +174,22 @@ def record_demo_correction(recipe_id: UUID, body: CorrectionBody,
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return {"saved":True}
+
+
+class IntentBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    utterance: str = Field(min_length=1, max_length=1000)
+    current_mode: str = Field(default="idle", pattern="^(idle|create|browse|edit)$")
+
+
+@router.post("/intent")
+def classify_demo_intent(body: IntentBody, request: Request, ctx=Depends(demo_context)):
+    """Voice navigation classification; read-only and never an authorization decision."""
+    provider = getattr(request.app.state, "ai_provider", None)
+    if provider is None or not hasattr(provider, "classify_intent"):
+        raise HTTPException(503, "Meta intent model not configured")
+    from .ai_provider import ProposalProviderError
+    try:
+        return provider.classify_intent(body.utterance, body.current_mode)
+    except ProposalProviderError as exc:
+        raise HTTPException(502, "Voice intent model unavailable") from exc
