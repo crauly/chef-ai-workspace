@@ -23,7 +23,7 @@ class Opener:
         assert req.get_header("Authorization")=="Bearer test-key"
         assert timeout==22
         payload=json.loads(req.data)
-        assert payload["model"]=="muse-spark-1.3"
+        assert payload["model"] in ("muse-spark-1.3","muse-spark-1.2","muse-spark-1.1")
         assert payload["store"] is False
         if self.error: raise self.error
         return Response(self.data)
@@ -64,3 +64,9 @@ class TestMuseInferenceDiagnostic(unittest.TestCase):
             result = MetaResponsesProvider("test-key").check_inference()
         self.assertEqual(result, {"status":"model_unavailable","reason":"model_not_found"})
         self.assertNotIn("private",str(result))
+
+    def test_model_version_selection(self):
+        with patch("chef_ai_workspace.meta_responses.urllib.request.build_opener",
+                   return_value=Opener(envelope('{"intent":"browse","target":""}'))):
+            for model in ("muse-spark-1.3","muse-spark-1.2","muse-spark-1.1"):
+                self.assertEqual(MetaResponsesProvider("test-key").check_inference(model)["status"],"inference_ready")

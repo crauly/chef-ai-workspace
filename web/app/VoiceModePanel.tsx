@@ -49,12 +49,17 @@ export default function VoiceModePanel({locale, onMode}: {
     : {idle:"Idle",create:"Create",browse:"Browse",edit:"Edit"};
   async function checkModel() {
     setChecking(true);setDiagnostic("");
+    const models = ["muse-spark-1.3","muse-spark-1.2","muse-spark-1.1"];
     try {
-      const response = await fetch("/api/model-inference-check",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
-      const data: {status?:string;reason?:string} = await response.json();
-      setDiagnostic([data.status || "unknown",data.reason && data.reason!=="unspecified" ? data.reason : ""].filter(Boolean).join(" / "));
-    } catch {setDiagnostic("proxy_transport_error");}
-    finally {setChecking(false);}
+      const results = await Promise.all(models.map(async (model) => {
+        try {
+          const response = await fetch("/api/model-inference-check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model})});
+          const data: {status?:string;reason?:string} = await response.json();
+          return model + ": " + [data.status || "unknown",data.reason && data.reason !== "unspecified" ? data.reason : ""].filter(Boolean).join(" / ");
+        } catch {return model + ": proxy_transport_error";}
+      }));
+      setDiagnostic(results.join(" | "));
+    } finally {setChecking(false);}
   }
   async function dispatch(value: string) {
     if (busy) return;
@@ -89,7 +94,7 @@ export default function VoiceModePanel({locale, onMode}: {
     {busy && <p aria-live="polite">{ja ? "Museが内容を確認しています…" : "Muse is interpreting…"}</p>}
     <label>{ja ? "通知音の音量" : "Cue volume"} <input type="range" min="0" max="1" step="0.1" value={volume} onChange={e => setVolume(Number(e.target.value))} aria-label={ja ? "通知音の音量" : "Cue volume"}/></label>
     <button type="button" onClick={() => setVolume(volume ? 0 : 0.5)}>{volume ? (ja ? "通知音をミュート" : "Mute cues") : (ja ? "通知音をオン" : "Unmute cues")}</button>
-    <button type="button" disabled={checking} onClick={()=>void checkModel()}>{ja ? "Muse実推論テスト" : "Test real Muse inference"}</button>
+    <button type="button" disabled={checking} onClick={()=>void checkModel()}>{ja ? "Muse 1.3 / 1.2 / 1.1 比較テスト" : "Compare Muse 1.3 / 1.2 / 1.1"}</button>
     {diagnostic && <p role="status">Meta inference: <strong>{diagnostic}</strong></p>}
     {command && <p className="muted">{ja ? "認識した指示" : "Recognized"}: {command}</p>}
     {error && <p role="alert" className="error">{error}</p>}
