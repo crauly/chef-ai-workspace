@@ -13,7 +13,7 @@ export async function POST(req:NextRequest) {
       body:JSON.stringify({model:"muse-spark-1.3"}),
       redirect:"error",cache:"no-store",signal:AbortSignal.timeout(27000)
     });
-    if(!upstream.ok)return answer(upstream.status===404?"python_route_not_found":"python_runtime_error",502);
+    if(!upstream.ok)return NextResponse.json({status:"python_http_error",http_status:upstream.status},{status:502,headers:{"Cache-Control":"no-store"}});
     const result:unknown=await upstream.json();
     const status=result&&typeof result==="object"?(result as {status?:unknown}).status:null;
     const reason=result&&typeof result==="object"?(result as {reason?:unknown}).reason:null;
