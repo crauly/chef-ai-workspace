@@ -17,7 +17,7 @@ createServer(async (req, res) => {
   if (path === "/test/reset") {reset(); return send(200, {});}
   if (path === "/test/advance") {recipe.revision++; recipe.materials[0].quantity = tracked("20"); return send(200, {});}
   if (path === "/test/search-fixtures") {
-    browseItems = [...Array.from({length: 25}, (_, i) => ({id: `00000000-0000-4000-8000-${String(i).padStart(12,"0")}`, title: "別の料理" + i, revision: 0})), {id, title: recipe.title.value, revision: 0}];
+    browseItems = [...Array.from({length: 21}, (_, i) => ({id: `00000000-0000-4000-8000-${String(i).padStart(12,"0")}`, title: "別の料理" + i, revision: 0})), {id, title: recipe.title.value, revision: 0}];
     return send(200, {});
   }
   if (path === "/test/state") return send(200, {confirms, corrections, revision: recipe.revision, listQueries});

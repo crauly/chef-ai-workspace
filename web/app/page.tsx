@@ -29,8 +29,9 @@ export default function Library(){
      const result=await startupRead<{items:Item[]}>(`/api/recipes?page=${page}&page_size=20&q=${encodeURIComponent(query)}`,()=>{if(current===listRequest.current)setWaking(true);});
      if(current===listRequest.current){
        setItems(result.items);setError("");
-       if(voiceTarget.current===query&&result.items.length===1){
-         voiceTarget.current=null;
+       const fromVoice=voiceTarget.current===query;
+       if(fromVoice)voiceTarget.current=null;
+       if(fromVoice&&page===1&&result.items.length===1){
          const recipe=await request<Recipe>(`/api/recipes/${result.items[0].id}`);
          if(current===listRequest.current){setSelected(recipe);setRename(recipe.title.value||"");}
        }

@@ -42,6 +42,16 @@ test("Muse browse target from voice is used as the owner-scoped name query",asyn
   expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).listQueries).toContainEqual({q:"片栗粉",page:1});
   await expect(page.getByRole("region",{name:"Recipe cost summary"})).toContainText("¥10");
   expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).confirms).toHaveLength(0);
+  // Twenty-one matches: a single item on page two is not a unique recipe.
+  await page.route("**/api/intent",route=>route.fulfill({json:{intent:"browse",target:"別の料理"}}));
+  await page.getByRole("button",{name:"🎙 音声コマンドを話す",exact:true}).click();
+  await page.waitForTimeout(700);
+  await page.getByRole("button",{name:"■ 指示の聞き取りを終了",exact:true}).click();
+  await expect(page.getByRole("button",{name:"詳細を見る",exact:true})).toHaveCount(20);
+  await expect(page.getByRole("region",{name:"Recipe cost summary"})).toHaveCount(0);
+  await page.getByRole("button",{name:"次へ",exact:true}).click();
+  await expect(page.getByRole("button",{name:"詳細を見る",exact:true})).toHaveCount(1);
+  await expect(page.getByRole("region",{name:"Recipe cost summary"})).toHaveCount(0);
 });
 
 test("an old search response cannot overwrite a newer search",async({page})=>{
