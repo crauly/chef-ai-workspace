@@ -11,4 +11,6 @@ export async function middleware(req: NextRequest) {
   response.headers.set("Referrer-Policy", "same-origin");
   return response;
 }
-export const config = {runtime: "nodejs", matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"]};
+// Binary audio has its own identical Basic gate and security headers in the route.
+// Avoid Next 15 Node middleware's request-body cloning race for audio uploads.
+export const config = {runtime: "nodejs", matcher: ["/((?!_next/static|_next/image|favicon.ico|api/voice/transcribe).*)"]};
