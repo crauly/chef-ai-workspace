@@ -206,12 +206,17 @@ def check_demo_model_connection(request: Request, ctx=Depends(demo_context)):
     return provider.check_connection()
 
 
+class ModelInferenceCheckBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    model: str = Field(default="muse-spark-1.3", pattern=r"^muse-spark-1\\.[123]$")
+
+
 @router.post("/model-inference-check")
-def check_demo_model_inference(request: Request, ctx=Depends(demo_context)):
+def check_demo_model_inference(body: ModelInferenceCheckBody, request: Request, ctx=Depends(demo_context)):
     """Explicit operator-only real Muse inference, no recipe mutations or secrets."""
     provider = getattr(request.app.state, "ai_provider", None)
     if provider is None:
         return {"status": "not_configured"}
     if not hasattr(provider, "check_inference"):
         return {"status": "unsupported_provider"}
-    return provider.check_inference()
+    return provider.check_inference(body.model)
