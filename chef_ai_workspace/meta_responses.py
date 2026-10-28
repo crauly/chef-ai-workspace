@@ -167,7 +167,7 @@ class MetaResponsesProvider:
     def check_connection(self) -> dict:
         """Explicit, authenticated diagnostic. Never expose key or response content."""
         req = urllib.request.Request(
-            "https://api.meta.ai/v1/models",
+            "https://api.meta.ai/v1/models/" + self.model,
             method="GET",
             headers={"Authorization": "Bearer " + self.api_key},
         )
@@ -177,16 +177,19 @@ class MetaResponsesProvider:
             if len(data) > 65536:
                 return {"status": "invalid_response"}
             decoded = json.loads(data)
-            models = decoded.get("data") if isinstance(decoded, dict) else None
-            if not isinstance(models, list):
+            if not isinstance(decoded, dict):
                 return {"status": "invalid_response"}
-            available = any(isinstance(m, dict) and m.get("id") == self.model for m in models)
-            return {"status": "ready" if available else "model_unavailable"}
+            model_id = decoded.get("id")
+            if model_id == self.model:
+                return {"status": "ready"}
+            return {"status": "invalid_response"}
         except urllib.error.HTTPError as exc:
             status = exc.code
             exc.close()
             if status == 401:
                 return {"status": "unauthorized"}
+            if status == 404:
+                return {"status": "model_unavailable"}
             if status == 403:
                 return {"status": "forbidden"}
             if status == 429:
