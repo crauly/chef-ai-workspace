@@ -4,13 +4,6 @@ import type {Locale} from "./i18n";
 
 export type VoiceMode = "idle" | "create" | "browse" | "edit";
 type Cue = Exclude<VoiceMode, "idle"> | "error";
-export function classifyVoiceCommand(input: string): VoiceMode | "unknown" {
-  const text = input.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
-  if (/^(新規(登録|作成)?|新しいレシピ|レシピ(を)?作(成|って)|create(new)?recipe)/.test(text)) return "create";
-  if (/^(レシピ(を)?(見せて|見たい|参照|検索|開いて)|一覧(を)?(見せて|開いて)|show(recipes|recipe)|findrecipe|openrecipe)/.test(text)) return "browse";
-  if (/^(レシピ(を)?(編集|修正)|編集(して|する)?|修正(して|する)?|材料(を)?(追加|変更)|数量(を)?変更|単価(を)?変更|editrecipe|modifyrecipe)/.test(text)) return "edit";
-  return "unknown";
-}
 
 export function playVoiceCue(kind: Cue, volume: number): void {
   if (volume <= 0) return;
@@ -44,6 +37,7 @@ export default function VoiceModePanel({locale, onMode}: {
   locale: Locale; onMode: (mode: VoiceMode, command: string) => void;
 }) {
   const [mode, setMode] = useState<VoiceMode>("idle");
+  const [busy, setBusy] = useState(false);
   const [volume, setVolume] = useState(0.5);
   const [error, setError] = useState("");
   const [command, setCommand] = useState("");
@@ -51,24 +45,37 @@ export default function VoiceModePanel({locale, onMode}: {
   const modeLabels: Record<VoiceMode, string> = ja
     ? {idle:"待機",create:"新規作成",browse:"レシピ参照",edit:"編集"}
     : {idle:"Idle",create:"Create",browse:"Browse",edit:"Edit"};
-  function dispatch(value: string) {
-    const next = classifyVoiceCommand(value);
-    setCommand(value);
-    if (next === "unknown") {
-      setError(ja ? "操作を判断できませんでした。『新規作成』『レシピ参照』『編集』などと話してください。" : "Command unclear. Try create recipe, show recipes, or edit recipe.");
-      playVoiceCue("error", volume);
-      return;
-    }
-    setError("");
-    if (next !== mode && next !== "idle") playVoiceCue(next, volume);
-    setMode(next);
-    onMode(next, value);
+  async function dispatch(value: string) {
+    if (busy) return;
+    setBusy(true);setCommand(value);setError("");
+    try {
+      const response = await fetch("/api/intent", {
+        method: "POST",headers: {"Content-Type":"application/json"},
+        body:JSON.stringify({utterance:value,current_mode:mode}),
+      });
+      if (!response.ok) throw new Error("model");
+      const result: unknown = await response.json();
+      if (!result || typeof result !== "object") throw new Error("model");
+      const {intent,target} = result as {intent?:unknown;target?:unknown};
+      if (!["create","browse","edit","clarify"].includes(String(intent)) || typeof target !== "string") throw new Error("model");
+      if (intent === "clarify") {
+        setError(ja ? "指示を確認できませんでした。別の言い方でお願いします。" : "Please rephrase the request.");
+        playVoiceCue("error",volume);return;
+      }
+      const next = intent as VoiceMode;
+      if (next !== mode) playVoiceCue(next,volume);
+      setMode(next);onMode(next,target);
+    } catch {
+      setError(ja ? "Museの意図判定に接続できません。しばらくしてから再度お試しください。" : "Muse intent recognition is unavailable. Try again.");
+      playVoiceCue("error",volume);
+    } finally {setBusy(false);}
   }
-  return <section aria-label={ja ? "音声操作モード" : "Voice command mode"} className="card voice-mode-panel">
-    <h2>{ja ? "音声で操作を切り替える" : "Navigate by voice"}</h2>
-    <p className="muted">{ja ? "『新規作成』『レシピ参照』『編集』と話してください。録音した言葉に応じて画面が切り替わります。" : "Say Create recipe, Show recipes, or Edit recipe."}</p>
+  return <section aria-label={ja ? "音声操作モード" : "Voice command mode"} className="voice-mode-panel">
+    <h2>{ja ? "音声操作" : "Voice assistant"}</h2>
+    <p className="muted">{ja ? "やりたいことを自然に話してください。Museが操作を判断します。" : "Describe what you want to do. Muse will identify the action."}</p>
     <p aria-live="polite">{ja ? "現在のモード" : "Current mode"}: <strong>{modeLabels[mode]}</strong></p>
-    <ModeMicrophone locale={locale} onCommand={dispatch} />
+    <ModeMicrophone locale={locale} onCommand={dispatch} disabled={busy} />
+    {busy && <p aria-live="polite">{ja ? "Museが内容を確認しています…" : "Muse is interpreting…"}</p>}
     <label>{ja ? "通知音の音量" : "Cue volume"} <input type="range" min="0" max="1" step="0.1" value={volume} onChange={e => setVolume(Number(e.target.value))} aria-label={ja ? "通知音の音量" : "Cue volume"}/></label>
     <button type="button" onClick={() => setVolume(volume ? 0 : 0.5)}>{volume ? (ja ? "通知音をミュート" : "Mute cues") : (ja ? "通知音をオン" : "Unmute cues")}</button>
     {command && <p className="muted">{ja ? "認識した指示" : "Recognized"}: {command}</p>}
@@ -83,7 +90,7 @@ type Recognition = {
  start:()=>void;stop:()=>void;abort:()=>void;
 };
 type SpeechWindow = Window & {SpeechRecognition?:new()=>Recognition;webkitSpeechRecognition?:new()=>Recognition};
-function ModeMicrophone({locale,onCommand}:{locale:Locale;onCommand:(text:string)=>void}) {
+function ModeMicrophone({locale,onCommand,disabled}:{locale:Locale;onCommand:(text:string)=>void;disabled:boolean}) {
  const [listening,setListening]=useState(false),[supported,setSupported]=useState<boolean|null>(null),[message,setMessage]=useState("");
  const ref=useRef<Recognition|null>(null), final=useRef("");
  useEffect(()=>{const w=window as SpeechWindow;setSupported(Boolean(w.SpeechRecognition||w.webkitSpeechRecognition));return()=>{ref.current?.abort();ref.current=null;};},[]);
@@ -98,7 +105,7 @@ function ModeMicrophone({locale,onCommand}:{locale:Locale;onCommand:(text:string
   try{r.start();setListening(true);}catch{setMessage(locale==="ja"?"マイクを開始できませんでした。":"Could not start microphone.");}
  }
  return <div>
-   <button type="button" disabled={supported===false} onClick={()=>listening?ref.current?.stop():start()} aria-pressed={listening}>{listening?(locale==="ja"?"■ 指示の聞き取りを終了":"■ Stop listening"):(locale==="ja"?"🎙 音声コマンドを話す":"🎙 Say command")}</button>
+   <button type="button" disabled={supported===false || disabled} onClick={()=>listening?ref.current?.stop():start()} aria-pressed={listening}>{listening?(locale==="ja"?"■ 指示の聞き取りを終了":"■ Stop listening"):(locale==="ja"?"🎙 音声コマンドを話す":"🎙 Say command")}</button>
    {message&&<p role="alert">{message}</p>}
    {supported===false&&<p className="muted">{locale==="ja"?"このブラウザは音声認識に対応していません。":"Speech recognition unavailable."}</p>}
  </div>;
