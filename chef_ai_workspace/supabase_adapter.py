@@ -4,7 +4,9 @@ This module never reads credentials or creates a browser-facing service-role cli
 A trusted backend supplies the transport and derives owner_id from verified auth.
 """
 from dataclasses import asdict
+from postgrest.exceptions import APIError
 from .models import Recipe, MaterialLine, Ingredient, PriceQuote, TrackedValue
+from .mutations import MutationError
 
 def _tracked(raw):
     return TrackedValue(**raw)
@@ -100,7 +102,17 @@ class SupabasePersistence:
                       p_new_state=state, p_title=title,
                       p_cost_snapshot=cost_snapshot, p_payload_hash=payload_hash,
                       p_save_version=save_version)
-        response = self.client.rpc("commit_recipe_revision", params).execute()
+        try:
+            response = self.client.rpc("commit_recipe_revision", params).execute()
+        except APIError as exc:
+            # Preparation can succeed in both writers before the RPC row lock decides
+            # the winner. Surface only the RPC's known conflicts as HTTP 409 via the
+            # existing application boundary; do not disguise other database failures.
+            if exc.code == "P0001" and exc.message in (
+                "Stale recipe revision", "Request ID reused with a different mutation"
+            ):
+                raise MutationError(exc.message) from exc
+            raise
         if not isinstance(response.data, int):
             raise RuntimeError("Unexpected commit RPC response")
         return response.data
