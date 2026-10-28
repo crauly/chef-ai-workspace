@@ -77,6 +77,70 @@ def create_demo_recipe(body: CreateRecipeBody, ctx=Depends(demo_context)):
     return asdict(recipe)
 
 
+
+class CompleteRecipeMaterial(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=200)
+    quantity: str = Field(min_length=1, max_length=30)
+    unit: str = Field(pattern=r"^(g|kg|ml|L)$")
+    price_jpy: str = Field(min_length=1, max_length=30)
+    price_quantity: str = Field(min_length=1, max_length=30)
+    price_unit: str = Field(pattern=r"^(g|kg|ml|L)$")
+
+
+class CompleteRecipeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    title: str = Field(min_length=1, max_length=200)
+    materials: list[CompleteRecipeMaterial] = Field(max_length=40)
+    selling_price_jpy: str | None = None
+
+
+@router.post("/recipes/full", status_code=201)
+def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_context)):
+    """Validate every field before a single durable create. Idempotent recipe UUID."""
+    from .mutations import prepare_mutation
+    from dataclasses import replace
+    owner, repository = ctx
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(422, "Recipe title required")
+    operations = []
+    for material in body.materials:
+        if not material.name.strip():
+            raise HTTPException(422, "Ingredient name required")
+        operations.append({"op": "add_material", "material_id": str(uuid4()),
+                           "name": material.name.strip(), "quantity": material.quantity,
+                           "unit": material.unit, "price_jpy": material.price_jpy,
+                           "price_quantity": material.price_quantity,
+                           "price_unit": material.price_unit})
+    if body.selling_price_jpy is not None:
+        operations.append({"op": "set_selling_price", "value_jpy": body.selling_price_jpy})
+    recipe_id = str(body.request_id)
+    try:
+        existing = repository.load_owned_recipe(owner, recipe_id)
+    except ValueError:
+        existing = None
+    if existing is not None:
+        # An uncertain network retry must not create duplicates.
+        return asdict(existing)
+    recipe = Recipe(recipe_id, TrackedValue(title, "confirmed", "user"))
+    if operations:
+        try:
+            recipe = prepare_mutation(
+                recipe, Proposal(recipe_id, 0, recipe_id, tuple(operations)),
+                user_confirmed=True)
+        except (MutationError, ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(422, "Invalid spoken recipe values") from exc
+    # The Supabase create_owned_recipe RPC requires initial revision 0.
+    recipe = replace(recipe, revision=0)
+    try:
+        snapshot = _json(asdict(calculate_cost(recipe)))
+        repository.create_owned_recipe(owner, recipe, snapshot)
+    except ValueError as exc:
+        raise HTTPException(409, "Recipe already exists") from exc
+    return asdict(recipe)
+
 @router.post("/recipes/{recipe_id}/confirm")
 def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
                         ctx=Depends(demo_context)):
