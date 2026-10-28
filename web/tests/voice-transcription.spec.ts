@@ -1,5 +1,7 @@
 import {test, expect, type Page} from "@playwright/test";
-import {MAX_WAV_BYTES, transcribeWav, validWav, VOICE_MODEL} from "../app/voice-transcription";
+import {MAX_WAV_BYTES, transcribeWav, validWav, VOICE_MODEL, JAPANESE_VOICE_KEYWORDS} from "../app/voice-transcription";
+import {NextRequest} from "next/server";
+import {POST as parseRecipe} from "../app/api/voice-recipe/route";
 
 function wav(rate = 24_000, seconds = 1) {
   const b = Buffer.alloc(44 + rate * seconds * 2);
@@ -19,6 +21,7 @@ test("Meta Voice transport uses the documented multipart contract and preserves 
     const form = init?.body as FormData;
     expect(JSON.parse(await (form.get("request") as Blob).text())).toEqual({
       model: VOICE_MODEL, mode: "PUSH_TO_TALK", audioEncoding: "WAV", languageBias: ["Japanese"],
+      keywords: JAPANESE_VOICE_KEYWORDS,
     });
     expect(Buffer.from(await (form.get("audio") as Blob).arrayBuffer())).toEqual(audio);
     return Response.json({transcript: "片栗粉10g、いや15g。", sessionId: "private-session"});
@@ -42,6 +45,33 @@ test("English settings and malformed, empty, excessive or failed upstream respon
     Response.json({transcript: "x".repeat(1001)}), new Response("secret", {status: 401}),
     new Response("x".repeat(70_000)), new Response("bad JSON")]) {
     await expect(transcribeWav(wav(), "ja", "fixture", async () => response)).rejects.toThrow();
+  }
+});
+
+test("live-observed Spark notes-string response is rejected; typed notes array yields a reviewable draft", async () => {
+  const previousFetch = global.fetch, password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
+  process.env.DEMO_PREVIEW_PASSWORD = "test-only-preview-password-32-characters";
+  process.env.MODEL_API_KEY = "fixture-key";
+  try {
+    for (const notes of ["", []]) {
+      global.fetch = async (_, init) => {
+        const sent = JSON.parse(String(init?.body));
+        expect(sent.messages[0].content).toContain("notes MUST be an array of strings");
+        return Response.json({choices: [{message: {content: JSON.stringify({
+          title: "音声テスト", materials: [{name: "乾燥パスタ", quantity: "150", unit: "g", price_jpy: "350", price_quantity: "500", price_unit: "g"}],
+          selling_price_jpy: "1800", notes,
+        })}}]});
+      };
+      const response = await parseRecipe(new NextRequest("http://localhost/api/voice-recipe", {method: "POST",
+        headers: {Origin: "http://localhost", Authorization: "Basic " + Buffer.from("chef:" + process.env.DEMO_PREVIEW_PASSWORD).toString("base64")},
+        body: JSON.stringify({turns: ["乾燥パスタ150g、500g350円、売価1800円"]})}));
+      expect(response.status).toBe(Array.isArray(notes) ? 200 : 502);
+      if (Array.isArray(notes)) expect((await response.json()).missing).toEqual([]);
+    }
+  } finally {
+    global.fetch = previousFetch;
+    if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
+    if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
   }
 });
 

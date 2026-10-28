@@ -1,6 +1,6 @@
 # ADR-007: Separate audio capture, Muse transcription and culinary interpretation
 
-Status: Accepted for implementation (2026-10-29); live Voice inference and device acceptance pending.
+Status: Accepted; live Web / Voice / Spark / dedicated Supabase integration verified (2026-10-29).
 
 ## Context and decision
 
@@ -10,6 +10,10 @@ with Web Audio capture. Web captures audio; the Next.js server calls Muse Voice
 Transcribe; existing Muse Spark logic interprets recipe intent, terminology,
 quantities, packaging prices and corrections. Python retains validation,
 deterministic costing and persistence. No new provider abstraction or database.
+
+The hackathon deliverable is a Web application. Native clients and physical
+smartphone acceptance are outside this change's completion criteria; the WAV
+boundary simply keeps future input independent of browser recognition vendors.
 
 The existing Human Gate remains authoritative: full registration requires a
 separate review turn and explicit save, with missing/ambiguous data blocking it.
@@ -30,10 +34,11 @@ public feature page and official cookbook provide the implemented file contract.
   `mode=PUSH_TO_TALK`, `audioEncoding=WAV`, `languageBias=[Japanese]` or `[English]`.
 - Multipart `audio`: mono, signed 16-bit PCM RIFF/WAVE at 16 or 24 kHz.
 - JSON response: use the top-level `transcript`. Japanese is explicitly supported.
+- Japanese `keywords` provide bounded culinary hints without rewriting transcripts.
 
 Do not use `/audio/transcriptions`, assume WebM/MP4 support, or put credentials
-in a browser WebSocket. Official availability is not proof this account can
-invoke Voice or that it recognizes a particular kitchen recording correctly.
+in a browser WebSocket. Account access was subsequently verified with Japanese
+synthetic speech; that does not prove general kitchen recognition accuracy.
 
 ## Application audio boundary
 
@@ -72,11 +77,14 @@ before recording. This does not assert a provider-side retention policy.
 ## Verification and tradeoffs
 
 Fixture transport tests verify exact multipart/auth/schema and failures.
-Browser tests exercise actual Web Audio/worklet/WAV encoding with a synthetic
-microphone, then fixture transcription and existing Human Gate. These are not
-evidence of live Muse recognition. Existing Python and browser approval tests
-remain required. Live Japanese speech, cooking noise, mobile permission/recovery,
-latency and complete live database E2E remain acceptance work.
+Browser tests exercise actual Web Audio/worklet/WAV encoding and failure/cancel
+behavior. An additional opt-in test sends Japanese synthetic speech through the
+actual Voice and Spark APIs, reviews and explicitly saves the corrected draft
+to a fresh owner in dedicated Supabase, then reloads it. It checks zero writes
+before approval and one recipe/initial version afterward. See [acceptance
+evidence and reproduction](VOICE_ACCEPTANCE.md). Synthetic speech is not a
+recording of a person in a kitchen; no general accuracy, acoustic robustness or
+physical-device compatibility claim follows from this test.
 
 Batch WAV is the smallest deployable change using the current Next.js backend;
 it adds silence and upload latency. Realtime WebSocket endpointing is deferred

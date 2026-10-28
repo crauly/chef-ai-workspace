@@ -80,8 +80,11 @@ Gate. Recordings are sent to Meta and are not stored by the application.
 Cost calculation and data validation remain deterministic application responsibilities.
 
 See [ADR-007](docs/ADR_007_MUSE_VOICE_INPUT_BOUNDARY.md) for the verified API
-contract, limits and test evidence. Live Voice recognition and mobile/kitchen
-acceptance remain unverified; fixture tests do not establish model accuracy.
+contract and limits. [Live Web acceptance](docs/VOICE_ACCEPTANCE.md) verified
+Japanese synthetic speech through actual Voice/Spark APIs, explicit approval,
+dedicated Supabase persistence and reload. This is a Web hackathon submission;
+native apps and physical smartphone testing are outside this change's scope.
+The test does not establish general recognition accuracy in kitchen noise.
 
 ## Project Background
 

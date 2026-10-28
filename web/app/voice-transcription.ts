@@ -1,6 +1,8 @@
 // Server transport: never import into a client component. No persistence or logging.
 export const MAX_WAV_BYTES = 24_000 * 2 * 30 + 44;
 export const VOICE_MODEL = "muse-voice-transcribe-1.0";
+// Domain hints steer recognition without replacing or rewriting the transcript.
+export const JAPANESE_VOICE_KEYWORDS = ["食材", "使用量", "仕入単価", "仕入れ価格", "売価", "乾燥パスタ", "訂正"];
 
 export function validWav(audio: Uint8Array): boolean {
   if (audio.length < 46 || audio.length > MAX_WAV_BYTES) return false;
@@ -21,7 +23,8 @@ export async function transcribeWav(audio: Uint8Array, language: "ja" | "en-US",
   if (!validWav(audio)) throw new Error("Invalid audio");
   const form = new FormData();
   form.append("request", new Blob([JSON.stringify({model: VOICE_MODEL, mode: "PUSH_TO_TALK",
-    audioEncoding: "WAV", languageBias: [language === "ja" ? "Japanese" : "English"]})],
+    audioEncoding: "WAV", languageBias: [language === "ja" ? "Japanese" : "English"],
+    ...(language === "ja" ? {keywords: JAPANESE_VOICE_KEYWORDS} : {})})],
     {type: "application/json"}));
   form.append("audio", new Blob([new Uint8Array(audio)], {type: "audio/wav"}), "utterance.wav");
   const response = await transport("https://api.meta.ai/v1/asr/transcribe", {

@@ -45,8 +45,9 @@ The backend supports a dedicated Meta Responses adapter through server-only
 `MODEL_API_KEY`; see [Meta integration](../docs/META_RESPONSES.md). Model attribution
 is displayed with each proposal. Substitute adapters and browser fixtures are
 not evidence of Muse behavior; no automatic fallback is introduced. Codex CLI's
-401 is a separate authentication path. Voice/photo and real-device/live-database
-E2E remain separate work.
+401 is a separate authentication path. Live voice/database evidence is tracked
+separately in [VOICE_ACCEPTANCE.md](../docs/VOICE_ACCEPTANCE.md); photo and
+physical-device validation are outside this voice change.
 
 ## Audio input
 
@@ -73,9 +74,11 @@ PR. Other branches retain their existing behavior. This follows Vercel's
 `tests/voice-transcription.spec.ts` covers transport/schema failures, route
 access/size/format protection and actual Chromium audio encoding with fixture
 transcription. It does not send real recordings to Meta or touch Supabase.
-Manual acceptance still requires Japanese ingredient/quantity/correction
-recordings, mobile permission denial and restart, quiet/long turns, cooking
-noise and real recognition latency. Do not claim those passed from CI.
+`tests/live-voice.spec.ts` is separately opt-in and has passed with actual Muse
+Voice/Spark and dedicated Supabase. It uses Japanese synthetic speech through
+the actual Web Audio capture path. The Web hackathon scope does not require a
+native app or a physical smartphone. Real kitchen noise and arbitrary speakers
+remain usability evaluation, not a claim of these automated tests.
 
 ## Verification
 
@@ -85,3 +88,6 @@ use an isolated local fixture backend with no database or real model. Python
 tests additionally exercise real FastAPI validation, deterministic mutation/cost,
 explicit confirmation, replay, conflicts and correction registration using an
 in-memory repository. These do not prove live Supabase or real inference.
+
+For the separately executed live test, dedicated test-owner creation and
+verified cleanup, see [VOICE_ACCEPTANCE.md](../docs/VOICE_ACCEPTANCE.md).
