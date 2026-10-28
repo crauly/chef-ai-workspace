@@ -51,7 +51,7 @@ export default function VoiceRecipeRegistration({locale,onCreated}:{locale:Local
  async function handle(utterance:string){
   const value=utterance.trim().replace(/[。．.!！?？、，,]+$/g,"").trim();if(!value||phaseRef.current==="saving")return;
   // ASR often inserts spaces between Japanese words: 「登録 を 確定」.
-  const command=value.normalize("NFKC").replace(/[\\s　、。．.!！?？,]+/g,"");
+  const command=value.normalize("NFKC").replace(/[\s　、。．.!！?？,]+/g,"");
   if(/^(キャンセル|破棄|最初から|cancel)$/i.test(command)){clear();return;}
   if(/^(内容を確認|内容を確認して|確認して|確認|review)$/i.test(command)){
    const d=draftRef.current;
