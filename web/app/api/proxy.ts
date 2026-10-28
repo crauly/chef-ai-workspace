@@ -10,7 +10,7 @@ export async function forward(req: NextRequest, id?: string, action: Action = ""
   if (!await previewAuthorized(req)) return failure(403);
   if (id !== undefined && !uuid.test(id)) return failure(400);
   if (req.method === "POST" && req.headers.get("origin") !== req.nextUrl.origin) return failure(403);
-  const api = process.env.CHEF_FASTAPI_INTERNAL_URL;
+  // Browser tests use only the loopback mock; production never falls back to Render.\n  const localMock = process.env.FASTAPI_BASE_URL;\n  const api = process.env.CHEF_FASTAPI_INTERNAL_URL ||\n    (localMock && /^http:\\/\\/(127\\.0\\.0\\.1|localhost):\\d+$/.test(localMock) ? localMock : undefined);
   const key = process.env.DEMO_ACCESS_TOKEN;
   if (!api || !key) return failure(503);
   try {
