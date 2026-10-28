@@ -86,7 +86,7 @@ export default function VoiceRecipeRegistration({locale,onCreated}:{locale:Local
   <p>料理名、食材、分量、仕入単価、売価を自然な言葉で伝えてください。訂正は続けて話せます。勝手に補完・保存しません。</p>
   <p>音声操作：「内容を確認」→「登録を確定」。取り消しは「キャンセル」。</p>
   <button type="button" onClick={listening?stop:start} aria-pressed={listening}>{listening?"■ マイクを停止":"🎙 音声登録を開始"}</button>
-  <p role="status" aria-live="polite">{busy?"処理中：":""}{message}</p>
+  <p aria-live="polite">{busy?"処理中：":""}{message}</p>
   <form onSubmit={e=>{e.preventDefault();if(manual.trim()){enqueue(manual);setManual("");}}}>
    <input aria-label="音声認識できない場合の入力" value={manual} onChange={e=>setManual(e.target.value)} placeholder="音声認識できないときの補助入力"/>
    <button type="submit" disabled={!manual.trim()}>反映</button>
