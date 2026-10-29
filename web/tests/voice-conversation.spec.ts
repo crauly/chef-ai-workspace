@@ -127,7 +127,7 @@ test("audio recorded before review cannot approve the draft even when transcript
  let started!:()=>void;const sending=new Promise<void>(resolve=>{started=resolve;});
  let saves=0;
  await page.route("**/api/voice-recipe",route=>route.fulfill({json:draft}));
- await page.route("**/api/voice/transcribe",async route=>{started();await blocked;await route.fulfill({json:{transcript:"保存してください"}});});
+ await page.route("**/api/voice/transcribe",async route=>{started();await blocked;await route.fulfill({json:{transcript:"登録してください"}});});
  await page.route("**/api/recipes/full",async route=>{
   saves++;const body=route.request().postDataJSON();
   await route.fulfill({status:201,json:{id:body.request_id,title:{value:body.title},revision:0,materials:[],selling_price_jpy:{value:null}}});

@@ -118,3 +118,11 @@ must be started after saving or switching modes. Drafts remain when browsing;
 pending edit proposals must be saved or discarded before leaving them. Multiple
 search matches require target selection. See [ADR-008](../docs/ADR_008_UNIFIED_VOICE_WORKSPACE.md)
 for routing, capture epochs and voice/manual confirmation boundaries.
+
+After review, “登録”, “登録してください” and “レシピを登録してください”
+all approve the current unchanged draft through the normal save gate. During
+an active task these controls take precedence over navigation. If capture
+pauses, a stop/error cue and capture status explain it. Accepted queued audio
+finishes before “音声操作を再開” becomes available. The draft remains in the
+page; do not reload to resume. A failed ASR segment is identified as failed
+and may need repeating; other accepted segments are not discarded with it.

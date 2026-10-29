@@ -117,7 +117,7 @@ async function installMicrophone(page: Page) {
 test("real Web Audio capture sends WAV through transcription, review and explicit save only", async ({page}) => {
   await installMicrophone(page);
   let saved = 0, transcribed = 0;
-  const texts = ["カルボナーラ、卵100グラム、50グラム60円、売価1800円", "登録を確定", "内容を確認", "登録を確定"];
+  const texts = ["カルボナーラ、卵100グラム、50グラム60円、売価1800円", "登録を確定", "内容を確認", "登録"];
   await page.route("**/api/voice/transcribe", async route => {
     const data = route.request().postDataBuffer()!;
     expect(validWav(data)).toBe(true);
@@ -163,7 +163,7 @@ test("transcription failure stops capture, reports recovery and never sends a dr
   await page.waitForTimeout(700);
   await page.getByRole("button", {name: "■ マイクを停止", exact: true}).click();
   await expect(page.getByRole("region", {name: "音声操作モード"}).getByRole("alert")).toContainText("音声を文字にできませんでした");
-  await expect(page.getByRole("button", {name: "🎙 音声操作を開始", exact: true})).toBeEnabled();
+  await expect(page.getByRole("button", {name: "🎙 音声操作を再開", exact: true})).toBeEnabled();
   expect(mutations).toBe(0);
 });
 

@@ -29,6 +29,7 @@ export async function encodeWav(frames: Float32Array[], rate: number): Promise<A
 export function useVoiceCapture(locale: Locale, onTranscript: (text: string, meta?: VoiceCaptureMeta) => void, continuous = false) {
   const [recording, setRecording] = useState(false), [busy, setBusy] = useState(false);
   const [supported, setSupported] = useState<boolean | null>(null), [error, setError] = useState("");
+  const [notice,setNotice]=useState("");
   const callback = useRef(onTranscript); callback.current = onTranscript;
   const controls = useRef<{stop: () => void; abort: () => void; markReview: (epoch:number) => void} | null>(null);
   const reviewEpoch = useRef(0);
@@ -54,6 +55,7 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
     let pending = Promise.resolve(), requests = 0, closed = false;
     const aborter = new AbortController();
     const cleanup = () => {
+      if(closed)return;
       closed = true; stream?.getTracks().forEach(track => track.stop());
       if (node) {node.port.onmessage = null; node.disconnect();}
       if (context && context.state !== "closed") void context.close();
@@ -69,8 +71,8 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
       if (!voiced || !frames.length || !context) {frames = []; samples = 0; silent = 0; voiced = false; return;}
       const batch = frames, rate = context.sampleRate, capturedReview = speechReviewEpoch;
       frames = []; samples = 0; silent = 0; voiced = false;
-      // Bound queued audio when the network or semantic parser is slow.
-      if (requests >= 3) {abort(); setError(locale === "ja" ? "通信が追いつきません。内容を確認して再開してください。" : "Connection is too slow. Review and restart."); return;}
+      // Keep accepted audio. Short fragments are coalesced while two requests
+      // are pending; a third full batch pauses capture instead of aborting them.
       requests++; setBusy(true);
       pending = pending.then(async () => {
         if (!valid()) return;
@@ -85,16 +87,23 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
         if (typeof text !== "string" || !text.trim() || text.length > 1000) throw new Error("transcription");
         if (valid()) callback.current(text, {reviewEpoch:capturedReview});
       }).catch(() => {
-        if (valid()) {abort(); setError(locale === "ja" ? "音声を文字にできませんでした。未送信の音声は破棄しました。内容を確認して再開してください。" : "Transcription failed. Unsent audio discarded. Review and restart.");}
+        if (valid()) {
+          setError(locale === "ja" ? "一部の音声を文字にできませんでした。ほかの受信済み音声は処理を続けます。下書きを確認し、不足分を再開して話してください。" : "Some audio could not be transcribed. Other accepted audio will finish. Review and restart for missing content.");
+          controls.current?.stop();
+        }
       }).finally(() => {
         requests--; if (valid()) {setBusy(requests > 0); if (closed && requests === 0) {
           controls.current = null; if (releaseMicrophone === abort) releaseMicrophone = undefined;
         }}
       });
+      if(continuous&&requests>=3){
+        setNotice(locale==="ja"?"音声受付を一時停止しました。受信済みの音声は破棄せず処理します。完了後に「音声操作を再開」を押してください。下書きは保持しています。":"Capture paused. Accepted audio will finish. Resume afterward; the draft is retained.");
+        cleanup();
+      }
     };
     controls.current = {abort, markReview:epoch=>node?.port.postMessage({type:"review",epoch}), stop: () => {if (!closed) {submit(); cleanup();} if (!requests) controls.current = null;}};
     releaseMicrophone = abort;
-    setError(""); setRecording(true);
+    setError("");setNotice(""); setRecording(true);
     try {
       stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: true, noiseSuppression: true}});
       if (!valid() || closed) {stream.getTracks().forEach(track => track.stop()); return;}
@@ -113,14 +122,14 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
         // Keep a short lead-in; never upload an idle microphone.
         if (!voiced && samples > rate * 0.3) {samples -= frames.shift()!.length;}
         // Local silence detection only delimits audio. Muse does all transcription.
-        if (voiced && (silent >= rate * VOICE_SILENCE_MS / 1000 || samples >= rate * 29)) {
+        if (voiced && ((silent >= rate * VOICE_SILENCE_MS / 1000&&requests<2) || samples >= rate * 29)) {
           submit(); if (!continuous) cleanup();
         }
       };
-      stream.getTracks().forEach(track => {track.onended = () => {if (!closed && valid()) {abort(); setError(locale === "ja" ? "マイクが切断されました。再開してください。" : "Microphone disconnected. Restart recording.");}};});
+      stream.getTracks().forEach(track => {track.onended = () => {if (!closed && valid()) {controls.current?.stop();setError(locale === "ja" ? "マイクが切断されました。受信済みの音声の処理後に再開してください。" : "Microphone disconnected. Resume after accepted audio finishes.");}};});
     } catch {
       if (valid()) {abort(); setError(locale === "ja" ? "マイクを開始できません。権限と対応ブラウザを確認してください。" : "Could not start microphone. Check permission and browser support.");}
     }
   }
-  return {recording, busy, supported, error, start, stop, cancel, markReview};
+  return {recording, busy, supported, error,notice, start, stop, cancel, markReview};
 }
