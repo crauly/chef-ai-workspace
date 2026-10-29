@@ -1,5 +1,5 @@
 "use client";
-import {useEffect,useRef,useState} from "react";
+import {useEffect,useImperativeHandle,useRef,useState,type Ref} from "react";
 import type {Locale} from "./i18n";
 import {request,type Recipe} from "./types";
 import {useVoiceCapture,type VoiceCaptureMeta} from "./useVoiceCapture";
@@ -10,7 +10,8 @@ type Interpretation={source:string;suggestion:string;reason:string};
 type Draft={title:string;materials:Ingredient[];selling_price_jpy:string;notes:string[];missing:string[];interpretations?:Interpretation[]};
 type Input={text:string;command:VoiceCommand;revision:number;approval:Draft|null};
 
-export default function VoiceRecipeRegistration({locale,onCreated}:{locale:Locale;onCreated:(recipe:Recipe)=>void}){
+export type RegistrationHandle={submit:(text:string,meta?:VoiceCaptureMeta)=>void;hasPending:()=>boolean;isSaving:()=>boolean;suspend:()=>void};
+export default function VoiceRecipeRegistration({locale,onCreated,control,sharedVoice}:{locale:Locale;onCreated:(recipe:Recipe)=>void;control?:Ref<RegistrationHandle>;sharedVoice?:{markReview:()=>number;cancel:()=>void}}){
  const ja=locale==="ja";
  const [busy,setBusy]=useState(false),[turns,setTurns]=useState<string[]>([]),[draft,setDraft]=useState<Draft|null>(null);
  const [phase,setPhase]=useState<"dictating"|"review"|"saving">("dictating");
@@ -21,7 +22,11 @@ export default function VoiceRecipeRegistration({locale,onCreated}:{locale:Local
  const approvalEpoch=useRef(0);
  const inbox=useRef<Input[]>([]),draining=useRef(false),revision=useRef(0),epoch=useRef(0);
  const requestId=useRef<string|null>(null),semanticAbort=useRef<AbortController|null>(null),alive=useRef(true);
- const voice=useVoiceCapture(locale,enqueue,true);
+ const capture=useVoiceCapture(locale,enqueue,true);
+ const voice={...capture,...sharedVoice};
+ useImperativeHandle(control,()=>({submit:enqueue,hasPending:()=>Boolean(dataTurns.current.length||inbox.current.length||draftRef.current),isSaving:()=>phaseRef.current==="saving",suspend:()=>{
+  reviewed.current=null;inbox.current=inbox.current.filter(input=>input.command==="data");setStage("dictating");
+ }}));
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;semanticAbort.current?.abort();inbox.current=[];};},[]);
  function setStage(next:"dictating"|"review"|"saving"){phaseRef.current=next;setPhase(next);}
  function say(text:string){if(alive.current)setMessage(text);}
@@ -63,8 +68,8 @@ export default function VoiceRecipeRegistration({locale,onCreated}:{locale:Local
    const recipe=await request<Recipe>("/api/recipes/full",{method:"POST",body:JSON.stringify({request_id:requestId.current,title:d.title,materials:d.materials,selling_price_jpy:d.selling_price_jpy||null})});
    if(!alive.current)return;
    epoch.current++;revision.current++;inbox.current=[];
-   dataTurns.current=[];draftRef.current=null;reviewed.current=null;setDraft(null);requestId.current=null;setStage("dictating");
-   say("レシピを保存しました。");onCreated(recipe);
+   dataTurns.current=[];setTurns([]);draftRef.current=null;reviewed.current=null;setDraft(null);requestId.current=null;setStage("dictating");
+   say(sharedVoice?"保存済みです。":"レシピを保存しました。");onCreated(recipe);
   }catch{setStage("review");say("保存結果を確認できませんでした。再送時も同じ登録IDを使います。一覧を確認してから再試行してください。");}
   finally{if(alive.current&&!draining.current)setBusy(false);}
  }
@@ -115,15 +120,15 @@ export default function VoiceRecipeRegistration({locale,onCreated}:{locale:Local
   <p>料理名、食材、分量、仕入単価、売価を自然な言葉で伝えてください。料理の文脈を解釈し、変更案を下書きで確認できます。</p>
   <p>「内容を確認」「保存してください」などで確認へ進みます。確認後、もう一度の明示承認で保存します。キャンセルは下書きを破棄します。</p>
   <p>{ja?"音声はMetaへ送信して文字起こしします。録音は保存しません。発話の間を約1秒空けると解釈します。":"Audio is sent to Meta and not stored. Pause for about one second between turns."}</p>
-  <button type="button" disabled={!voice.recording&&(voice.supported===false||voice.busy||phase==="saving")} onClick={voice.recording?voice.stop:()=>void voice.start()} aria-pressed={voice.recording}>{voice.recording?"■ マイクを停止":"🎙 音声登録を開始"}</button>
+  {!sharedVoice&&<><button type="button" disabled={!voice.recording&&(voice.supported===false||voice.busy||phase==="saving")} onClick={voice.recording?voice.stop:()=>void voice.start()} aria-pressed={voice.recording}>{voice.recording?"■ マイクを停止":"🎙 音声登録を開始"}</button>
   <p aria-live="polite">{voice.recording?"聞き取り中… ":""}{voice.busy?"音声を文字にしています…":""}</p>
   {voice.error&&<p role="alert">{voice.error}</p>}
-  {voice.supported===false&&<p>音声入力を利用できません。補助入力を使用してください。</p>}
+  {voice.supported===false&&<p>音声入力を利用できません。補助入力を使用してください。</p>}</>}
   <p aria-live="polite">{busy?"処理中：":""}{message}</p>
-  <form onSubmit={event=>{event.preventDefault();if(manual.trim()){enqueue(manual);setManual("");}}}>
+  {!sharedVoice&&<form onSubmit={event=>{event.preventDefault();if(manual.trim()){enqueue(manual);setManual("");}}}>
    <input aria-label="音声認識できない場合の入力" value={manual} onChange={event=>setManual(event.target.value)} placeholder="音声認識できないときの補助入力" disabled={phase==="saving"}/>
    <button type="submit" disabled={!manual.trim()||phase==="saving"}>反映</button>
-  </form>
+  </form>}
   <button type="button" disabled={busy||!dataTurns.current.length||phase==="saving"} onClick={retry}>解析を再試行</button>
   <p>認識した発話：{turns.length?turns.join(" ／ "):"なし"}</p>
   {draft&&<div aria-label="未保存のレシピ下書き">

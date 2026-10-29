@@ -107,3 +107,14 @@ For natural save requests, visible culinary title suggestions, retry behavior,
 capture-time approval boundaries and measured latency limits, see
 [the conversation regression report](../docs/VOICE_CONVERSATION_FIX.md).
 Review/save controls do not make another Spark request.
+
+## Continuous voice workspace
+
+The main screen now has one microphone and one fallback text input for
+registration, reference and editing. Say “レシピを登録します”, dictate the
+recipe, review and explicitly save; then “ペペロンチーノを見せて” and speak a
+change. Each actual mode transition plays its distinct cue. No second microphone
+must be started after saving or switching modes. Drafts remain when browsing;
+pending edit proposals must be saved or discarded before leaving them. Multiple
+search matches require target selection. See [ADR-008](../docs/ADR_008_UNIFIED_VOICE_WORKSPACE.md)
+for routing, capture epochs and voice/manual confirmation boundaries.

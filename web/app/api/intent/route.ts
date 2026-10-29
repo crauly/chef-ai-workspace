@@ -11,6 +11,7 @@ const INSTRUCTION = [
   "target is the explicitly named recipe, or an empty string if not specified.",
   "Create starts a new recipe; browse searches or views a recipe; edit modifies the selected recipe.",
   "If unclear, conflicting or garbled, choose clarify.",
+  "Questions about existing data, thanks, or negated editing do not request a modification; use browse or clarify, never edit.",
   "Never save, delete, approve, modify data or authorize any operation."
 ].join(" ");
 
@@ -33,6 +34,7 @@ export async function POST(req:NextRequest) {
       headers:{"Authorization":"Bearer "+key,"Content-Type":"application/json"},
       body:JSON.stringify({
         model:"muse-spark-1.3",
+        reasoning_effort:"low",max_completion_tokens:2048,
         messages:[
           {role:"system",content:INSTRUCTION},
           {role:"user",content:JSON.stringify({utterance:record.utterance,current_mode:record.current_mode})}

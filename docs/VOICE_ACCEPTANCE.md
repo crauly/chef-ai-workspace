@@ -118,7 +118,33 @@ commands, combined review/save requests or dish-name normalization. See
 [the corrective implementation and new live evidence](VOICE_CONVERSATION_FIX.md).
 The original evidence below is historical, not proof that those cases worked.
 
-## User's next step
+## Unified continuous voice acceptance — 2026-10-29
+
+The later opt-in complaint case now covers a single microphone session through
+actual Muse Voice/Spark and the existing dedicated database backend: registration
+→ review and explicit save (zero recipes before approval, one recipe/one version
+afterward, cost 216 yen) → spoken name retrieval → spoken pasta correction from
+100g to 150g → displayed proposal → a later spoken save → one recipe/two versions,
+revision 1, cost 251 yen → reload with the same cost. The test asserted exactly
+one microphone open across that conversation. A manufacturer recognition error
+was explicitly corrected with text; this is not an entirely voice-only run or
+a guarantee for arbitrary speakers. Selling price remained unset.
+
+The first integration trial exposed microphone suppression during transition
+cues erasing a following dish name. The audio-discarding code was removed and
+the repeated live trial retained the dish name and completed the workflow.
+Echo cancellation is requested from the browser; physical acoustic feedback
+and kitchen noise remain unverified. The fixture test additionally checks the
+exact three cue motifs and no repeat cue on same-mode turns.
+
+The temporary owner was removed by normal test-backend shutdown; all six
+owner-scoped table counts were zero. No user's existing recipe/draft was saved,
+deleted or modified. This is pre-release local live integration, not an
+authenticated hosted end-to-end test. See [ADR-008](ADR_008_UNIFIED_VOICE_WORKSPACE.md).
+The complaint audio directory now also needs `browse.wav` and `edit.wav` in the
+same documented PCM format. No fixture audio or secrets are committed.
+
+## Historical release note — PR #48
 
 No setup, API-key replacement or smartphone preparation is required. Following
 the user's explicit merge instruction, PR #48 was merged as

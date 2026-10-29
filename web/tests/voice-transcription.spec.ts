@@ -162,12 +162,12 @@ test("transcription failure stops capture, reports recovery and never sends a dr
   await page.getByRole("button", {name: "🎙 音声登録を開始", exact: true}).click();
   await page.waitForTimeout(700);
   await page.getByRole("button", {name: "■ マイクを停止", exact: true}).click();
-  await expect(page.getByRole("region", {name: "音声レシピ一括登録"}).getByRole("alert")).toContainText("音声を文字にできませんでした");
+  await expect(page.getByRole("region", {name: "音声操作モード"}).getByRole("alert")).toContainText("音声を文字にできませんでした");
   await expect(page.getByRole("button", {name: "🎙 音声登録を開始", exact: true})).toBeEnabled();
   expect(mutations).toBe(0);
 });
 
-test("switching microphones discards an in-flight transcript from the previous input", async ({page}) => {
+test("leaving the shared microphone discards an in-flight transcript", async ({page}) => {
   await installMicrophone(page);
   let parsed = 0;
   await page.route("**/api/voice-recipe", route => {parsed++; return route.fulfill({status: 500});});
@@ -184,9 +184,10 @@ test("switching microphones discards an in-flight transcript from the previous i
   await page.waitForTimeout(700);
   await page.getByRole("button", {name: "■ マイクを停止", exact: true}).click();
   await sending;
-  await page.getByRole("button", {name: "🎙 音声コマンドを話す", exact: true}).click();
+  await expect(page.getByRole("button", {name: /🎙/})).toHaveCount(1);
+  await page.reload();
   release(); await page.waitForTimeout(300);
   expect(parsed).toBe(0);
-  await expect(page.getByText("認識した発話：なし")).toBeVisible();
+  await expect(page.getByLabel("未保存のレシピ下書き")).toHaveCount(0);
   await page.reload();
 });
