@@ -92,6 +92,22 @@ This project is inspired by real operational challenges encountered while develo
 
 Chef AI Workspace is an independent hackathon project. Its implementation does not depend on the existing private Ricetta-OS system.
 
-## Status
+## Ingredient and procurement assistance — implementation design
+
+The product direction includes reusable ingredient records, supplier-specific
+purchase information, price-change awareness, a notification bell and
+source-backed alternative purchasing suggestions for small restaurants.
+These are core assistance goals; the complete workflow is **not implemented**.
+Voice transcription alone does not satisfy them.
+
+See [ADR-009](docs/ADR_009_INGREDIENT_PROCUREMENT_ASSISTANCE.md),
+[detailed design](docs/INGREDIENT_PRICE_DESIGN.md),
+[implementation checklist](docs/IMPLEMENTATION_PLAN_MASTER_PRICE.md), and
+[alternating Muse/Codex handoff](docs/MUSE_CODEX_HANDOFF.md).
+Price-check scheduling, thresholds and external retrieval choices still require
+explicit design decisions; no automatic monitoring or purchasing is enabled by
+these documents.
+
+## Development status
 
 Early development — Meta Global AI Developer Hackathon 2026.
