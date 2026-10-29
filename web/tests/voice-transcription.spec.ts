@@ -57,6 +57,8 @@ test("live-observed Spark notes-string response is rejected; typed notes array y
       global.fetch = async (_, init) => {
         const sent = JSON.parse(String(init?.body));
         expect(sent.messages[0].content).toContain("notes MUST be an array of strings");
+        expect(sent.messages[0].role).toBe("developer");
+        expect(sent.reasoning_effort).toBe("low");
         return Response.json({choices: [{message: {content: JSON.stringify({
           title: "音声テスト", materials: [{name: "乾燥パスタ", quantity: "150", unit: "g", price_jpy: "350", price_quantity: "500", price_unit: "g"}],
           selling_price_jpy: "1800", notes,
@@ -140,7 +142,7 @@ test("real Web Audio capture sends WAV through transcription, review and explici
   await expect(page.getByText("未保存の下書き：カルボナーラ")).toBeVisible();
   expect(saved).toBe(0);
   await recordTurn();
-  await expect(page.getByText('先に「内容を確認」と話してください。')).toBeVisible();
+  await expect(page.getByText(/^確認用の下書きを表示しました。/)).toBeVisible();
   expect(saved).toBe(0);
   await recordTurn();
   await expect(page.getByRole("button", {name: "内容を承認して保存"})).toBeEnabled();

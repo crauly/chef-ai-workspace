@@ -62,7 +62,7 @@ weaken auth, or claim that a native app already exists. Future production auth
 must follow ADR-006.
 
 Web uses an AudioWorklet and resamples to 24 kHz with OfflineAudioContext.
-A 3.5-second quiet gap delimits an utterance; 29 seconds caps a segment. These
+A roughly one-second quiet gap delimits an utterance; 29 seconds caps a segment. These
 are local recording heuristics, not linguistic interpretation or provider VAD.
 Continuous recipe capture queues at most three segments; overload or failure
 stops recording and discards unsent audio with an explicit recovery message.
@@ -90,3 +90,12 @@ Batch WAV is the smallest deployable change using the current Next.js backend;
 it adds silence and upload latency. Realtime WebSocket endpointing is deferred
 until evidence justifies an additional streaming server. No merge or deployment
 is part of this change.
+
+## 2026-10-29 conversation follow-up
+
+The user acceptance regression and revised evidence are recorded in
+[VOICE_CONVERSATION_FIX.md](VOICE_CONVERSATION_FIX.md). Culinary title
+normalization is a visible proposal, never a rewrite of source speech or an
+authorization to save. Review is bound to the unchanged draft and a capture
+thread epoch, so delayed pre-review speech cannot approve it. The versioned
+worklet preserves compatibility for already-open older clients.

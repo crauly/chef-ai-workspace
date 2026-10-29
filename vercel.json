@@ -2,7 +2,8 @@
   "git": {
     "deploymentEnabled": {
       "feat/muse-voice-transcription": false,
-      "fix/voice-recipe-retrieval": false
+      "fix/voice-recipe-retrieval": false,
+      "fix/voice-understanding-and-confirmation": false
     }
   },
   "services": {

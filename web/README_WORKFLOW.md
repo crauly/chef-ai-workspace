@@ -62,8 +62,11 @@ All microphone entry points use Web Audio, not browser speech recognition.
 HTTPS (or localhost), microphone permission and AudioWorklet support are
 required; typed input remains available. Audio is sent to Meta through the
 protected server-only `/api/voice/transcribe` route. The app does not retain
-recordings. Pause 3.5 seconds between recipe turns, especially between review
-and explicit save. The stop button flushes the last voiced segment. Changing
+recordings. Pause for about one second between turns. A save request such as
+「保存してください」first presents the current draft for review; a later explicit
+request approves that reviewed draft. A combined review/save sentence is one
+request and cannot approve a draft that was not already presented. The stop
+button flushes the last voiced segment. Changing
 microphones, discarding a draft, navigation or a transcription error cancels
 pending audio. On failure, review the visible draft before restarting.
 
@@ -99,3 +102,8 @@ in-memory repository. These do not prove live Supabase or real inference.
 
 For the separately executed live test, dedicated test-owner creation and
 verified cleanup, see [VOICE_ACCEPTANCE.md](../docs/VOICE_ACCEPTANCE.md).
+
+For natural save requests, visible culinary title suggestions, retry behavior,
+capture-time approval boundaries and measured latency limits, see
+[the conversation regression report](../docs/VOICE_CONVERSATION_FIX.md).
+Review/save controls do not make another Spark request.
