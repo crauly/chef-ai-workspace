@@ -22,7 +22,7 @@ test("name search reaches the backend beyond the first page, clears and never wr
   await expect(page.getByText("一致するレシピがありません。")).toBeVisible();
 });
 
-test("Muse browse target from voice is used as the owner-scoped name query",async({page,request})=>{
+test("browse target from the shared microphone is used as the owner-scoped name query",async({page,request})=>{
   await page.addInitScript(()=>{
     Object.defineProperty(navigator.mediaDevices,"getUserMedia",{value:async()=>{
       const context=new AudioContext(), source=context.createOscillator(), gain=context.createGain(), output=context.createMediaStreamDestination();
@@ -34,9 +34,9 @@ test("Muse browse target from voice is used as the owner-scoped name query",asyn
   await page.route("**/api/voice/transcribe",route=>route.fulfill({json:{transcript:"片栗粉のレシピを見せて"}}));
   await page.route("**/api/intent",route=>route.fulfill({json:{intent:"browse",target:"片栗粉"}}));
   await page.goto("/");
-  await page.getByRole("button",{name:"🎙 音声コマンドを話す",exact:true}).click();
+  await page.getByRole("button",{name:"🎙 音声操作を開始",exact:true}).click();
   await page.waitForTimeout(700);
-  await page.getByRole("button",{name:"■ 指示の聞き取りを終了",exact:true}).click();
+  await page.getByRole("button",{name:"■ マイクを停止",exact:true}).click();
   await expect(page.getByLabel("レシピ名で検索")).toHaveValue("片栗粉");
   await expect(page.getByRole("button",{name:"詳細を見る",exact:true})).toHaveCount(1);
   expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).listQueries).toContainEqual({q:"片栗粉",page:1});
@@ -44,9 +44,10 @@ test("Muse browse target from voice is used as the owner-scoped name query",asyn
   expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).confirms).toHaveLength(0);
   // Twenty-one matches: a single item on page two is not a unique recipe.
   await page.route("**/api/intent",route=>route.fulfill({json:{intent:"browse",target:"別の料理"}}));
-  await page.getByRole("button",{name:"🎙 音声コマンドを話す",exact:true}).click();
+  await page.route("**/api/voice/transcribe",route=>route.fulfill({json:{transcript:"別の料理のレシピを見せて"}}));
+  await page.getByRole("button",{name:"🎙 音声操作を開始",exact:true}).click();
   await page.waitForTimeout(700);
-  await page.getByRole("button",{name:"■ 指示の聞き取りを終了",exact:true}).click();
+  await page.getByRole("button",{name:"■ マイクを停止",exact:true}).click();
   await expect(page.getByRole("button",{name:"詳細を見る",exact:true})).toHaveCount(20);
   await expect(page.getByRole("region",{name:"Recipe cost summary"})).toHaveCount(0);
   await page.getByRole("button",{name:"次へ",exact:true}).click();

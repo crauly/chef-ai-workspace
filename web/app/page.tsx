@@ -1,10 +1,8 @@
 "use client";
 import {useCallback,useEffect,useRef,useState} from "react";
 import {label, type Locale} from "./i18n";
-import AIEditor from "./AIEditor";
-import VoiceInput from "./VoiceInput";
-import VoiceModePanel, {type VoiceMode} from "./VoiceModePanel";
-import VoiceRecipeRegistration from "./VoiceRecipeRegistration";
+import AIEditor,{type EditorHandle} from "./AIEditor";
+import VoiceWorkspace from "./VoiceWorkspace";
 import {request, startupRead, type Recipe} from "./types";
 type Item={id:string;title:string;revision:number;updated_at?:string};
 export default function Library(){
@@ -14,6 +12,9 @@ export default function Library(){
  const [query,setQuery]=useState(""),[searchInput,setSearchInput]=useState("");
  const listRequest=useRef(0);
  const voiceTarget=useRef<string|null>(null);
+ const editor=useRef<EditorHandle|null>(null),reviewBoundary=useRef<(()=>number)|null>(null);
+ const browseWaiter=useRef<((recipe:Recipe|null)=>void)|null>(null);
+ useEffect(()=>{if(selected&&browseWaiter.current){browseWaiter.current(selected);browseWaiter.current=null;}},[selected]);
  const [loadingList,setLoadingList]=useState(false);
  const [waking,setWaking]=useState(false);
  const [cost,setCost]=useState<{partial:boolean;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean}|null>(null);
@@ -35,13 +36,15 @@ export default function Library(){
          const recipe=await request<Recipe>(`/api/recipes/${result.items[0].id}`);
          if(current===listRequest.current){setSelected(recipe);setRename(recipe.title.value||"");}
        }
+       if(fromVoice&&result.items.length!==1){browseWaiter.current?.(null);browseWaiter.current=null;}
      }
-   }catch(e){if(current===listRequest.current)setError(String(e));}
+   }catch(e){if(current===listRequest.current){setError(String(e));browseWaiter.current?.(null);browseWaiter.current=null;}}
    finally{if(current===listRequest.current){setWaking(false);setLoadingList(false);}}
  },[page,query]);
  useEffect(()=>{void reload();return()=>{listRequest.current++;};},[reload]);
  function search(name:string,fromVoice=false){
-   voiceTarget.current=fromVoice&&name.trim()?name.trim():null;
+   if(!fromVoice){browseWaiter.current?.(null);browseWaiter.current=null;}
+   voiceTarget.current=fromVoice?name.trim():null;
    listRequest.current++;setItems([]);setSelected(null);setPage(1);setLoadingList(true);
    setSearchInput(name.trim());setQuery(name.trim());
    if(page===1&&query===name.trim())void reload();
@@ -77,17 +80,13 @@ export default function Library(){
    await saveOperations([{op:"set_material_price",material_id:materialId,
      price_jpy:newPrice,price_quantity:perQuantity,price_unit:perUnit}]);
  }
- function handleVoiceMode(mode: VoiceMode, target: string) {
-   if(mode === "create") {
-     setSelected(null);setPage(1);
-     if (target.trim()) setDraft(target.trim());
-   } else if(mode === "browse") {search(target,true);}
-   else if(mode === "edit" && !selected && items.length === 1) {void open(items[0].id);}
+ function browseByVoice(target:string):Promise<Recipe|null>{
+  browseWaiter.current?.(null);
+  return new Promise(resolve=>{browseWaiter.current=resolve;search(target,true);});
  }
  return <main><header><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">日本語</option><option value="en-US">English (US)</option></select></label></div><h1>{t("library")}</h1><p className="muted">{t("intro")}</p></header>
- <VoiceModePanel locale={locale} onMode={handleVoiceMode}/>
- <VoiceRecipeRegistration locale={locale} onCreated={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");setError("");void reload();}}/>
- <form onSubmit={create}><input aria-label={t("newName")} placeholder={t("newName")} value={draft} onChange={e=>setDraft(e.target.value)}/><VoiceInput locale={locale} disabled={busy} onTranscript={setDraft}/><button disabled={busy||!draft.trim()}>{t("create")}</button></form>
+ <VoiceWorkspace locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} onCreated={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");setError("");void reload();}}/>
+ <form onSubmit={create}><input aria-label={t("newName")} placeholder={t("newName")} value={draft} onChange={e=>setDraft(e.target.value)}/><button disabled={busy||!draft.trim()}>{t("create")}</button></form>
  <form onSubmit={e=>{e.preventDefault();search(searchInput);}}>
   <input aria-label={locale==="ja"?"レシピ名で検索":"Search recipes by name"} maxLength={200} value={searchInput} onChange={e=>setSearchInput(e.target.value)}/>
   <button type="submit" disabled={busy}>{locale==="ja"?"検索":"Search"}</button>
@@ -101,7 +100,7 @@ export default function Library(){
  <div className="toolbar"><button disabled={page===1} onClick={()=>setPage(p=>p-1)}>{t("previous")}</button><span>{t("page")} {page}</span><button disabled={items.length<20} onClick={()=>setPage(p=>p+1)}>{t("next")}</button></div>
  {selected&&<section className="card"><div className="toolbar"><h2>{t("detail")}</h2><button disabled={busy} onClick={()=>setSelected(null)}>{t("close")}</button></div>
  <p className="tag">Revision {selected.revision}</p>
- <AIEditor key={selected.id} recipe={selected} locale={locale} onBusy={setBusy} onSaved={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");void reload();}} />
+ <AIEditor key={selected.id} recipe={selected} locale={locale} control={editor} markReview={()=>reviewBoundary.current?.()??-1} onBusy={setBusy} onSaved={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");void reload();}} />
  <form onSubmit={change}><input aria-label={t("rename")} value={rename} onChange={e=>setRename(e.target.value)}/><button disabled={busy||!rename.trim()}>{t("save")}</button></form>
  <h2>{t("ingredients")}</h2>{selected.materials.length===0?<p className="muted">{t("noIngredients")}</p>:<ul>{selected.materials.map(m=><li key={m.id}><strong>{m.material_name.value?.trim() || t("unnamed")}</strong> — {m.quantity.value??t("missing")} {m.unit??""}{m.quantity.status==="assumed"?` (${t("assumed")})`:m.quantity.status==="unresolved"?` (${t("unresolved")})`:""} <button disabled={busy} type="button" onClick={()=>{const v=prompt(locale==="ja"?"新しい数量":"New quantity",m.quantity.value||"");if(v!==null&&v.trim())void updateQuantity(m.id,v,m.unit||"g");}}>{locale==="ja"?"数量変更":"Edit qty"}</button> <button disabled={busy} type="button" onClick={()=>{const p=m.price_override;const v=prompt(locale==="ja"?"新しい仕入単価（円）":"New price JPY",p?.amount_jpy.value||"");if(v!==null&&v.trim())void updatePrice(m.id,v,p?.per_quantity||"1",p?.per_unit||m.unit||"g");}}>{locale==="ja"?"単価変更":"Edit price"}</button></li>)}</ul>}
  <form onSubmit={addFood} className="material-form">
