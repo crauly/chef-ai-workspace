@@ -29,3 +29,23 @@ Render Free may sleep between requests. The initial library GET now performs bou
 - Then exercise explicit AI proposal, diff, approval, revision persistence and reload, using only dedicated test data and confirmed demo owner.
 - Validate fresh cold start, HTTP Basic rejection, error cases, and that no secrets are present in browser responses.
 - Never claim external deployment or end-to-end production verification until these checks actually pass.
+
+## Existing Git-linked Vercel project and private ownership
+
+For the existing hosted demo, preserve its project, aliases, environment and
+root `vercel.json` service configuration. The manual setup recipes above are
+alternatives, not instructions to recreate an already configured project.
+
+Vercel Hobby cannot deploy a private GitHub organization repository. A private
+personal repository must satisfy Vercel's Git identity/owner conditions; see
+[the official Git deployment rules](https://vercel.com/docs/git#using-hobby-teams).
+Keeping source private during development and making it public for submission
+are separate owner decisions; never publish source to work around a deploy error.
+
+After an authorized ownership transfer, verify the repository ID, private
+visibility, retained PR/history, Git App access and the existing project's Git
+connection. Update local `origin` URLs and project-management links. Resume the
+normal reviewed-main Git delivery path with an owner-recognized commit, then
+verify deployment READY, aliases, commit identity and the existing Basic gate.
+Do not substitute a local source upload or change plan/billing to conceal an
+unresolved Git permission or entitlement error.
