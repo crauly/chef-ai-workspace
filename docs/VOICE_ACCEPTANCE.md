@@ -111,6 +111,13 @@ source, audio, logs or committed environment files.
    inspect/delete only that owner through the existing trusted admin path,
    then verify its six owner-scoped tables are empty before starting again.
 
+## Subsequent user acceptance regression
+
+The original scripted success did not cover the user's natural polite save
+commands, combined review/save requests or dish-name normalization. See
+[the corrective implementation and new live evidence](VOICE_CONVERSATION_FIX.md).
+The original evidence below is historical, not proof that those cases worked.
+
 ## User's next step
 
 No setup, API-key replacement or smartphone preparation is required. Following

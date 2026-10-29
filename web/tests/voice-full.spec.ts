@@ -26,7 +26,7 @@ test("full recipe voice dialogue requires review before one atomic save",async({
  await expect(page.getByRole("button",{name:"内容を承認して保存"})).toBeDisabled();
  expect(saved).toBe(0);
  await entry.fill("登録を確定");await page.getByRole("button",{name:"反映"}).click();
- await expect(page.getByText('先に「内容を確認」と話してください。')).toBeVisible();
+ await expect(page.getByText(/^確認用の下書きを表示しました。/)).toBeVisible();
  expect(saved).toBe(0);
  await entry.fill("内容 を 確認");await page.getByRole("button",{name:"反映"}).click();
  await expect(page.getByRole("button",{name:"内容を承認して保存"})).toBeEnabled();

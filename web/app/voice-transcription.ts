@@ -2,7 +2,7 @@
 export const MAX_WAV_BYTES = 24_000 * 2 * 30 + 44;
 export const VOICE_MODEL = "muse-voice-transcribe-1.0";
 // Domain hints steer recognition without replacing or rewriting the transcript.
-export const JAPANESE_VOICE_KEYWORDS = ["食材", "使用量", "仕入単価", "仕入れ価格", "売価", "乾燥パスタ", "訂正"];
+export const JAPANESE_VOICE_KEYWORDS = ["食材", "使用量", "仕入単価", "仕入れ価格", "売価", "乾燥パスタ", "訂正", "アーリオオーリオ", "ペペロンチーノ"];
 
 export function validWav(audio: Uint8Array): boolean {
   if (audio.length < 46 || audio.length > MAX_WAV_BYTES) return false;
