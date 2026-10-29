@@ -5,7 +5,8 @@
       "fix/voice-recipe-retrieval": false,
       "fix/voice-understanding-and-confirmation": false,
       "fix/unified-voice-conversation": false,
-      "fix/voice-resume-and-register": false
+      "fix/voice-resume-and-register": false,
+      "chore/personal-repository-deployment": false
     }
   },
   "services": {
