@@ -117,7 +117,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    <h2>音声操作</h2>
    <p>現在のモード: <strong>{labels[mode]}</strong>{mode==="edit"&&selected?` — ${selected.title.value}`:""}</p>
    <p>「レシピを登録します」「〇〇を見せて」「パスタを150gに変更」のように続けて話してください。</p>
-   <button type="button" disabled={!voice.recording&&(voice.supported===false||voice.busy)} onClick={voice.recording?voice.stop:()=>void voice.start()} aria-pressed={voice.recording}>{voice.recording?"■ マイクを停止":"🎙 音声登録を開始"}</button>
+   <button type="button" disabled={!voice.recording&&(voice.supported===false||voice.busy)} onClick={voice.recording?voice.stop:()=>void voice.start()} aria-pressed={voice.recording}>{voice.recording?"■ マイクを停止":"🎙 音声操作を開始"}</button>
    <p>音声はMetaへ送信して文字起こしします。録音は保存しません。切り替え音の後に話してください。</p>
    <p aria-live="polite">{voice.recording?"聞き取り中… ":""}{voice.busy?"音声を文字にしています… ":""}{routing?"操作を処理中… ":""}{message}</p>
    {voice.error&&<p role="alert">{voice.error}</p>}

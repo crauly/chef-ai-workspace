@@ -113,7 +113,7 @@ test("a quiet gap submits audio promptly instead of waiting 3.5 seconds",async({
  let transcribes=0;
  await page.route("**/api/voice/transcribe",route=>{transcribes++;return route.fulfill({json:{transcript:"パスタ100g"}});});
  await page.route("**/api/voice-recipe",route=>route.fulfill({json:draft}));
- await page.goto("/");await page.getByRole("button",{name:"🎙 音声登録を開始",exact:true}).click();
+ await page.goto("/");await page.getByRole("button",{name:"🎙 音声操作を開始",exact:true}).click();
  await page.waitForFunction(()=>typeof (window as unknown as {quietTestMic?:()=>void}).quietTestMic==="function");
  await page.waitForTimeout(350);
  await page.evaluate(()=>(window as unknown as {quietTestMic:()=>void}).quietTestMic());
@@ -134,12 +134,12 @@ test("audio recorded before review cannot approve the draft even when transcript
  });
  await page.goto("/");await input(page,"パスタ100g、500g350円");
  await expect(page.getByRole("button",{name:"内容を確認",exact:true})).toBeEnabled();
- await page.getByRole("button",{name:"🎙 音声登録を開始",exact:true}).click();
+ await page.getByRole("button",{name:"🎙 音声操作を開始",exact:true}).click();
  await page.waitForTimeout(700);await page.getByRole("button",{name:"■ マイクを停止",exact:true}).click();
  await sending;
  await page.getByRole("button",{name:"内容を確認",exact:true}).click();
  release();
- await expect(page.getByRole("button",{name:"🎙 音声登録を開始",exact:true})).toBeEnabled();
+ await expect(page.getByRole("button",{name:"🎙 音声操作を開始",exact:true})).toBeEnabled();
  await expect(page.getByRole("button",{name:"内容を承認して保存",exact:true})).toBeEnabled();
  expect(saves).toBe(0);
  await input(page,"保存してください");

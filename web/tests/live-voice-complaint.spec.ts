@@ -33,7 +33,7 @@ test("reported dish-name and polite-save conversation reaches one durable recipe
   }
  });
  await page.goto("/");
- await page.getByRole("button",{name:"🎙 音声登録を開始",exact:true}).click();
+ await page.getByRole("button",{name:"🎙 音声操作を開始",exact:true}).click();
  await page.waitForFunction(()=>typeof (window as unknown as {testPlay?:unknown}).testPlay==="function");
  const record=async(name:string)=>{
   await page.waitForTimeout(800);

@@ -42,7 +42,7 @@ test("one uninterrupted microphone creates, reviews, saves, browses and edits wi
   await route.fulfill({status:201,json:{id:"11111111-1111-4111-8111-111111111111",title:{value:recipeDraft.title},revision:0,materials:[],selling_price_jpy:{value:"1000"}}});
  });
  await page.goto("/");await expect(page.getByRole("button",{name:/🎙/})).toHaveCount(1);
- await page.getByRole("button",{name:"🎙 音声登録を開始",exact:true}).click();
+ await page.getByRole("button",{name:"🎙 音声操作を開始",exact:true}).click();
  async function speak(text:string){
   const expected=transcribed+1;texts.push(text);await page.waitForTimeout(800);
   await page.evaluate(()=>(window as unknown as {unifiedMic:{gain:GainNode}}).unifiedMic.gain.gain.value=.1);

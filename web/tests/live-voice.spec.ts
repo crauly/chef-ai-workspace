@@ -40,10 +40,10 @@ test("Japanese audio → live Muse Voice/Spark → explicit correction/review/sa
     const wav = fs.readFileSync(path.join(audioDir, name + ".wav"));
     const seconds = (wav.length - 44) / wav.readUInt32LE(28);
     await page.evaluate(name => {(window as unknown as {testAudio: string}).testAudio = "/test-audio/" + name + ".wav";}, name);
-    await page.getByRole("button", {name: "🎙 音声登録を開始", exact: true}).click();
+    await page.getByRole("button", {name: "🎙 音声操作を開始", exact: true}).click();
     await page.waitForTimeout(seconds * 1000 + 400);
     await page.getByRole("button", {name: "■ マイクを停止", exact: true}).click();
-    await expect(page.getByRole("button", {name: "🎙 音声登録を開始", exact: true})).toBeEnabled({timeout: 40_000});
+    await expect(page.getByRole("button", {name: "🎙 音声操作を開始", exact: true})).toBeEnabled({timeout: 40_000});
   };
   await record("recipe");
   const draft = page.getByLabel("未保存のレシピ下書き");

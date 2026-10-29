@@ -34,7 +34,7 @@ test("browse target from the shared microphone is used as the owner-scoped name 
   await page.route("**/api/voice/transcribe",route=>route.fulfill({json:{transcript:"片栗粉のレシピを見せて"}}));
   await page.route("**/api/intent",route=>route.fulfill({json:{intent:"browse",target:"片栗粉"}}));
   await page.goto("/");
-  await page.getByRole("button",{name:"🎙 音声登録を開始",exact:true}).click();
+  await page.getByRole("button",{name:"🎙 音声操作を開始",exact:true}).click();
   await page.waitForTimeout(700);
   await page.getByRole("button",{name:"■ マイクを停止",exact:true}).click();
   await expect(page.getByLabel("レシピ名で検索")).toHaveValue("片栗粉");
@@ -45,7 +45,7 @@ test("browse target from the shared microphone is used as the owner-scoped name 
   // Twenty-one matches: a single item on page two is not a unique recipe.
   await page.route("**/api/intent",route=>route.fulfill({json:{intent:"browse",target:"別の料理"}}));
   await page.route("**/api/voice/transcribe",route=>route.fulfill({json:{transcript:"別の料理のレシピを見せて"}}));
-  await page.getByRole("button",{name:"🎙 音声登録を開始",exact:true}).click();
+  await page.getByRole("button",{name:"🎙 音声操作を開始",exact:true}).click();
   await page.waitForTimeout(700);
   await page.getByRole("button",{name:"■ マイクを停止",exact:true}).click();
   await expect(page.getByRole("button",{name:"詳細を見る",exact:true})).toHaveCount(20);

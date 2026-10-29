@@ -134,7 +134,7 @@ test("real Web Audio capture sends WAV through transcription, review and explici
   });
   await page.goto("/");
   const recordTurn = async () => {
-    await page.getByRole("button", {name: "🎙 音声登録を開始", exact: true}).click();
+    await page.getByRole("button", {name: "🎙 音声操作を開始", exact: true}).click();
     await page.waitForTimeout(700);
     await page.getByRole("button", {name: "■ マイクを停止", exact: true}).click();
   };
@@ -159,11 +159,11 @@ test("transcription failure stops capture, reports recovery and never sends a dr
   await page.route("**/api/recipes/full", route => {mutations++; return route.fulfill({status: 500});});
   await page.route("**/api/voice/transcribe", route => route.fulfill({status: 502, json: {error: "failed"}}));
   await page.goto("/");
-  await page.getByRole("button", {name: "🎙 音声登録を開始", exact: true}).click();
+  await page.getByRole("button", {name: "🎙 音声操作を開始", exact: true}).click();
   await page.waitForTimeout(700);
   await page.getByRole("button", {name: "■ マイクを停止", exact: true}).click();
   await expect(page.getByRole("region", {name: "音声操作モード"}).getByRole("alert")).toContainText("音声を文字にできませんでした");
-  await expect(page.getByRole("button", {name: "🎙 音声登録を開始", exact: true})).toBeEnabled();
+  await expect(page.getByRole("button", {name: "🎙 音声操作を開始", exact: true})).toBeEnabled();
   expect(mutations).toBe(0);
 });
 
@@ -180,7 +180,7 @@ test("leaving the shared microphone discards an in-flight transcript", async ({p
     await route.fulfill({json: {transcript: "この発話は破棄される"}}).catch(() => {});
   });
   await page.goto("/");
-  await page.getByRole("button", {name: "🎙 音声登録を開始", exact: true}).click();
+  await page.getByRole("button", {name: "🎙 音声操作を開始", exact: true}).click();
   await page.waitForTimeout(700);
   await page.getByRole("button", {name: "■ マイクを停止", exact: true}).click();
   await sending;
