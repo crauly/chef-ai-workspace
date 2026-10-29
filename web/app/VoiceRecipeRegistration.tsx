@@ -11,7 +11,7 @@ type Draft={title:string;materials:Ingredient[];selling_price_jpy:string;notes:s
 type Input={text:string;command:VoiceCommand;revision:number;approval:Draft|null};
 
 export type RegistrationHandle={submit:(text:string,meta?:VoiceCaptureMeta)=>void;hasPending:()=>boolean;isSaving:()=>boolean;suspend:()=>void};
-export default function VoiceRecipeRegistration({locale,onCreated,control,sharedVoice}:{locale:Locale;onCreated:(recipe:Recipe)=>void;control?:Ref<RegistrationHandle>;sharedVoice?:{markReview:()=>number;cancel:()=>void}}){
+export default function VoiceRecipeRegistration({locale,onCreated,control,sharedVoice}:{locale:Locale;onCreated:(recipe:Recipe)=>void;control?:Ref<RegistrationHandle>;sharedVoice?:{markReview:()=>number;cancel:()=>void;captureMessage:string}}){
  const ja=locale==="ja";
  const [busy,setBusy]=useState(false),[turns,setTurns]=useState<string[]>([]),[draft,setDraft]=useState<Draft|null>(null);
  const [phase,setPhase]=useState<"dictating"|"review"|"saving">("dictating");
@@ -139,6 +139,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,control,shared
    {draft.missing.length>0&&<p role="alert">不足情報：{draft.missing.join("、")}</p>}
    {draft.notes.length>0&&<p role="alert">要確認：{draft.notes.join("、")}</p>}
    <p>{phase==="review"?"確認待ち：内容が正しければ、保存を明示承認してください。":"まだ保存されていません。"}</p>
+   {sharedVoice&&<><p role="status">{sharedVoice.captureMessage}</p><a href="#voice-controls">音声操作・再開へ戻る</a></>}
    <button type="button" disabled={busy||!complete||phase==="saving"} onClick={showReview}>内容を確認</button>
    <button type="button" disabled={busy||phase!=="review"||!complete} onClick={()=>void save()}>内容を承認して保存</button>
    <button type="button" disabled={phase==="saving"} onClick={clear}>下書きを破棄</button>

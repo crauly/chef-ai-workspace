@@ -24,6 +24,11 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  const alive=useRef(true);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;queue.current=[];reviewBoundary.current=null;};},[reviewBoundary]);
  const voice=useVoiceCapture(locale,receive,true);
+ const wasRecording=useRef(false);
+ useEffect(()=>{
+  if(wasRecording.current&&!voice.recording)playVoiceCue(voice.error?"error":"stop",volume);
+  wasRecording.current=voice.recording;
+ },[voice.recording,voice.error,volume]);
  useEffect(()=>{
   if(selected?.id&&selected.id!==previousTarget.current&&currentMode.current==="idle"){
    transition("browse");feedback("参照モードです。表示中のレシピの変更内容を話すと編集へ進みます。");
@@ -75,6 +80,13 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    const input=queue.current.shift()!;
    if(input.meta.reviewEpoch<modeBoundary.current&&voiceCommand(input.text)!=="data"){feedback("切り替え前の承認は適用していません。もう一度お願いします。",true);continue;}
    setHeard(input.text);
+   // In an active task, a human's explicit save/review is a control first.
+   // “レシピを登録してください” must not be swallowed as create navigation.
+   if(voiceCommand(input.text)!=="data"&&(currentMode.current==="create"||currentMode.current==="edit")){
+    if(currentMode.current==="create")registration.current?.submit(input.text,input.meta);
+    else await editor.current?.submit(input.text,input.meta);
+    continue;
+   }
    if(/^(?:変更案を破棄|変更を取り消す)[。！! ]*$/.test(input.text)){
     if(currentMode.current==="edit")await editor.current?.submit("キャンセル",input.meta);
     feedback("変更案を破棄しました。レシピ自体は変更していません。");continue;
@@ -113,11 +125,13 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
   finally{running.current=false;if(alive.current)setRouting(false);}
  }
  return <>
-  <section aria-label="音声操作モード" className="voice-mode-panel">
+  <section id="voice-controls" aria-label="音声操作モード" className="voice-mode-panel">
    <h2>音声操作</h2>
    <p>現在のモード: <strong>{labels[mode]}</strong>{mode==="edit"&&selected?` — ${selected.title.value}`:""}</p>
    <p>「レシピを登録します」「〇〇を見せて」「パスタを150gに変更」のように続けて話してください。</p>
-   <button type="button" disabled={!voice.recording&&(voice.supported===false||voice.busy)} onClick={voice.recording?voice.stop:()=>void voice.start()} aria-pressed={voice.recording}>{voice.recording?"■ マイクを停止":"🎙 音声操作を開始"}</button>
+   <button type="button" disabled={!voice.recording&&(voice.supported===false||voice.busy)} onClick={voice.recording?voice.stop:()=>void voice.start()} aria-pressed={voice.recording}>{voice.recording?"■ マイクを停止":voice.error||voice.notice?"🎙 音声操作を再開":"🎙 音声操作を開始"}</button>
+   <p role="status">{voice.recording?"音声受付中":voice.busy?"音声受付は一時停止・受信済みの音声を処理中":voice.error||voice.notice?"音声受付は停止中・再開できます":"音声受付は停止中"}</p>
+   {voice.notice&&<p role="status">{voice.notice}</p>}
    <p>音声はMetaへ送信して文字起こしします。録音は保存しません。切り替え音の後に話してください。</p>
    <p aria-live="polite">{voice.recording?"聞き取り中… ":""}{voice.busy?"音声を文字にしています… ":""}{routing?"操作を処理中… ":""}{message}</p>
    {voice.error&&<p role="alert">{voice.error}</p>}
@@ -132,7 +146,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    <button type="button" onClick={()=>void navigate({mode:"browse",target:""})}>レシピを参照</button>
    <button type="button" onClick={()=>void navigate({mode:"edit",target:""})}>選択レシピを編集</button>
   </section>
-  <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} sharedVoice={{markReview:mark,cancel:()=>{}}} onCreated={recipe=>{
+  <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} sharedVoice={{markReview:mark,cancel:()=>{},captureMessage:voice.recording?"音声受付中です。確認後は「登録」「登録してください」でも保存できます。":voice.busy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${voice.error||voice.notice||""}`}} onCreated={recipe=>{
    transition("browse");feedback("レシピを保存しました。");onCreated(recipe);
   }}/></div>
  </>;

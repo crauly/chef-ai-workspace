@@ -20,7 +20,7 @@ test("Japanese chef reviews, explicitly approves, saves, recalculates and record
   await page.getByText("聞き間違い・解釈の訂正を登録", {exact: true}).click();
   await page.getByLabel("元の表現・誤認した言葉").fill("澱粉"); await page.getByLabel("料理人が指定する表現").fill("片栗粉");
   await page.getByRole("button", {name: "訂正を確認して登録"}).click();
-  await expect(page.getByRole("status")).toContainText("訂正履歴を登録しました");
+  await expect(page.getByRole("region",{name:"AIに変更を相談"}).getByRole("status")).toContainText("訂正履歴を登録しました");
   expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).corrections).toEqual([{heard: "澱粉", preferred: "片栗粉"}]);
   await page.reload(); await page.getByRole("button", {name: "詳細を見る"}).click();
   await expect(page.getByRole("region", {name: "Recipe cost summary"})).toContainText("¥15");

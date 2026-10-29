@@ -4,7 +4,8 @@
       "feat/muse-voice-transcription": false,
       "fix/voice-recipe-retrieval": false,
       "fix/voice-understanding-and-confirmation": false,
-      "fix/unified-voice-conversation": false
+      "fix/unified-voice-conversation": false,
+      "fix/voice-resume-and-register": false
     }
   },
   "services": {

@@ -4,7 +4,7 @@ import {useVoiceCapture} from "./useVoiceCapture";
 import type {Locale} from "./i18n";
 
 export type VoiceMode = "idle" | "create" | "browse" | "edit";
-type Cue = Exclude<VoiceMode, "idle"> | "error";
+type Cue = Exclude<VoiceMode, "idle"> | "error" | "stop";
 
 export function playVoiceCue(kind: Cue, volume: number): void {
   if (volume <= 0) return;
@@ -18,6 +18,7 @@ export function playVoiceCue(kind: Cue, volume: number): void {
     browse: [[392, 0], [523.25, 0.16]],
     edit: [[587.33, 0], [440, 0.11], [587.33, 0.22]],
     error: [[220, 0], [196, 0.19]],
+    stop: [[330, 0], [262, 0.12], [196, 0.24]],
   };
   try {
     for (const [frequency, delay] of notes[kind]) {

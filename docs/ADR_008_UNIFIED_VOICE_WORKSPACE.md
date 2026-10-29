@@ -64,6 +64,43 @@ late. Queued typed requests also carry their arrival epoch. New correction data
 invalidates approval; successive unsaved edit instructions are passed together
 to the model, preserving self-corrections. Model output never supplies consent.
 
+## Follow-up: registration priority and recoverable capture pauses
+
+User testing reported capture stopping without an audible explanation and
+registration requests not reaching saving. The screenshot did not contain the
+upper capture diagnostic, so the exact stop reason in that session is unknown.
+Two reproducible paths were corrected:
+
+- In an active create/edit task, an explicit human review/save/hold/cancel is
+  routed to that task before navigation matching. In particular,
+  “レシピを登録してください” previously matched create navigation and could
+  never reach the reviewed draft's save. “登録” and “登録してください” remain
+  valid save requests. Confirmation of the unchanged current draft is required;
+  a request before review opens review, never silently approves future content.
+- Previously the fourth short speech batch aborted all outstanding ASR work.
+  When two requests are pending, capture now coalesces short fragments until
+  capacity returns or the 29-second WAV bound is reached. A third accepted full
+  batch pauses capture and drains the accepted audio instead of aborting it.
+  Memory/request limits remain bounded. Resuming stays disabled until draining
+  finishes; the same draft and review epoch remain available afterward.
+
+An actual recording→stopped transition plays one descending stop cue (or the
+error cue on failure), honoring mute/volume. Capture state, pause reason and
+resume controls are explicit at the main microphone; the draft also repeats
+capture status and links back to the shared controls. This is a shared capture,
+not another microphone. No sound is emitted for an ordinary silence delimiter.
+
+On one ASR failure, capture stops and flushes its current partial speech while
+other queued batches finish. The failed segment is reported explicitly and may
+need repeating; an ASR failure is not represented as recovered speech. Cancel,
+leaving the page or deliberately replacing capture still aborts pending work.
+
+Regression tests use real WAV encoding and controlled worklet frames with a
+delayed ASR fixture to verify coalescing, all three bounded batches draining,
+one stop cue, draft retention/resume, and later batches surviving an earlier
+failed request. They are not new live-provider, physical-audio or database
+accuracy evidence.
+
 ## Verification
 
 See `web/tests/unified-voice.spec.ts` for one actual AudioWorklet session through
