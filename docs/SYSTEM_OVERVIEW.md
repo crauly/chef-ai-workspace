@@ -80,3 +80,8 @@ flowchart TB
   owner policies. No secret is `NEXT_PUBLIC_`.
 - Unverified at M9: live-DB writes, applied-migration status, external
   retrieval, live Meta inference, real-voice runs (see M8_ACCEPTANCE.md).
+- Wiring boundary: the voice registration UI saves via `/demo/recipes/full`,
+  which creates unlinked material lines (`/api/voice-recipe` carries no
+  ingredient IDs or past-recipe context). M4 reuse (search → ingredient-assist
+  → ledger confirm) is a demo-API flow, not a voice auto-link. The diagram
+  edge DEMO → M4 is that API flow; it must not be read as voice auto-reuse.

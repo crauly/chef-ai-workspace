@@ -9,9 +9,20 @@ All prices below are fixture/demo values, never market data.
    (e.g. peperoncino: pasta 100g, olive oil, garlic). The proposal shows
    a diff with assumed/unresolved marks; the chef corrects and approves
    explicitly (Human Gate). Save → reload shows the same state.
-2. **Ingredient reuse.** In a second recipe say "same pasta as the
-   peperoncino": the same owned ingredient ID is linked, with its price
-   source shown.
+2. **Ingredient reuse (explicit assist + confirm, demo API).**
+   Voice auto-reuse from speech alone is unavailable in the current Web UI:
+   saving from voice (`POST /demo/recipes/full`) creates unlinked material
+   lines. Demonstrate reuse with the wired flow instead:
+   (a) save the second recipe (voice/UI) so it has an unlinked "pasta" line;
+   (b) `GET /demo/ingredients/search?q=pasta` shows the owned candidate
+   carrying the first recipe's ingredient ID;
+   (c) `POST /demo/recipes/{second_id}/ingredient-assist`
+   `{material_id, name}` returns `reuse` with that candidate
+   (`new` returns a `suggested_new_id`);
+   (d) `POST /demo/recipes/{second_id}/confirm` with
+   `ledger: [{kind: "reuse", id}]` (or `kind: "new"` with the suggested ID)
+   links it in the same approved request (Human Gate).
+   Reload shows the linked real ingredient name with the material name kept.
 3. **Cost view.** Open recipe detail: current food cost and cost rate.
    Unpriced lines stay partial -- never zero-filled.
 4. **Price check → bell.** Confirm a new price observation for pasta
@@ -28,7 +39,9 @@ All prices below are fixture/demo values, never market data.
 - 0:00-0:20 Problem: costing labor for a small restaurant; what this app does.
 - 0:20-1:10 Voice registration with a mid-course correction, explicit
   approval, save and reload.
-- 1:10-1:50 Reuse ("same pasta"), cost view with a partial line.
+- 1:10-1:50 Reuse via search → ingredient-assist → ledger confirm
+  (same owned ID), cost view with a partial line. Do not narrate this as
+  voice auto-linking.
 - 1:50-2:30 Price confirmation → bell → impacted recipes and cost delta.
 - 2:30-2:55 Sourcing suggestions: three kinds, sources, gaps, no auto-apply.
 - 2:55-3:00 Limits card: fixture-verified; live-DB/inference/retrieval
@@ -39,3 +52,7 @@ All prices below are fixture/demo values, never market data.
 - Never present fixture prices as market data or recognition accuracy.
 - Never imply notifications adopt prices or switch suppliers.
 - Never show the unavailable external retrieval as working.
+- Never present voice auto-reuse of an existing ingredient ID as working.
+  The voice UI save path (`/api/voice-recipe` → `/demo/recipes/full`)
+  carries no ingredient IDs or past-recipe context; reuse needs the
+  explicit search → ingredient-assist → ledger-confirm steps above.
