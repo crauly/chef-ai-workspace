@@ -76,5 +76,39 @@ class AssistTests(unittest.TestCase):
                                    approved_ingredient_id="c")
 
 
+
+    def test_quote_extra_keys_cannot_redirect_approval(self):
+        cand = classify_material("出汁", {"a": Ingredient("a", "出汁", None),
+                                          "b": Ingredient("b", "出汁", None)})
+        ledger, ops = build_approval_request(
+            material_id="11111111-1111-1111-1111-111111111111", material_name="出汁",
+            candidate=cand, approved_ingredient_id="a",
+            quote={"price_jpy": "1", "price_quantity": "1", "price_unit": "g",
+                   "ingredient_id": "b", "material_id": "zzz",
+                   "price_mode": "inherit"})
+        self.assertEqual(ops[0]["ingredient_id"], "a")
+        self.assertEqual(ops[0]["material_id"],
+                         "11111111-1111-1111-1111-111111111111")
+        self.assertEqual(ops[0]["price_mode"], "override")
+        self.assertEqual(ledger[0].id, "a")
+
+    def test_new_quote_extra_keys_cannot_redirect_approval(self):
+        ledger, ops = build_approval_request(
+            material_id="11111111-1111-1111-1111-111111111111", material_name="塩",
+            candidate=LinkCandidate("new", ()), approved_new=True,
+            new_id="22222222-2222-2222-2222-222222222222",
+            quote={"price_jpy": "50", "price_quantity": "100", "price_unit": "g",
+                   "ingredient_id": "99999999-9999-9999-9999-999999999999",
+                   "price_mode": "inherit"})
+        self.assertEqual(ops[0]["ingredient_id"],
+                         "22222222-2222-2222-2222-222222222222")
+        self.assertEqual(ops[0]["price_mode"], "override")
+
+    def test_new_without_assigned_id_is_rejected(self):
+        with self.assertRaises(ValueError):
+            build_approval_request(
+                material_id="11111111-1111-1111-1111-111111111111",
+                material_name="塩", candidate=LinkCandidate("new", ()),
+                approved_new=True)
 if __name__ == "__main__":
     unittest.main()

@@ -94,8 +94,14 @@ def build_approval_request(*, material_id: str, material_name: str,
             if not quote or not all(k in quote for k in
                                     ("price_jpy", "price_quantity", "price_unit")):
                 raise ValueError("Override link requires explicit quote")
+            # Copy only the three price fields: extra quote keys (e.g. a
+            # foreign ingredient_id/material_id/price_mode) must never
+            # redirect the chef's approved link.
             ops = ({"op": "link_ingredient", "material_id": material_id,
-                     "ingredient_id": wanted, "price_mode": "override", **quote},)
+                     "ingredient_id": wanted, "price_mode": "override",
+                     "price_jpy": quote["price_jpy"],
+                     "price_quantity": quote["price_quantity"],
+                     "price_unit": quote["price_unit"]},)
         return (LedgerIngredient("reuse", id=wanted),), ops
     if not approved_new:
         raise ValueError("New ingredient registration requires explicit approval")
@@ -119,9 +125,14 @@ def build_approval_request(*, material_id: str, material_name: str,
                                     ("price_jpy", "price_quantity", "price_unit")):
                 raise ValueError("Override link requires explicit quote")
             ops = ({"op": "link_ingredient", "material_id": material_id,
-                     "ingredient_id": new_id, "price_mode": "override", **quote},)
+                     "ingredient_id": new_id, "price_mode": "override",
+                     "price_jpy": quote["price_jpy"],
+                     "price_quantity": quote["price_quantity"],
+                     "price_unit": quote["price_unit"]},)
         return ledger, ops
-    # Without an assigned ID the approval registers first; the saved ID is
-    # linked explicitly in a follow-up approval.
-    return (LedgerIngredient("new", name=material_name.strip(),
-                             brand=new_brand, spec=new_spec),), ()
+    # Without an assigned ID no executable request can be built: the
+    # confirm boundary requires at least one operation and the persistence
+    # layer rejects empty operations. Callers must use the server-issued
+    # suggested ID (one-shot path above) so registration and linking
+    # complete as one approved request.
+    raise ValueError("New ingredient approval requires an assigned ID")
