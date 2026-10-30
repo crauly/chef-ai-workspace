@@ -9,6 +9,7 @@ from .ai_provider import ProposalProviderError
 ENDPOINT = "https://api.meta.ai/v1/responses"
 MODEL = "muse-spark-1.3"
 MAX_RESPONSE_BYTES = 131072
+MAX_PROMPT_CANDIDATES_HINT = 10
 INSTRUCTIONS = """You are Muse, assisting a professional chef with recipe changes.
 Interpret the original chef instruction in its own language. Preserve self-corrections:
 「片栗粉10g、いや15g」 means 15g, not two ingredients. Keep the chef-facing ingredient
@@ -207,7 +208,7 @@ class MetaResponsesProvider:
             "instructions": 'Return only JSON: {"intent":"browse","target":""}.',
             "input": "レシピを見せて",
             "store": False,
-            "max_output_tokens": 128,
+            "max_output_tokens": 512,
             "reasoning": {"effort": "low"},
         }, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(ENDPOINT, data=payload, method="POST",
@@ -240,6 +241,7 @@ class MetaResponsesProvider:
             if isinstance(parsed, dict) and parsed.get("intent") == "browse" and parsed.get("target") == "":
                 return {"status": "inference_ready"}
             return {"status": "unexpected_model_output"}
+
         except urllib.error.HTTPError as exc:
             status = exc.code
             # Classify the provider's structured error without exposing raw body,
@@ -281,6 +283,92 @@ class MetaResponsesProvider:
             return {"status": "invalid_response"}
         except OSError:
             return {"status": "connection_error"}
+
+    def evaluate_sourcing_axes(self, prompt_json: str) -> list[dict]:
+        """One Muse call: semantic compatibility/quality ranking only.
+
+        Input is caller-built candidate facts (no owner IDs, no writes).
+        Cost is never decided here; a ``cost`` label in the response is
+        rejected by the strict parser. Returns validated evaluations;
+        raises ``ProposalProviderError`` on any transport/shape deviation.
+        """
+        from .axis_sourcing import AxisEvaluationError, parse_axis_evaluations
+        if not isinstance(prompt_json, str) or not prompt_json.strip() \
+                or len(prompt_json) > 16384:
+            raise ValueError("Axis prompt invalid")
+        instructions = (
+            "You are a product manager helping a professional chef compare "
+            "registered purchase options for one ingredient. "
+            "You receive JSON facts only: candidate kinds, names, suppliers, "
+            "packages, prices, tax/shipping notes, sources, confirmation "
+            "state, comparison summaries and gaps. "
+            "Return ONLY JSON with exactly one key: evaluations, a list of "
+            "objects with exactly candidate_index (integer), axis, reason "
+            "(Japanese, at most 200 characters, grounded only in the given "
+            "facts), confidence (high, medium or low). "
+            "axis must be compatibility (same-dish usability as a "
+            "replacement) or quality (evidence-backed grade); never cost. "
+            "Rank at most one candidate per axis; omit axes with no suitable "
+            "candidate instead of forcing a pick. "
+            "Never claim high quality or a good reputation without evidence "
+            "in the facts (confirmed observation or stated source): say the "
+            "basis is uncertain and use low confidence. "
+            "Never invent prices, suppliers, URLs, or facts. "
+            "You only suggest; the chef decides and nothing is purchased."
+        )
+        payload = json.dumps({
+            "model": self.model, "instructions": instructions,
+            "input": prompt_json, "store": False,
+            "max_output_tokens": 1024, "reasoning": {"effort": "low"},
+        }, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(ENDPOINT, data=payload, method="POST",
+            headers={"Authorization": "Bearer " + self.api_key,
+                     "Content-Type": "application/json"})
+        try:
+            with urllib.request.build_opener(_NoRedirect()).open(req, timeout=25) as response:
+                data = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(data) > MAX_RESPONSE_BYTES:
+                raise ProposalProviderError("Meta response too large")
+            raw = json.loads(data)
+        except urllib.error.HTTPError as exc:
+            exc.close()
+            raise ProposalProviderError("Meta axis evaluation request failed") from None
+        except (ValueError, OSError) as exc:
+            raise ProposalProviderError("Meta axis evaluation request failed") from exc
+        if (not isinstance(raw, dict) or raw.get("status") != "completed"
+                or raw.get("error")):
+            raise ProposalProviderError("Meta axis evaluation incomplete")
+        texts = []
+        for item in raw.get("output") or []:
+            if not isinstance(item, dict):
+                raise ProposalProviderError("Invalid Meta axis output")
+            if item.get("type") == "reasoning":
+                continue
+            if (item.get("type") != "message"
+                    or item.get("role") != "assistant"
+                    or item.get("status") != "completed"):
+                raise ProposalProviderError("Invalid Meta axis message")
+            content = item.get("content")
+            if not isinstance(content, list):
+                raise ProposalProviderError("Invalid Meta axis content")
+            for part in content:
+                if (not isinstance(part, dict)
+                        or part.get("type") != "output_text"
+                        or not isinstance(part.get("text"), str)):
+                    raise ProposalProviderError("Meta axis output is not text")
+                texts.append(part["text"])
+        try:
+            prompt_facts = json.loads(prompt_json)
+            pool_size = len(prompt_facts.get("candidates", []))
+        except (ValueError, TypeError, AttributeError):
+            pool_size = 0
+        try:
+            evaluations, _ = parse_axis_evaluations(
+                "".join(texts), pool_size or MAX_PROMPT_CANDIDATES_HINT)
+        except AxisEvaluationError as exc:
+            raise ProposalProviderError(
+                f"Invalid Meta axis evaluations: {exc}") from None
+        return evaluations
 
     def check_chat_completions(self) -> dict:
         """One minimal official Chat Completions call using the same Render key."""

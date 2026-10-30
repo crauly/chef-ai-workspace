@@ -3,6 +3,9 @@ import {useState} from "react";
 type Comparison={comparable:boolean;reasons:string[];currency:string|null;unit_basis:string|null;diff:string|null;rate_pct:string|null};
 type Candidate={kind:string;ingredient_id:string;ingredient_name:string|null;offer_id:string|null;supplier_name:string|null;product_url:string|null;amount:string|null;currency:string|null;package_quantity:string|null;package_unit:string|null;shipping_note:string|null;tax_note:string|null;source:string|null;observed_at:string|null;data_origin:string;unknowns:string[];comparison:Comparison|null};
 type Result={ingredient_id:string;ingredient_name:string|null;candidates:Candidate[];total_found:number;returned:number;shortage_note:string|null;provider:{available:boolean;reason:string}};
+type AxisPick={axis:string;candidate_index:number;candidate:Candidate;reason:string;reason_source:string;confidence:string|null};
+type AxisSlot={pick:AxisPick|null;label:string;empty_reason?:string};
+type AxisResult={ingredient_id:string;ingredient_name:string|null;axes:{cost:AxisSlot;compatibility:AxisSlot;quality:AxisSlot};returned:number;shortage_note:string|null;provider:{external:{available:boolean;reason:string};muse:{used:boolean;evaluated:number;skipped:number;error:string|null}}};
 async function read<T>(path:string):Promise<T>{
  const response=await fetch(path,{headers:{"Content-Type":"application/json"}});
  if(!response.ok){const err=new Error(`request failed: ${response.status}`);(err as {status?:number}).status=response.status;throw err;}
@@ -19,8 +22,10 @@ function verdict(c:Candidate,ja:boolean):string{
 export default function SourcingSuggestions({locale}:{locale:string}){
  const [ingredientId,setIngredientId]=useState("");
  const [result,setResult]=useState<Result|null>(null);
+ const [axes,setAxes]=useState<AxisResult|null>(null);
  const [error,setError]=useState("");
  const [busy,setBusy]=useState(false);
+ const [axisBusy,setAxisBusy]=useState(false);
  const ja=locale==="ja";
  async function lookup(e:React.FormEvent){
   e.preventDefault();
@@ -29,11 +34,28 @@ export default function SourcingSuggestions({locale}:{locale:string}){
   setBusy(true);
   try{
    const data=await read<Result>(`/api/sourcing-suggestions?ingredient_id=${encodeURIComponent(id)}`);
-   setResult(data);setError("");
+   setResult(data);setAxes(null);setError("");
   }catch(e){const code=(e as {status?:number}).status;
    if(code===404)setError(ja?"食材が見つかりません。":"Ingredient not found.");
    else setError(ja?"候補を取得できませんでした。":"Could not load suggestions.");}
   finally{setBusy(false);}
+ }
+ async function lookupAxes(){
+  const id=ingredientId.trim();
+  if(!id||axisBusy)return;
+  setAxisBusy(true);
+  try{
+   const data=await read<AxisResult>(`/api/axis-suggestions?ingredient_id=${encodeURIComponent(id)}&max_candidates=3`);
+   setAxes(data);setError("");
+  }catch{setError(ja?"軸別候補を取得できませんでした。":"Could not load axis picks.");}
+  finally{setAxisBusy(false);}
+ }
+ function axisSlot(slot:AxisSlot,ja:boolean){
+  if(!slot.pick)return <p className="muted">{slot.label}: {slot.empty_reason||(ja?"選定なし":"No pick")}</p>;
+  const c=slot.pick.candidate;
+  return <div><p><strong>{slot.label}</strong> — {c.ingredient_name||c.ingredient_id}{c.supplier_name?` / ${c.supplier_name}`:""}</p>
+   <p className="muted">{ja?"理由":"Reason"}: {slot.pick.reason}{slot.pick.reason_source==="muse"&&slot.pick.confidence?` (${ja?"確信度":"confidence"}: ${slot.pick.confidence})`:""}</p>
+   <p className="muted">{ja?"比較":"Comparison"}: {verdict(c,ja)}{c.source?` / ${ja?"出典":"Source"}: ${c.source}`:""}{c.observed_at?` (${c.observed_at})`:""}{c.unknowns.length>0?` [${c.unknowns.join("; ")}]`:""}</p></div>;
  }
  return <section className="card" aria-label={ja?"代替・購入先候補":"Sourcing suggestions"}>
   <div className="toolbar"><h2>{ja?"代替・購入先候補":"Substitute sourcing"}</h2></div>
@@ -58,6 +80,15 @@ export default function SourcingSuggestions({locale}:{locale:string}){
     {c.observed_at&&<span className="muted"> ({c.observed_at})</span>}
     {c.unknowns.length>0&&<span className="muted"> [{c.unknowns.join("; ")}]</span>}
    </li>)}</ul>}
+   <div className="toolbar"><button type="button" onClick={lookupAxes} disabled={axisBusy||!ingredientId.trim()}>{ja?"3軸で比べる（コスト・互換性・品質）":"Compare on 3 axes"}</button></div>
+   {axes&&<div>
+    <p className="muted">{ja?"軸別選定":"Axis picks"}: {axes.returned}{axes.shortage_note?` — ${axes.shortage_note}`:""}</p>
+    {!axes.provider.external.available&&<p className="muted">{ja?"外部Web取得は未利用":"External web retrieval unavailable"}: {axes.provider.external.reason}</p>}
+    {!axes.provider.muse.used&&<p className="muted">{ja?"Muse評価なし（コスト軸のみ確定計算）":"No Muse evaluation (cost axis only)"}{axes.provider.muse.error?`: ${axes.provider.muse.error}`:""}</p>}
+    {axisSlot(axes.axes.cost,ja)}
+    {axisSlot(axes.axes.compatibility,ja)}
+    {axisSlot(axes.axes.quality,ja)}
+   </div>}
   </div>}
  </section>;
 }
