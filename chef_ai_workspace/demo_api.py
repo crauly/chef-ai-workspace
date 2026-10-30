@@ -700,6 +700,118 @@ def confirm_demo_observation(observation_id: UUID, ctx=Depends(demo_context)):
             "comparison": _json(result["comparison"])}
 
 
+@router.get("/ingredients/{ingredient_id}/sourcing-suggestions")
+def suggest_demo_sourcing(
+        ingredient_id: UUID,
+        max_candidates: int = Query(default=3, ge=1, le=10),
+        ctx=Depends(demo_context)):
+    """Propose alternate suppliers / substitute products (M7). Read-only.
+
+    Candidates come only from the caller's owned ledger: other offers of
+    the same ingredient, then similarly named owned ingredients (never
+    merged by name). External web retrieval is unavailable, so the
+    provider status says so instead of inventing listings. Nothing here
+    writes, adopts, or switches anything; the chef decides.
+    """
+    from .substitute_sourcing import suggest_sourcing
+    owner, repository = ctx
+    loaders = ("load_owned_ingredients", "list_ingredient_offers",
+               "list_ingredient_observations",
+               "get_owned_ingredient_adoption", "search_owned_ingredients")
+    if any(not callable(getattr(repository, name, None)) for name in loaders):
+        raise HTTPException(503, "Sourcing suggestions not configured")
+    try:
+        owned = repository.load_owned_ingredients(owner, [str(ingredient_id)])
+    except ValueError as exc:
+        raise HTTPException(404, "Ingredient not found or inaccessible") from exc
+    ingredient = owned.get(str(ingredient_id))
+    if ingredient is None:
+        raise HTTPException(404, "Ingredient not found or inaccessible")
+    name = getattr(ingredient, "name", str(ingredient_id))
+    adopted = None
+    try:
+        ref = repository.get_owned_ingredient_adoption(owner, str(ingredient_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Ingredient not found or inaccessible") from exc
+    if ref.get("adopted_observation_id"):
+        try:
+            adopted = _to_price_observation(_observation_or_404(
+                repository, owner, str(ref["adopted_observation_id"])))
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            adopted = None
+    offers = repository.list_ingredient_offers(owner, str(ingredient_id))
+    observations = repository.list_ingredient_observations(
+        owner, str(ingredient_id), limit=200)
+    latest_by_offer: dict = {}
+    for row in observations:
+        latest_by_offer.setdefault(str(row.get("offer_id")), row)
+    same_offers = []
+    for offer in offers:
+        row = latest_by_offer.get(str(offer.get("id")))
+        obs = None
+        if row is not None:
+            obs = {"id": row.get("id"),
+                   "amount": row.get("amount_jpy"),
+                   "currency": row.get("currency"),
+                   "tax_note": row.get("tax_note"),
+                   "shipping_note": row.get("shipping_note"),
+                   "source": row.get("source"),
+                   "confirmed": row.get("confirmed"),
+                   "observed_at": row.get("observed_at"),
+                   "supplier_id": row.get("supplier_id")}
+        same_offers.append({
+            "offer_id": offer.get("id"),
+            "supplier_name": (row or {}).get("supplier_name"),
+            "product_url": offer.get("product_url") or (row or {}).get("product_url"),
+            "package_quantity": offer.get("package_quantity"),
+            "package_unit": offer.get("package_unit"),
+            "observation": obs,
+            "data_origin": ("registered_reference"
+                            if row is not None
+                            and row.get("source") == "web_reference"
+                            else "ledger")})
+    similar = []
+    # One latest-observation read per similarly named ingredient (capped at
+    # 5 to bound fan-out on small demo ledgers; a dedicated joined repo
+    # method can replace this if the ledger grows).
+    for hit in repository.search_owned_ingredients(owner, name, limit=6)[:6]:
+        if str(hit.get("id")) == str(ingredient_id):
+            continue
+        if len(similar) >= 5:
+            break
+        rows = repository.list_ingredient_observations(
+            owner, str(hit.get("id")), limit=1)
+        row = rows[0] if rows else None
+        obs = None
+        if row is not None:
+            obs = {"id": row.get("id"),
+                   "amount": row.get("amount_jpy"),
+                   "currency": row.get("currency"),
+                   "tax_note": row.get("tax_note"),
+                   "shipping_note": row.get("shipping_note"),
+                   "source": row.get("source"),
+                   "confirmed": row.get("confirmed"),
+                   "observed_at": row.get("observed_at"),
+                   "supplier_id": row.get("supplier_id")}
+        similar.append({"ingredient_id": hit.get("id"),
+                        "ingredient_name": hit.get("name"),
+                        "offer_id": row.get("offer_id") if row else None,
+                        "supplier_name": row.get("supplier_name") if row else None,
+                        "product_url": row.get("product_url") if row else None,
+                        "package_quantity": row.get("package_quantity") if row else None,
+                        "package_unit": row.get("package_unit") if row else None,
+                        "observation": obs,
+                        "data_origin": "ledger"})
+        if len(similar) >= 5:
+            break
+    return _json(suggest_sourcing(
+        ingredient_id=str(ingredient_id), ingredient_name=name,
+        adopted=adopted, same_offers=same_offers, similar=similar,
+        max_candidates=max_candidates))
+
+
 @router.get("/notifications")
 def list_demo_notifications(status: str | None = Query(default=None, max_length=20),
                             limit: int = Query(default=100, ge=1, le=200),
