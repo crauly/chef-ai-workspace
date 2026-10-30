@@ -8,9 +8,12 @@ the caller's already-owned ledger rows passed in by the application layer:
 - ``same_product_same_supplier``: another offer of the same ingredient
   from the same supplier as the adopted price basis (different purchase
   terms, e.g. pack size or URL).
-- ``same_product_other_supplier``: an offer of the same ingredient from a
-  different (or unknown) supplier. Each carries its latest observation,
+- ``same_product_other_supplier``: an offer of the same ingredient from
+  a confirmed different supplier. Each carries its latest observation,
   including user-registered ``web_reference`` rows.
+- ``same_product_unknown_supplier``: an offer of the same ingredient
+  whose supplier is unknown. Shown as a separate purchase term, never
+  labelled as another supplier.
 - ``similar_product``: different owned ingredients whose names overlap.
   Shown for the chef to judge; name proximity never merges identity.
 
@@ -164,9 +167,10 @@ def suggest_sourcing(*, ingredient_id, ingredient_name,
     latest observation (or None). Same-supplier offers are labelled
     ``same_product_same_supplier`` only when their supplier matches
     ``reference_supplier_id`` (normally the adopted basis offer's
-    supplier); every other same-ingredient offer -- including ones with an
-    unknown supplier -- is ``same_product_other_supplier`` so the label
-    always matches reality. ``similar`` rows carry another owned
+    supplier); same-ingredient offers from any other known supplier are
+    ``same_product_other_supplier``, while ones with an unknown supplier
+    are ``same_product_unknown_supplier`` so the label always matches
+    reality. ``similar`` rows carry another owned
     ingredient plus its latest observation (or None). Same-product offers
     come first; the result never invents prices and never labels
     incomparable candidates cheaper or pricier. Read-only: inputs are
@@ -189,8 +193,10 @@ def suggest_sourcing(*, ingredient_id, ingredient_name,
         if (reference_supplier_id is not None and supplier_id is not None
                 and str(supplier_id) == str(reference_supplier_id)):
             kind = "same_product_same_supplier"
-        else:
+        elif supplier_id is not None:
             kind = "same_product_other_supplier"
+        else:
+            kind = "same_product_unknown_supplier"
         pooled.append(_candidate(
             kind=kind,
             ingredient_id=ingredient_id,

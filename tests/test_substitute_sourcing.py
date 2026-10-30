@@ -275,7 +275,7 @@ class SuggestTests(unittest.TestCase):
         self.assertIsNone(body["shortage_note"])
         kinds = [c["kind"] for c in body["candidates"]]
         self.assertEqual(kinds, ["same_product_other_supplier",
-                                 "same_product_other_supplier",
+                                 "same_product_unknown_supplier",
                                  "same_product_same_supplier"])
         first = body["candidates"][0]
         self.assertEqual(first["offer_id"], OFF_2)
@@ -353,12 +353,12 @@ class SuggestTests(unittest.TestCase):
         self.assertEqual(by_offer[OFF_4]["kind"],
                          "same_product_same_supplier")
         self.assertEqual(by_offer[OFF_4]["comparison"]["diff"], "-0.0200")
-        # OFF_2 is a different supplier; OFF_3 has an unknown supplier:
-        # both are labelled other-supplier, matching reality.
+        # OFF_2 is a confirmed different supplier; OFF_3 has an
+        # unknown supplier and gets its own purchase-term kind.
         self.assertEqual(by_offer[OFF_2]["kind"],
                          "same_product_other_supplier")
         self.assertEqual(by_offer[OFF_3]["kind"],
-                         "same_product_other_supplier")
+                         "same_product_unknown_supplier")
         self.assertIn("仕入先不明", by_offer[OFF_3]["unknowns"])
         self.assertNotIn("仕入先不明", by_offer[OFF_4]["unknowns"])
 
@@ -404,6 +404,27 @@ class SuggestTests(unittest.TestCase):
         self.assertEqual(by_offer[OFF_2]["amount"], "500")
         self.assertEqual(by_offer[OFF_3]["amount"], "260")
         self.assertNotIn("価格情報なし", by_offer[OFF_3]["unknowns"])
+
+    def test_unknown_supplier_is_never_labelled_other_supplier(self):
+        # Supplier-less offers form their own kind at both layers.
+        from chef_ai_workspace.substitute_sourcing import suggest_sourcing
+        out = suggest_sourcing(
+            ingredient_id="i", ingredient_name="パスタ", adopted=None,
+            same_offers=[{"offer_id": "o1", "supplier_id": None,
+                          "observation": None},
+                         {"offer_id": "o2", "supplier_id": "s9",
+                          "observation": None}],
+            similar=[])
+        kinds = {c["offer_id"]: c["kind"] for c in out["candidates"]}
+        self.assertEqual(kinds["o1"], "same_product_unknown_supplier")
+        self.assertEqual(kinds["o2"], "same_product_other_supplier")
+        r = self._get(ING, max_candidates=10)
+        http_kinds = {c["offer_id"]: c["kind"]
+                      for c in r.json()["candidates"]}
+        self.assertEqual(http_kinds[OFF_3],
+                         "same_product_unknown_supplier")
+        self.assertEqual(http_kinds[OFF_2],
+                         "same_product_other_supplier")
 
     def test_numeric_zero_price_is_preserved(self):
         # Supabase numeric(0) must survive as "0", not "" or "None", and
