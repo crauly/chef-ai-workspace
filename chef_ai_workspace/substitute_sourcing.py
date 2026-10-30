@@ -5,9 +5,12 @@ anything -- no ingredient, supplier, offer, observation, adoption, recipe,
 or notification writes, and no network access. Candidates come only from
 the caller's already-owned ledger rows passed in by the application layer:
 
-- ``same_product_other_supplier``: other offers of the same ingredient
-  (each with its latest observation, including user-registered
-  ``web_reference`` rows). Same ingredient ID, different purchase terms.
+- ``same_product_same_supplier``: another offer of the same ingredient
+  from the same supplier as the adopted price basis (different purchase
+  terms, e.g. pack size or URL).
+- ``same_product_other_supplier``: an offer of the same ingredient from a
+  different (or unknown) supplier. Each carries its latest observation,
+  including user-registered ``web_reference`` rows.
 - ``similar_product``: different owned ingredients whose names overlap.
   Shown for the chef to judge; name proximity never merges identity.
 
@@ -60,13 +63,15 @@ def _observation(ingredient_id, offer_id, observation, package_quantity,
 
 
 def _unknowns(*, package_quantity, package_unit, shipping_note, tax_note,
-              observation, similar):
+              observation, similar, supplier_known):
     gaps = []
     if observation is None:
         gaps.append("価格情報なし")
     else:
         if not observation.get("confirmed"):
             gaps.append("未確認の参考価格")
+    if not supplier_known:
+        gaps.append("仕入先不明")
     if not package_quantity or not package_unit:
         gaps.append("規格不明")
     if shipping_note is None and (observation is None or
@@ -81,8 +86,8 @@ def _unknowns(*, package_quantity, package_unit, shipping_note, tax_note,
 
 
 def _candidate(*, kind, ingredient_id, ingredient_name, offer_id,
-               supplier_name, product_url, package_quantity, package_unit,
-               observation, adopted, data_origin):
+               supplier_id, supplier_name, product_url, package_quantity,
+               package_unit, observation, adopted, data_origin):
     shipping = (observation.get("shipping_note")
                 if observation else None)
     tax = observation.get("tax_note") if observation else None
@@ -122,22 +127,30 @@ def _candidate(*, kind, ingredient_id, ingredient_name, offer_id,
         "unknowns": _unknowns(
             package_quantity=package_quantity, package_unit=package_unit,
             shipping_note=shipping, tax_note=tax,
-            observation=observation, similar=(kind == "similar_product")),
+            observation=observation, similar=(kind == "similar_product"),
+            supplier_known=bool(supplier_id or supplier_name)),
         "comparison": comparison,
     }
 
 
 def suggest_sourcing(*, ingredient_id, ingredient_name,
                      adopted=None, same_offers=(), similar=(),
-                     max_candidates=MAX_CANDIDATES):
+                     max_candidates=MAX_CANDIDATES,
+                     reference_supplier_id=None):
     """Assemble up to ``max_candidates`` suggestions from owned ledger rows.
 
     ``adopted`` is the ingredient's adopted-basis PriceObservation or None.
-    ``same_offers`` rows carry the offer plus its latest observation (or
-    None). ``similar`` rows carry another owned ingredient plus its latest
-    observation (or None). Same-product offers come first; the result never
-    invents prices and never labels incomparable candidates cheaper or
-    pricier. Read-only: inputs are only read.
+    ``same_offers`` rows carry the offer (with ``supplier_id``) plus its
+    latest observation (or None). Same-supplier offers are labelled
+    ``same_product_same_supplier`` only when their supplier matches
+    ``reference_supplier_id`` (normally the adopted basis offer's
+    supplier); every other same-ingredient offer -- including ones with an
+    unknown supplier -- is ``same_product_other_supplier`` so the label
+    always matches reality. ``similar`` rows carry another owned
+    ingredient plus its latest observation (or None). Same-product offers
+    come first; the result never invents prices and never labels
+    incomparable candidates cheaper or pricier. Read-only: inputs are
+    only read.
     """
     try:
         limit = int(max_candidates)
@@ -148,11 +161,18 @@ def suggest_sourcing(*, ingredient_id, ingredient_name,
     for offer in same_offers or ():
         if not isinstance(offer, dict):
             continue
+        supplier_id = offer.get("supplier_id")
+        if (reference_supplier_id is not None and supplier_id is not None
+                and str(supplier_id) == str(reference_supplier_id)):
+            kind = "same_product_same_supplier"
+        else:
+            kind = "same_product_other_supplier"
         pooled.append(_candidate(
-            kind="same_product_other_supplier",
+            kind=kind,
             ingredient_id=ingredient_id,
             ingredient_name=ingredient_name,
             offer_id=offer.get("offer_id") or offer.get("id"),
+            supplier_id=supplier_id,
             supplier_name=offer.get("supplier_name"),
             product_url=offer.get("product_url"),
             package_quantity=offer.get("package_quantity"),
@@ -171,6 +191,7 @@ def suggest_sourcing(*, ingredient_id, ingredient_name,
             ingredient_id=other_id,
             ingredient_name=item.get("ingredient_name") or item.get("name"),
             offer_id=item.get("offer_id"),
+            supplier_id=item.get("supplier_id"),
             supplier_name=item.get("supplier_name"),
             product_url=item.get("product_url"),
             package_quantity=item.get("package_quantity"),

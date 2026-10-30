@@ -48,7 +48,7 @@ export default function SourcingSuggestions({locale}:{locale:string}){
    {!result.provider.available&&<p className="muted">{ja?"外部Web取得は未利用":"External web retrieval unavailable"}: {result.provider.reason}</p>}
    {result.candidates.length===0?<p className="muted">{ja?"候補がありません。":"No candidates."}</p>:
    <ul>{result.candidates.map((c,i)=><li key={`${c.kind}-${c.offer_id||c.ingredient_id}-${i}`}>
-    <strong>{c.kind==="same_product_other_supplier"?(ja?"同商品・別仕入先":"Same product, other supplier"):(ja?"類似商品（要確認）":"Similar product (review needed)")}</strong>
+    <strong>{c.kind==="same_product_same_supplier"?(ja?"同商品・同仕入先の別条件":"Same product, same supplier"):c.kind==="same_product_other_supplier"?(ja?"同商品・別仕入先":"Same product, other supplier"):(ja?"類似商品（要確認）":"Similar product (review needed)")}</strong>
     <span> — {c.ingredient_name||c.ingredient_id}{c.supplier_name?` / ${c.supplier_name}`:""}</span>
     <br/><span>{c.amount!==null?`${c.amount}${c.currency||""}`:(ja?"価格情報なし":"No price")} {c.package_quantity&&c.package_unit?`(${c.package_quantity}${c.package_unit})`:""}
     {c.shipping_note?` / ${c.shipping_note}`:""} {c.tax_note?` / ${c.tax_note}`:""}</span>
