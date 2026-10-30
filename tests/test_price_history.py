@@ -200,13 +200,14 @@ class FakeRepo:
         return {"ingredient_id": ingredient_id,
                 "adopted_observation_id": row["adopted"], "adopted_at": None}
 
-    def list_recipes_using_ingredient(self, owner_id, ingredient_id, limit=100,
+    def list_recipes_using_ingredient(self, owner_id, ingredient_id, limit=None,
                                      page_size=200):
         if owner_id != self.owner:
             raise ValueError("Ingredient not owned by caller")
         self._owned_ingredient(owner_id, ingredient_id)
-        return [r for r in self.recipes.values()
-                if any(m.ingredient_id == ingredient_id for m in recipe_materials(r))][:limit]
+        matches = [r for r in self.recipes.values()
+                   if any(m.ingredient_id == ingredient_id for m in recipe_materials(r))]
+        return matches if limit is None else matches[:limit]
 
 
 def recipe_materials(recipe):
@@ -429,6 +430,8 @@ class PaginationTests(unittest.TestCase):
                 return self
             def eq(self, *a, **k):
                 return self
+            def order(self, *a, **k):
+                return self
             def range(self, lo, hi):
                 self._lo, self._hi = lo, hi
                 return self
@@ -446,9 +449,17 @@ class PaginationTests(unittest.TestCase):
         repo = SupabasePersistence.__new__(SupabasePersistence)
         repo.client = _Tables(states)
         repo.load_owned_ingredients = lambda owner, ids: {ING_A: object()}
-        got = repo.list_recipes_using_ingredient(OWNER_1, ING_A, limit=1000,
+        # Default call must return all 250 matches: the old limit=100
+        # default dropped everything from the 101st match on.
+        got = repo.list_recipes_using_ingredient(OWNER_1, ING_A,
                                                  page_size=60)
         self.assertEqual(len(got), total)
+        self.assertEqual(len({r.id for r in got}), total)
+        self.assertEqual([r.id for r in got],
+                         [f"r-{i}" for i in range(total)])
+        # Explicit limits still bound the result.
+        self.assertEqual(len(repo.list_recipes_using_ingredient(
+            OWNER_1, ING_A, limit=100, page_size=60)), 100)
 
 
 class ImpactGateApiTests(unittest.TestCase):
