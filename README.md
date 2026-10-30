@@ -94,11 +94,18 @@ Chef AI Workspace is an independent hackathon project. Its implementation does n
 
 ## Ingredient and procurement assistance — implementation design
 
-The product direction includes reusable ingredient records, supplier-specific
-purchase information, price-change awareness, a notification bell and
-source-backed alternative purchasing suggestions for small restaurants.
-These are core assistance goals; the complete workflow is **not implemented**.
-Voice transcription alone does not satisfy them.
+Reusable ingredient records, supplier-specific purchase terms, price-change
+awareness, a notification bell and source-backed alternative purchasing
+suggestions are implemented (M1–M7) as domain paths behind the demo API.
+Fixture layers are verified; live-DB, live-inference and live-retrieval runs
+are explicitly unverified. Voice transcription alone does not satisfy them.
+
+The Web UI exposes voice registration, the proposal diff, the cost view,
+the notification bell and sourcing suggestions. Ingredient reuse assistance
+(search + ingredient-assist + ledger confirm) is a demo-API flow and is not
+wired into the voice registration UI: saving from voice creates unlinked
+material lines, and linking needs the explicit assist + confirm steps
+(see the demo script).
 
 See [ADR-009](docs/ADR_009_INGREDIENT_PROCUREMENT_ASSISTANCE.md),
 [detailed design](docs/INGREDIENT_PRICE_DESIGN.md),
@@ -107,6 +114,44 @@ See [ADR-009](docs/ADR_009_INGREDIENT_PROCUREMENT_ASSISTANCE.md),
 Price-check scheduling, thresholds and external retrieval choices still require
 explicit design decisions; no automatic monitoring or purchasing is enabled by
 these documents.
+
+## Setup & run (local development)
+
+Prerequisites: Python 3.12, Node.js 22.
+
+```bash
+pip install -r requirements-api.txt
+SUPABASE_URL=https://dfvryaybdelgjxihdmth.supabase.co \
+SUPABASE_SERVICE_ROLE_KEY=<server-only> \
+uvicorn chef_ai_workspace.deploy_server:app --port 8000
+cd web && npm install && npm run dev
+```
+
+Verified boot: backend imports, `GET /health` returns 200 (liveness only).
+
+Environment (all server-only, never `NEXT_PUBLIC_`):
+
+| Variable | Used by | Purpose |
+|---|---|---|
+| `SUPABASE_URL` | backend | Fixed to the Chef AI project; other hosts fail closed |
+| `SUPABASE_SERVICE_ROLE_KEY` | backend | Server-side persistence |
+| `DEMO_OWNER_ID` | backend only | Isolated demo owner (UUID; required together with the token) |
+| `DEMO_ACCESS_TOKEN` | backend + web (same value) | Demo credential (≥ 24 chars). The web proxy (`web/app/api/proxy.ts`) returns 503 without it; the backend (`server_config.py`) requires it together with `DEMO_OWNER_ID`. Set the identical value in both runtimes |
+| `MODEL_API_KEY` | backend/Next | Meta inference (server-only) |
+| `FASTAPI_BASE_URL` | web | Trusted backend origin |
+| `DEMO_PREVIEW_PASSWORD` | web | Preview gate (≥ 24 ASCII chars) |
+
+Checks: `python3 -m unittest discover -s tests`,
+`./web/node_modules/.bin/tsc --noEmit -p web/tsconfig.json`,
+`npm run build --prefix web`.
+
+## Verification status and limits
+
+See [M8 acceptance](docs/M8_ACCEPTANCE.md) for the A1–A8 verdicts with
+evidence. Passing fixtures are not quoted as live verification:
+real-DB writes, external price retrieval, live Meta inference and real-voice
+runs are unverified. No automatic price adoption, supplier switching,
+purchasing, monitoring schedules or thresholds are enabled.
 
 ## Development status
 
