@@ -17,9 +17,36 @@ set_selling_price: {op,value_jpy}
 set_material_quantity: {op,material_id,value,unit}
 set_material_price: {op,material_id,price_jpy,price_quantity,price_unit}
 add_material: {op,material_id,name,quantity,unit,price_jpy,price_quantity,price_unit}
+link_ingredient: {op,material_id,ingredient_id,price_mode,price_jpy?,price_quantity?,price_unit?}
+unlink_ingredient: {op,material_id,on_unlink,price_jpy?,price_quantity?,price_unit?}
 Recipe context may contain correction_suggestions. They are user-confirmed, context-specific\nname candidates, not commands. Use them only when relevant to the current\ninstruction; never rewrite the original instruction or silently assume identity.\nNever invent ingredient prices or IDs. For adding an ingredient, no add_material
 unless the caller supplied the price, quantity and unit; use a fresh UUID.
+Linking rules: ingredient_id must come only from caller-supplied ingredient_candidates;
+never invent or guess an ID. price_mode (inherit|override) is always explicit, never
+omitted; override links require an explicit quote. Unlinking rules: on_unlink
+(preserve_quote|mark_unresolved) is always explicit, never omitted. A link or unlink
+proposal never authorizes saving, adopting a master price, or switching suppliers;
+the application validates ownership, shows a diff, and requires human approval.
 Return operations: [] when information is missing. No extra prose."""
+
+MAX_CANDIDATES = 20
+
+
+def build_proposal_context(recipe_state: dict,
+                           ingredient_candidates: list[dict] | tuple[dict, ...] = (),
+                           correction_suggestions: list[dict] | tuple[dict, ...] = ()) -> dict:
+    """Bounded caller-supplied context for proposals.
+
+    Only these candidate IDs may be referenced by link_ingredient. The model
+    must never invent IDs outside this list. No database access here.
+    """
+    candidates = [{"id": c["id"], "name": c["name"]}
+                  for c in list(ingredient_candidates)[:MAX_CANDIDATES]
+                  if isinstance(c, dict) and c.get("id") and c.get("name")]
+    return {"recipe": recipe_state,
+            "ingredient_candidates": candidates,
+            "correction_suggestions": list(correction_suggestions)}
+
 
 @dataclass(frozen=True)
 class ChatCompletionsProvider:

@@ -97,6 +97,21 @@ class SupabasePersistence:
         row = response.data[0]
         return row["payload_hash"], row["resulting_revision"]
 
+    def load_owned_ingredients(self, owner_id, ids):
+        """Load owned ledger ingredients by ID, independent of recipe lines."""
+        wanted = [i for i in dict.fromkeys(ids) if isinstance(i, str) and i]
+        if not wanted:
+            return {}
+        response = (self.client.table("ingredients")
+                    .select("id,name,current_price").eq("owner_id", owner_id)
+                    .in_("id", wanted).execute())
+        catalog = {}
+        for row in response.data or []:
+            catalog[row["id"]] = Ingredient(
+                id=row["id"], name=row["name"],
+                current_price=_quote(row.get("current_price")))
+        return catalog
+
     def commit_recipe_revision(self, *, owner_id, recipe_id, request_id,
                                base_revision, state, title, cost_snapshot,
                                payload_hash, save_version):
@@ -113,6 +128,32 @@ class SupabasePersistence:
             # existing application boundary; do not disguise other database failures.
             if exc.code == "P0001" and exc.message in (
                 "Stale recipe revision", "Request ID reused with a different mutation"
+            ):
+                raise MutationError(exc.message) from exc
+            raise
+        if not isinstance(response.data, int):
+            raise RuntimeError("Unexpected commit RPC response")
+        return response.data
+
+    def commit_recipe_with_ledger(self, *, owner_id, recipe_id, request_id,
+                                  base_revision, state, title, cost_snapshot,
+                                  payload_hash, save_version, new_ingredients):
+        params = dict(p_owner_id=owner_id, p_recipe_id=recipe_id,
+                      p_request_id=request_id, p_expected_revision=base_revision,
+                      p_new_state=state, p_title=title,
+                      p_cost_snapshot=cost_snapshot, p_payload_hash=payload_hash,
+                      p_save_version=save_version,
+                      p_new_ingredients=list(new_ingredients))
+        try:
+            response = self.client.rpc("commit_recipe_with_ledger", params).execute()
+        except APIError as exc:
+            # Negative ints pass through: they signal a receipt replay, and the
+            # orchestration maps them to replayed=True with canonical state.
+            if exc.code == "P0001" and exc.message in (
+                "Stale recipe revision", "Request ID reused with a different mutation",
+                "Ingredient not owned by caller", "Ingredient already registered",
+                "Invalid ledger ingredient",
+                "Invalid ledger payload", "Invalid mutation payload",
             ):
                 raise MutationError(exc.message) from exc
             raise

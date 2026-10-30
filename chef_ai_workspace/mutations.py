@@ -99,6 +99,61 @@ def prepare_mutation(recipe: Recipe, proposal: Proposal, *, user_confirmed: bool
                 candidate = replace(candidate, cost_adjustment_jpy=TrackedValue(str(number), "assumed", "ai"))
             else:
                 candidate = replace(candidate, cost_adjustment_jpy=_value(str(number), user_confirmed))
+        elif kind == "link_ingredient":
+            _fields(op, {"op", "material_id", "ingredient_id", "price_mode"},
+                    {"price_jpy", "price_quantity", "price_unit"})
+            try:
+                UUID(op["ingredient_id"])
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise MutationError("Invalid ingredient ID") from exc
+            matches = [m for m in candidate.materials if m.id == op["material_id"]]
+            if len(matches) != 1:
+                raise MutationError("Unknown material ID")
+            mode = op["price_mode"]
+            if mode not in ("inherit", "override"):
+                raise MutationError("Link requires explicit inherit or override")
+            if catalog is None or op["ingredient_id"] not in catalog:
+                raise MutationError("Linked ingredient not in catalog")
+            if mode == "inherit":
+                new_line = replace(matches[0], ingredient_id=op["ingredient_id"],
+                                   price_mode="inherit", price_override=None)
+            else:
+                for key in ("price_jpy", "price_quantity", "price_unit"):
+                    if key not in op:
+                        raise MutationError("Override link requires explicit quote")
+                quote = PriceQuote(amount_jpy=_value(op["price_jpy"], user_confirmed),
+                                   per_quantity=op["price_quantity"], per_unit=op["price_unit"],
+                                   source="manual" if user_confirmed else "estimated")
+                new_line = replace(matches[0], ingredient_id=op["ingredient_id"],
+                                   price_mode="override", price_override=quote)
+            candidate = replace(candidate, materials=tuple(
+                new_line if m.id == op["material_id"] else m for m in candidate.materials))
+        elif kind == "unlink_ingredient":
+            _fields(op, {"op", "material_id", "on_unlink"},
+                    {"price_jpy", "price_quantity", "price_unit"})
+            matches = [m for m in candidate.materials if m.id == op["material_id"]]
+            if len(matches) != 1:
+                raise MutationError("Unknown material ID")
+            line = matches[0]
+            policy = op["on_unlink"]
+            if policy not in ("preserve_quote", "mark_unresolved"):
+                raise MutationError("Unlink requires explicit preserve_quote or mark_unresolved")
+            if line.price_mode == "inherit" or policy == "mark_unresolved":
+                if policy == "preserve_quote":
+                    for key in ("price_jpy", "price_quantity", "price_unit"):
+                        if key not in op:
+                            raise MutationError("Preserving a quote requires explicit quote")
+                    quote = PriceQuote(amount_jpy=_value(op["price_jpy"], user_confirmed),
+                                       per_quantity=op["price_quantity"], per_unit=op["price_unit"],
+                                       source="manual" if user_confirmed else "estimated")
+                else:
+                    quote = None
+                new_line = replace(line, ingredient_id=None, price_mode="override",
+                                   price_override=quote)
+            else:
+                new_line = replace(line, ingredient_id=None)
+            candidate = replace(candidate, materials=tuple(
+                new_line if m.id == op["material_id"] else m for m in candidate.materials))
         elif kind == "set_title":
             _fields(op, {"op", "value"})
             candidate = replace(candidate, title=_value(op["value"], user_confirmed))
