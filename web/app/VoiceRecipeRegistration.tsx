@@ -4,6 +4,7 @@ import type {Locale} from "./i18n";
 import {request,type Recipe} from "./types";
 import {useVoiceCapture,type VoiceCaptureMeta} from "./useVoiceCapture";
 import {voiceCommand,type VoiceCommand} from "./voice-commands";
+import {logVoiceEvent} from "./voice-diagnostics";
 
 type Ingredient={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string};
 type Interpretation={source:string;suggestion:string;reason:string};
@@ -42,7 +43,7 @@ export function toSaveMaterials(draft:Draft){
   price_unit:m.price_unit||null}));
 }
 
-export type RegistrationHandle={submit:(text:string,meta?:VoiceCaptureMeta)=>void;hasPending:()=>boolean;isSaving:()=>boolean;suspend:()=>void};
+export type RegistrationHandle={submit:(text:string,meta?:VoiceCaptureMeta)=>void;hasPending:()=>boolean;isSaving:()=>boolean;suspend:()=>void;requestReview:()=>void};
 export default function VoiceRecipeRegistration({locale,onCreated,control,sharedVoice}:{locale:Locale;onCreated:(recipe:Recipe,mode:SaveMode)=>void;control?:Ref<RegistrationHandle>;sharedVoice?:{markReview:()=>number;cancel:()=>void;captureMessage:string}}){
  const ja=locale==="ja";
  const [busy,setBusy]=useState(false),[turns,setTurns]=useState<string[]>([]),[draft,setDraft]=useState<Draft|null>(null);
@@ -57,7 +58,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,control,shared
  const requestId=useRef<string|null>(null),semanticAbort=useRef<AbortController|null>(null),alive=useRef(true);
  const capture=useVoiceCapture(locale,enqueue,true);
  const voice={...capture,...sharedVoice};
- useImperativeHandle(control,()=>({submit:enqueue,hasPending:()=>Boolean(dataTurns.current.length||inbox.current.length||draftRef.current),isSaving:()=>phaseRef.current==="saving",suspend:()=>{
+ useImperativeHandle(control,()=>({submit:enqueue,hasPending:()=>Boolean(dataTurns.current.length||inbox.current.length||draftRef.current),isSaving:()=>phaseRef.current==="saving",requestReview:()=>{showReview();},suspend:()=>{
   reviewed.current=null;inbox.current=inbox.current.filter(input=>input.command==="data");setStage("dictating");
  }}));
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;semanticAbort.current?.abort();inbox.current=[];};},[]);
@@ -67,20 +68,23 @@ export default function VoiceRecipeRegistration({locale,onCreated,control,shared
   if(phaseRef.current==="saving")return;
   epoch.current++;revision.current++;semanticAbort.current?.abort();voice.cancel();inbox.current=[];
   dataTurns.current=[];setTurns([]);draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);requestId.current=null;
-  setStage("dictating");say("下書きを破棄しました。新しいレシピを話してください。");
+  setStage("dictating");logVoiceEvent("draft.discarded.explicit","explicit cancel");say("下書きを破棄しました。新しいレシピを話してください。");
  }
  async function parse(next:string[],version:number){
   const current=epoch.current,aborter=new AbortController();semanticAbort.current=aborter;
-  say("Museが料理の文脈・数量・価格を解釈しています…");
+  logVoiceEvent("muse.start",`${next.length} turns`);say("Museが料理の文脈・数量・価格を解釈しています…");
   try{
    const out=await request<Draft>("/api/voice-recipe",{method:"POST",body:JSON.stringify({turns:next}),signal:aborter.signal});
-   if(!alive.current||epoch.current!==current||revision.current!==version)return;
+   if(!alive.current||epoch.current!==current||revision.current!==version){logVoiceEvent("muse.ok","stale result ignored");return;}
+   logVoiceEvent(draftRef.current?"draft.updated":"draft.created", "voice-recipe");
    draftRef.current=out;setDraft(out);reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
    say(out.missing.length||out.notes.length?"確認が必要です："+[...out.missing,...out.notes].join("、"):
     "下書きを更新しました。内容を確認し、「保存してください」と話すか、確認ボタンを押してください。");
   }catch{
-   if(alive.current&&epoch.current===current&&revision.current===version&&!aborter.signal.aborted)
+   if(alive.current&&epoch.current===current&&revision.current===version&&!aborter.signal.aborted){
+    logVoiceEvent("muse.fail","voice-recipe failed; draft kept");
     say("料理の解釈に失敗しました。保存していません。「解析を再試行」か補助入力で再開できます。");
+   }
   }
  }
  function showReview(){
