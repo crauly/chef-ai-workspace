@@ -59,6 +59,11 @@ class Ingredient:
     id: str
     name: str
     current_price: PriceQuote | None = None
+    # M5: reference to the adopted price observation (ingredients
+    # table). Observations never write these fields; adoption stays an
+    # explicit, separately approved write outside M5's scope.
+    adopted_observation_id: str | None = None
+    adopted_at: str | None = None
 
 
 @dataclass(frozen=True)

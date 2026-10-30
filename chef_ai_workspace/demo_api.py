@@ -442,3 +442,148 @@ def check_demo_chat_completions(request: Request, ctx=Depends(demo_context)):
     if not hasattr(provider, "check_chat_completions"):
         return {"status": "unsupported_provider"}
     return provider.check_chat_completions()
+
+
+# --- M5: price observations, comparison, impact (owner-scoped, read-mostly) ---
+
+class ObservationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    amount_jpy: str = Field(max_length=30)
+    currency: str = Field(default="JPY", max_length=10)
+    tax_note: str | None = Field(default=None, max_length=200)
+    shipping_note: str | None = Field(default=None, max_length=200)
+    source: str = Field(default="manual_entry", max_length=20)
+    confirmed: bool = False
+    observed_at: str | None = Field(default=None, max_length=40)
+
+
+def _observation_or_404(repository, owner: str, observation_id: str) -> dict:
+    getter = getattr(repository, "get_owned_observation", None)
+    if not callable(getter):
+        raise HTTPException(503, "Price history not configured")
+    try:
+        return getter(owner, observation_id)
+    except ValueError as exc:
+        raise HTTPException(404, "Observation not found or inaccessible") from exc
+
+
+def _to_price_observation(row: dict):
+    from .price_history import PriceObservation
+    return PriceObservation(
+        id=str(row["id"]), ingredient_id=str(row["ingredient_id"]),
+        offer_id=str(row["offer_id"]),
+        supplier_id=(str(row["supplier_id"]) if row.get("supplier_id") else None),
+        amount=str(row["amount_jpy"]), currency=str(row["currency"]),
+        tax_note=row.get("tax_note"), shipping_note=row.get("shipping_note"),
+        package_quantity=str(row.get("package_quantity") or ""),
+        package_unit=str(row.get("package_unit") or ""),
+        source=str(row["source"]), confirmed=bool(row.get("confirmed")),
+        observed_at=str(row.get("observed_at") or ""))
+
+
+@router.post("/offers/{offer_id}/observations", status_code=201)
+def create_demo_observation(offer_id: UUID, body: ObservationBody,
+                            ctx=Depends(demo_context)):
+    """Append one price fact. Appending never adopts a price: the
+    ingredient's current quote and adoption reference stay untouched."""
+    owner, repository = ctx
+    creator = getattr(repository, "create_owned_observation", None)
+    if not callable(creator):
+        raise HTTPException(409, "Price history not supported by repository")
+    try:
+        new_id = creator(
+            owner, str(offer_id), body.amount_jpy, currency=body.currency,
+            tax_note=body.tax_note, shipping_note=body.shipping_note,
+            source=body.source, confirmed=body.confirmed,
+            observed_at=body.observed_at)
+    except ValueError as exc:
+        if "not owned" in str(exc):
+            raise HTTPException(404, "Offer not found or inaccessible") from exc
+        raise HTTPException(422, str(exc)) from exc
+    return {"id": new_id}
+
+
+@router.get("/ingredients/{ingredient_id}/observations")
+def list_demo_observations(ingredient_id: UUID,
+                           limit: int = Query(default=100, ge=1, le=200),
+                           ctx=Depends(demo_context)):
+    """Append-only price history for one owned ingredient, newest first."""
+    owner, repository = ctx
+    lister = getattr(repository, "list_ingredient_observations", None)
+    if not callable(lister):
+        raise HTTPException(503, "Price history not configured")
+    try:
+        items = lister(owner, str(ingredient_id), limit=limit)
+    except ValueError as exc:
+        raise HTTPException(404, "Ingredient not found or inaccessible") from exc
+    return {"items": [_json(item) for item in items]}
+
+
+class CompareBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    candidate_observation_id: UUID
+    base_observation_id: UUID | None = None
+    base_adopted: bool = False
+
+
+@router.post("/ingredients/{ingredient_id}/observations/compare")
+def compare_demo_observations(ingredient_id: UUID, body: CompareBody,
+                              ctx=Depends(demo_context)):
+    """Compare a candidate observation against an explicit basis: either a
+    named observation or the ingredient's adopted price. Terms must match
+    exactly; otherwise reasons are returned and no numbers are invented."""
+    from .price_history import compare_observations
+    owner, repository = ctx
+    if (body.base_observation_id is None) == (not body.base_adopted):
+        raise HTTPException(422, "Exactly one comparison basis required")
+    candidate = _to_price_observation(_observation_or_404(
+        repository, owner, str(body.candidate_observation_id)))
+    if body.base_adopted:
+        adoption = getattr(repository, "get_owned_ingredient_adoption", None)
+        if not callable(adoption):
+            raise HTTPException(503, "Price history not configured")
+        try:
+            ref = adoption(owner, str(ingredient_id))
+        except ValueError as exc:
+            raise HTTPException(404, "Ingredient not found or inaccessible") from exc
+        if not ref.get("adopted_observation_id"):
+            raise HTTPException(422, "Ingredient has no adopted price")
+        base = _to_price_observation(_observation_or_404(
+            repository, owner, str(ref["adopted_observation_id"])))
+    else:
+        base = _to_price_observation(_observation_or_404(
+            repository, owner, str(body.base_observation_id)))
+    for obs in (base, candidate):
+        if obs.ingredient_id != str(ingredient_id):
+            raise HTTPException(422, "Observation does not belong to this ingredient")
+    return _json(asdict(compare_observations(base, candidate)))
+
+
+@router.get("/ingredients/{ingredient_id}/price-impact")
+def impact_demo_price(ingredient_id: UUID, observation_id: UUID,
+                      ctx=Depends(demo_context)):
+    """Hypothetical current-cost impact as if the observation were adopted.
+    Reads only: recipes, snapshots, and adopted prices are never written."""
+    from .price_history import assess_impact, observation_quote
+    owner, repository = ctx
+    finder = getattr(repository, "list_recipes_using_ingredient", None)
+    if not callable(finder):
+        raise HTTPException(503, "Price history not configured")
+    row = _observation_or_404(repository, owner, str(observation_id))
+    obs = _to_price_observation(row)
+    if obs.ingredient_id != str(ingredient_id):
+        raise HTTPException(422, "Observation does not belong to this ingredient")
+    quote = observation_quote(obs)
+    if quote is None:
+        raise HTTPException(422, "Observation package terms cannot price a line")
+    try:
+        recipes = finder(owner, str(ingredient_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Ingredient not found or inaccessible") from exc
+    needed = sorted({m.ingredient_id for recipe in recipes for m in recipe.materials
+                     if m.price_mode == "inherit" and m.ingredient_id})
+    loader = getattr(repository, "load_owned_ingredients", None)
+    catalog = loader(owner, needed) if callable(loader) else {}
+    impacts = assess_impact(tuple(recipes), catalog or {},
+                            str(ingredient_id), quote)
+    return {"items": [_json(asdict(impact)) for impact in impacts]}
