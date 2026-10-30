@@ -29,10 +29,13 @@ class HumanGateWiring(unittest.TestCase):
         self.assertIn("trusted_user_confirmed=True", DEMO)
 
     def test_no_route_calls_commit_rpc_directly(self):
+        # Routes must save only through save_* orchestration; direct
+        # repository.commit_*() or client.rpc("commit_*") calls bypass the
+        # Human Gate. Capability checks via getattr are allowed.
         for src, name in ((API, "api.py"), (DEMO, "demo_api.py")):
             with self.subTest(route=name):
-                self.assertNotIn("commit_recipe_revision", src)
-                self.assertNotIn("commit_recipe_with_ledger", src)
+                self.assertNotIn("repository.commit_", src)
+                self.assertNotIn('rpc("commit_', src)
 
     def test_old_path_accepts_no_ledger_writes(self):
         # Approval via the legacy path cannot create ingredients: there is

@@ -112,6 +112,74 @@ class SupabasePersistence:
                 current_price=_quote(row.get("current_price")))
         return catalog
 
+    def search_owned_ingredients(self, owner_id, query, limit=20):
+        """Owner-scoped ingredient search for reuse candidates and past-recipe
+        references. Returns id/name rows only; identity decisions stay with
+        the chef's explicit approval, never with proximity."""
+        if not isinstance(query, str) or not query.strip() or limit < 1:
+            return []
+        pattern = query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        response = (self.client.table("ingredients")
+                    .select("id,name,brand,spec").eq("owner_id", owner_id)
+                    .ilike("name", "%" + pattern + "%")
+                    .order("name").limit(min(limit, 50)).execute())
+        return response.data or []
+
+    def create_owned_supplier(self, owner_id, name, note=None):
+        """Minimal supplier registration. Owner is server-derived; the
+        0003 trigger rejects cross-owner references on dependent rows."""
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Supplier name required")
+        response = (self.client.table("suppliers")
+                    .insert({"owner_id": owner_id, "name": name.strip(),
+                             "note": note}).execute())
+        rows = response.data or []
+        if not rows or "id" not in rows[0]:
+            raise RuntimeError("Unexpected supplier insert response")
+        return rows[0]["id"]
+
+    def list_owned_suppliers(self, owner_id, limit=50):
+        response = (self.client.table("suppliers")
+                    .select("id,name,note").eq("owner_id", owner_id)
+                    .order("name").limit(min(max(limit, 1), 100)).execute())
+        return response.data or []
+
+    def create_owned_offer(self, owner_id, ingredient_id, supplier_id=None,
+                           product_url=None, package_quantity=None,
+                           package_unit=None, shipping_note=None):
+        """Minimal purchase-terms row. Ownership of the referenced ingredient
+        (and supplier, if given) is re-checked here; the 0003 trigger
+        enforces it again in the database regardless of role."""
+        owned = self.load_owned_ingredients(owner_id, [ingredient_id])
+        if ingredient_id not in owned:
+            raise ValueError("Ingredient not owned by caller")
+        if supplier_id is not None:
+            suppliers = (self.client.table("suppliers").select("id")
+                         .eq("owner_id", owner_id).eq("id", supplier_id)
+                         .limit(1).execute()).data or []
+            if not suppliers:
+                raise ValueError("Supplier not owned by caller")
+        response = (self.client.table("offers").insert({
+            "owner_id": owner_id, "ingredient_id": ingredient_id,
+            "supplier_id": supplier_id, "product_url": product_url,
+            "package_quantity": package_quantity, "package_unit": package_unit,
+            "shipping_note": shipping_note}).execute())
+        rows = response.data or []
+        if not rows or "id" not in rows[0]:
+            raise RuntimeError("Unexpected offer insert response")
+        return rows[0]["id"]
+
+    def list_ingredient_offers(self, owner_id, ingredient_id):
+        owned = self.load_owned_ingredients(owner_id, [ingredient_id])
+        if ingredient_id not in owned:
+            raise ValueError("Ingredient not owned by caller")
+        response = (self.client.table("offers")
+                    .select("id,supplier_id,product_url,package_quantity,"
+                            "package_unit,shipping_note")
+                    .eq("owner_id", owner_id).eq("ingredient_id", ingredient_id)
+                    .execute())
+        return response.data or []
+
     def commit_recipe_revision(self, *, owner_id, recipe_id, request_id,
                                base_revision, state, title, cost_snapshot,
                                payload_hash, save_version):

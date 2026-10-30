@@ -110,3 +110,34 @@ class AdapterTests(unittest.TestCase):
 
 if __name__=="__main__":
     unittest.main()
+
+class ProcurementAdapterTests(unittest.TestCase):
+    def test_search_keeps_owner_scope_and_escapes(self):
+        c=Client();c.tables["ingredients"]=[{"id":"i1","name":"片栗粉"}]
+        repo=SupabasePersistence(c)
+        self.assertEqual(repo.search_owned_ingredients("user-a","100%粉"),[{"id":"i1","name":"片栗粉"}])
+        self.assertIn(("owner_id","user-a"),c.queries[0].filters)
+        self.assertIn(("ilike","name","%100\\%粉%"),c.queries[0].filters)
+        self.assertEqual(repo.search_owned_ingredients("user-a","  "),[])
+
+    def test_create_offer_rejects_foreign_ingredient(self):
+        c=Client();c.tables["ingredients"]=[]
+        repo=SupabasePersistence(c)
+        with self.assertRaises(ValueError):
+            repo.create_owned_offer("user-a","foreign-id")
+        self.assertNotIn("offers",c.calls)
+
+    def test_create_offer_checks_supplier_ownership(self):
+        c=Client()
+        c.tables["ingredients"]=[{"id":"i1","name":"塩","current_price":None}]
+        c.tables["suppliers"]=[]
+        c.tables["offers"]=[{"id":"o1"}]
+        repo=SupabasePersistence(c)
+        with self.assertRaises(ValueError):
+            repo.create_owned_offer("user-a","i1",supplier_id="other-sup")
+
+    def test_list_offers_rejects_foreign_ingredient(self):
+        c=Client();c.tables["ingredients"]=[]
+        repo=SupabasePersistence(c)
+        with self.assertRaises(ValueError):
+            repo.list_ingredient_offers("user-a","foreign-id")

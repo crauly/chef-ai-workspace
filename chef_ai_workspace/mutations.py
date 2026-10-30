@@ -59,6 +59,31 @@ def prepare_mutation(recipe: Recipe, proposal: Proposal, *, user_confirmed: bool
             line = MaterialLine(id=op["material_id"], material_name=name, quantity=quantity,
                                 unit=unit, price_override=quote)
             candidate = replace(candidate, materials=candidate.materials + (line,))
+        elif kind == "add_unpriced_material":
+            # M4: voice/NL may know a material without its price (or quantity).
+            # The line is stored with no quote so costing reports partial with
+            # explicit unresolved IDs; never zero-filled or guessed.
+            _fields(op, {"op", "material_id", "name"}, {"quantity", "unit"})
+            try:
+                UUID(op["material_id"])
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise MutationError("Invalid material ID") from exc
+            if any(m.id == op["material_id"] for m in candidate.materials):
+                raise MutationError("Duplicate material ID")
+            name = _value(op["name"], user_confirmed)
+            if "quantity" in op:
+                quantity = _value(op["quantity"], user_confirmed)
+                unit = op.get("unit")
+                if decimal(quantity.value) < 0 or not isinstance(unit, str) or not unit.strip():
+                    raise MutationError("Invalid material quantity")
+            elif "unit" in op:
+                raise MutationError("Unit without quantity")
+            else:
+                quantity, unit = TrackedValue(None, "unresolved",
+                                              "user" if user_confirmed else "ai"), None
+            line = MaterialLine(id=op["material_id"], material_name=name,
+                                quantity=quantity, unit=unit, price_override=None)
+            candidate = replace(candidate, materials=candidate.materials + (line,))
         elif kind == "set_material_price":
             _fields(op, {"op", "material_id", "price_jpy", "price_quantity", "price_unit"})
             if not any(m.id == op["material_id"] for m in candidate.materials):

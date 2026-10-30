@@ -49,14 +49,37 @@ def list_demo_recipes(page: int = 1, page_size: int = 20,
 def get_demo_recipe(recipe_id: UUID, ctx=Depends(demo_context)):
     owner, repository=ctx
     try:
-        return asdict(repository.load_owned_recipe(owner, str(recipe_id)))
+        found = repository.load_owned_recipe(owner, str(recipe_id))
     except ValueError:
         raise HTTPException(404, "Recipe not found")
+    # M4: linked ingredient names lead; material names are kept and used as
+    # fallback for unlinked lines. Resolution never renames stored data.
+    from .display_names import resolve_display_names
+    ids = [m.ingredient_id for m in found.materials if m.ingredient_id]
+    loader = getattr(repository, "load_owned_ingredients", None)
+    if ids and callable(loader):
+        catalog = loader(owner, ids) or {}
+    elif any(m.price_mode == "inherit" for m in found.materials):
+        catalog = repository.load_owned_catalog(owner, found)
+    else:
+        catalog = {}
+    out = asdict(found)
+    out["display_names"] = resolve_display_names(found, catalog)
+    return out
 
 
 class CreateRecipeBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=200)
+
+
+class LedgerEntryBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: str = Field(pattern=r"^(new|reuse)$")
+    id: UUID | None = None
+    name: str | None = Field(default=None, max_length=200)
+    brand: str | None = Field(default=None, max_length=200)
+    spec: str | None = Field(default=None, max_length=200)
 
 
 class ConfirmChangeBody(BaseModel):
@@ -65,6 +88,9 @@ class ConfirmChangeBody(BaseModel):
     request_id: UUID
     operations: list[dict] = Field(min_length=1, max_length=40)
     save_version: bool = True
+    # Optional ledger (M4): new-ingredient registration and recipe linking
+    # complete as one approved request. Absent ledger keeps the legacy path.
+    ledger: list[LedgerEntryBody] = Field(default_factory=list)
 
 
 @router.post("/recipes", status_code=201)
@@ -83,11 +109,13 @@ def create_demo_recipe(body: CreateRecipeBody, ctx=Depends(demo_context)):
 class CompleteRecipeMaterial(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=200)
-    quantity: str = Field(min_length=1, max_length=30)
-    unit: str = Field(pattern=r"^(g|kg|ml|L)$")
-    price_jpy: str = Field(min_length=1, max_length=30)
-    price_quantity: str = Field(min_length=1, max_length=30)
-    price_unit: str = Field(pattern=r"^(g|kg|ml|L)$")
+    quantity: str | None = Field(default=None, max_length=30)
+    unit: str | None = Field(default=None, pattern=r"^(g|kg|ml|L)$")
+    # Prices are optional (M4): missing prices save the line unpriced and the
+    # cost stays partial with explicit unresolved IDs -- never zero-filled.
+    price_jpy: str | None = Field(default=None, max_length=30)
+    price_quantity: str | None = Field(default=None, max_length=30)
+    price_unit: str | None = Field(default=None, pattern=r"^(g|kg|ml|L)$")
 
 
 class CompleteRecipeBody(BaseModel):
@@ -111,11 +139,27 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
     for material in body.materials:
         if not material.name.strip():
             raise HTTPException(422, "Ingredient name required")
-        operations.append({"op": "add_material", "material_id": str(uuid4()),
-                           "name": material.name.strip(), "quantity": material.quantity,
-                           "unit": material.unit, "price_jpy": material.price_jpy,
-                           "price_quantity": material.price_quantity,
-                           "price_unit": material.price_unit})
+        priced = (material.price_jpy is not None and material.price_quantity is not None
+                  and material.price_unit is not None)
+        if priced:
+            if material.quantity is None or material.unit is None:
+                raise HTTPException(422, "Priced lines require quantity and unit")
+            operations.append({"op": "add_material", "material_id": str(uuid4()),
+                               "name": material.name.strip(), "quantity": material.quantity,
+                               "unit": material.unit, "price_jpy": material.price_jpy,
+                               "price_quantity": material.price_quantity,
+                               "price_unit": material.price_unit})
+        else:
+            if material.price_jpy is not None or material.price_quantity is not None:
+                raise HTTPException(422, "Partial price fields are rejected")
+            op = {"op": "add_unpriced_material", "material_id": str(uuid4()),
+                  "name": material.name.strip()}
+            if material.quantity is not None:
+                if material.unit is None:
+                    raise HTTPException(422, "Quantity requires unit")
+                op["quantity"] = material.quantity
+                op["unit"] = material.unit
+            operations.append(op)
     if body.selling_price_jpy is not None:
         operations.append({"op": "set_selling_price", "value_jpy": body.selling_price_jpy})
     recipe_id = str(body.request_id)
@@ -150,6 +194,20 @@ def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
     proposal = Proposal(str(recipe_id), body.base_revision, str(body.request_id),
                         tuple(body.operations))
     try:
+        if body.ledger:
+            from .persistence_service import LedgerIngredient, save_recipe_with_ledger
+            if not callable(getattr(repository, "commit_recipe_with_ledger", None)):
+                raise HTTPException(409, "Ledger commit not supported by repository")
+            ledger = tuple(LedgerIngredient(
+                e.kind, id=str(e.id) if e.id is not None else None,
+                name=e.name, brand=e.brand, spec=e.spec) for e in body.ledger)
+            saved = save_recipe_with_ledger(
+                owner_id=owner, trusted_user_confirmed=True,
+                proposal=proposal, ledger=ledger, repository=repository,
+                save_version=body.save_version)
+            return {"recipe": asdict(saved.recipe), "revision": saved.resulting_revision,
+                    "replayed": saved.replayed,
+                    "saved_ingredient_ids": list(saved.saved_ingredient_ids)}
         saved = save_validated_mutation(
             owner_id=owner, trusted_user_confirmed=True,
             proposal=proposal, repository=repository,
