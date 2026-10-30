@@ -54,13 +54,24 @@ def get_demo_recipe(recipe_id: UUID, ctx=Depends(demo_context)):
         raise HTTPException(404, "Recipe not found")
     # M4: linked ingredient names lead; material names are kept and used as
     # fallback for unlinked lines. Resolution never renames stored data.
+    return _displayed_recipe(owner, repository, found)
+
+
+class CreateRecipeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=200)
+
+
+def _displayed_recipe(owner, repository, found):
+    """Attach resolved display names without renaming stored data."""
     from .display_names import resolve_display_names
     ids = [m.ingredient_id for m in found.materials if m.ingredient_id]
     loader = getattr(repository, "load_owned_ingredients", None)
     if ids and callable(loader):
         catalog = loader(owner, ids) or {}
     elif any(m.price_mode == "inherit" for m in found.materials):
-        catalog = repository.load_owned_catalog(owner, found)
+        loader2 = getattr(repository, "load_owned_catalog", None)
+        catalog = loader2(owner, found) if callable(loader2) else {}
     else:
         catalog = {}
     out = asdict(found)
@@ -68,9 +79,68 @@ def get_demo_recipe(recipe_id: UUID, ctx=Depends(demo_context)):
     return out
 
 
-class CreateRecipeBody(BaseModel):
+def _owned_candidates(owner, repository, recipe, name):
+    """Owned-only candidate pool: search hits plus the recipe catalog."""
+    from .models import Ingredient as _Ingredient
+    pool: dict[str, _Ingredient] = {}
+    searcher = getattr(repository, "search_owned_ingredients", None)
+    if callable(searcher):
+        for row in searcher(owner, name) or []:
+            if isinstance(row, dict) and row.get("id") and row.get("name"):
+                pool[row["id"]] = _Ingredient(row["id"], row["name"], None)
+    try:
+        for gid, g in (repository.load_owned_catalog(owner, recipe) or {}).items():
+            pool.setdefault(gid, g)
+    except (ValueError, TypeError, AttributeError):
+        pass
+    return pool
+
+
+class AssistRequestBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    title: str = Field(min_length=1, max_length=200)
+    material_id: UUID
+    name: str = Field(min_length=1, max_length=200)
+
+
+@router.get("/ingredients/search")
+def search_demo_ingredients(q: str = Query(default="", max_length=200),
+                            limit: int = Query(default=20, ge=1, le=50),
+                            ctx=Depends(demo_context)):
+    """Owner-scoped ingredient search for reuse candidates (M4)."""
+    owner, repository = ctx
+    searcher = getattr(repository, "search_owned_ingredients", None)
+    if not callable(searcher):
+        raise HTTPException(503, "Ingredient search not configured")
+    return {"items": searcher(owner, q.strip(), limit) or []}
+
+
+@router.post("/recipes/{recipe_id}/ingredient-assist")
+def assist_demo_ingredient(recipe_id: UUID, body: AssistRequestBody,
+                           ctx=Depends(demo_context)):
+    """Classify one material against owned ingredients (M4).
+
+    Returns reuse/ambiguous/new with owned candidates only. For "new" the
+    server issues a suggested ID so the follow-up confirm can register and
+    link in one approved request; the suggestion itself saves nothing.
+    """
+    from .ingredient_assist import classify_material
+    owner, repository = ctx
+    try:
+        recipe = repository.load_owned_recipe(owner, str(recipe_id))
+    except ValueError:
+        raise HTTPException(404, "Recipe not found")
+    if not any(m.id == str(body.material_id) for m in recipe.materials):
+        raise HTTPException(404, "Material not found")
+    try:
+        candidate = classify_material(body.name, _owned_candidates(
+            owner, repository, recipe, body.name))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    out = {"decision": candidate.decision,
+           "candidates": [{"id": g.id, "name": g.name} for g in candidate.candidates]}
+    if candidate.decision == "new":
+        out["suggested_new_id"] = str(uuid4())
+    return out
 
 
 class LedgerEntryBody(BaseModel):
@@ -80,6 +150,18 @@ class LedgerEntryBody(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     brand: str | None = Field(default=None, max_length=200)
     spec: str | None = Field(default=None, max_length=200)
+
+    from pydantic import model_validator as _mv
+
+    @_mv(mode="after")
+    def _require_complete_spec(self):
+        # Incomplete specs are explicit input errors: a nameless new entry
+        # or an ID-less reuse must never be silently dropped or guessed.
+        if self.kind == "new" and not (self.name or "").strip():
+            raise ValueError("New ledger entry requires a name")
+        if self.kind == "reuse" and self.id is None:
+            raise ValueError("Reuse ledger entry requires an ingredient ID")
+        return self
 
 
 class ConfirmChangeBody(BaseModel):
@@ -169,7 +251,7 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
         existing = None
     if existing is not None:
         # An uncertain network retry must not create duplicates.
-        return asdict(existing)
+        return _displayed_recipe(owner, repository, existing)
     recipe = Recipe(recipe_id, TrackedValue(title, "confirmed", "user"))
     if operations:
         try:
@@ -185,7 +267,7 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
         repository.create_owned_recipe(owner, recipe, snapshot)
     except ValueError as exc:
         raise HTTPException(409, "Recipe already exists") from exc
-    return asdict(recipe)
+    return _displayed_recipe(owner, repository, recipe)
 
 @router.post("/recipes/{recipe_id}/confirm")
 def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
@@ -205,7 +287,8 @@ def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
                 owner_id=owner, trusted_user_confirmed=True,
                 proposal=proposal, ledger=ledger, repository=repository,
                 save_version=body.save_version)
-            return {"recipe": asdict(saved.recipe), "revision": saved.resulting_revision,
+            shown = _displayed_recipe(owner, repository, saved.recipe)
+            return {"recipe": shown, "revision": saved.resulting_revision,
                     "replayed": saved.replayed,
                     "saved_ingredient_ids": list(saved.saved_ingredient_ids)}
         saved = save_validated_mutation(
@@ -216,7 +299,8 @@ def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(404, "Recipe not found or inaccessible") from exc
-    return {"recipe": asdict(saved.recipe), "revision": saved.resulting_revision,
+    return {"recipe": _displayed_recipe(owner, repository, saved.recipe),
+            "revision": saved.resulting_revision,
             "replayed": saved.replayed}
 
 

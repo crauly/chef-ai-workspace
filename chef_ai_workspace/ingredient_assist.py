@@ -81,14 +81,12 @@ def build_approval_request(*, material_id: str, material_name: str,
     except (ValueError, TypeError, AttributeError) as exc:
         raise ValueError("Invalid material ID") from exc
     if candidate.decision in ("reuse", "ambiguous"):
-        wanted = approved_ingredient_id or (candidate.candidates[0].id
-                                            if candidate.decision == "reuse" and len(candidate.candidates) == 1
-                                            and approved_ingredient_id is None else None)
-        # Single exact reuse may default, but only to its sole candidate and
-        # only from an explicit approval call -- never from model text.
+        # The approved ID must always be stated explicitly, even for a single
+        # exact match: silence never implies the chef's choice.
         ids = {g.id for g in candidate.candidates}
-        if wanted is None or wanted not in ids:
+        if approved_ingredient_id is None or approved_ingredient_id not in ids:
             raise ValueError("Approved ingredient must be chosen from candidates")
+        wanted = approved_ingredient_id
         if inherit_price:
             ops = ({"op": "link_ingredient", "material_id": material_id,
                      "ingredient_id": wanted, "price_mode": "inherit"},)
