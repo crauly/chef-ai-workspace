@@ -700,21 +700,13 @@ def confirm_demo_observation(observation_id: UUID, ctx=Depends(demo_context)):
             "comparison": _json(result["comparison"])}
 
 
-@router.get("/ingredients/{ingredient_id}/sourcing-suggestions")
-def suggest_demo_sourcing(
-        ingredient_id: UUID,
-        max_candidates: int = Query(default=3, ge=1, le=10),
-        ctx=Depends(demo_context)):
-    """Propose alternate suppliers / substitute products (M7). Read-only.
+def _load_sourcing_inputs(owner, repository, ingredient_id):
+    """Shared read-only loader for sourcing suggestions (M7 pool).
 
-    Candidates come only from the caller's owned ledger: other offers of
-    the same ingredient, then similarly named owned ingredients (never
-    merged by name). External web retrieval is unavailable, so the
-    provider status says so instead of inventing listings. Nothing here
-    writes, adopts, or switches anything; the chef decides.
+    Bulk reads only: one bounded call per group, never one query per
+    offer or per similar ingredient (N+1). Raises HTTPException for
+    unknown/inaccessible ingredients. No writes.
     """
-    from .substitute_sourcing import suggest_sourcing
-    owner, repository = ctx
     loaders = ("load_owned_ingredients", "list_ingredient_offers",
                "list_latest_observations_for_offers",
                "list_latest_observations_for_ingredients",
@@ -807,12 +799,99 @@ def suggest_demo_sourcing(
                         "package_unit": row.get("package_unit") if row else None,
                         "observation": obs,
                         "data_origin": "ledger"})
+    return {"name": name, "adopted": adopted, "same_offers": same_offers,
+            "similar": similar,
+            "reference_supplier_id": reference_supplier_id,
+            "adopted_offer_id": adopted_offer_id}
+
+
+@router.get("/ingredients/{ingredient_id}/sourcing-suggestions")
+def suggest_demo_sourcing(
+        ingredient_id: UUID,
+        max_candidates: int = Query(default=3, ge=1, le=10),
+        ctx=Depends(demo_context)):
+    """Propose alternate suppliers / substitute products (M7). Read-only.
+
+    Candidates come only from the caller's owned ledger: other offers of
+    the same ingredient, then similarly named owned ingredients (never
+    merged by name). External web retrieval is unavailable, so the
+    provider status says so instead of inventing listings. Nothing here
+    writes, adopts, or switches anything; the chef decides.
+    """
+    from .substitute_sourcing import suggest_sourcing
+    owner, repository = ctx
+    loaded = _load_sourcing_inputs(owner, repository, str(ingredient_id))
+    name = loaded["name"]
+    adopted = loaded["adopted"]
+    same_offers = loaded["same_offers"]
+    similar = loaded["similar"]
+    reference_supplier_id = loaded["reference_supplier_id"]
+    adopted_offer_id = loaded["adopted_offer_id"]
     return _json(suggest_sourcing(
         ingredient_id=str(ingredient_id), ingredient_name=name,
         adopted=adopted, same_offers=same_offers, similar=similar,
         max_candidates=max_candidates,
         reference_supplier_id=reference_supplier_id,
         adopted_offer_id=adopted_offer_id))
+
+
+@router.get("/ingredients/{ingredient_id}/axis-suggestions")
+def suggest_demo_axis(ingredient_id: UUID,
+                      max_candidates: int = Query(default=3, ge=1, le=5),
+                      use_muse: bool = Query(default=True),
+                      request: Request = None,
+                      ctx=Depends(demo_context)):
+    """3-axis picks (cost / compatibility / quality) over owned ledger rows.
+
+    Read-only. The candidate pool is the M7 flow (other offers of the same
+    ingredient, then similarly named owned ingredients, never merged by
+    name; external retrieval stays unavailable). Cost is picked
+    deterministically in Python from the M5 comparison; compatibility and
+    quality come from at most one Muse semantic evaluation over
+    ledger-registered facts. Unqualifying axes stay empty with reasons;
+    nothing here writes, adopts, or switches anything.
+    """
+    import json
+    from .axis_sourcing import (AxisEvaluationError, assign_axes,
+                                build_axis_prompt)
+    from .substitute_sourcing import EXTERNAL_PROVIDER_STATUS, suggest_sourcing
+    owner, repository = ctx
+    loaded = _load_sourcing_inputs(owner, repository, str(ingredient_id))
+    pool = suggest_sourcing(
+        ingredient_id=str(ingredient_id), ingredient_name=loaded["name"],
+        adopted=loaded["adopted"], same_offers=loaded["same_offers"],
+        similar=loaded["similar"], max_candidates=10,
+        reference_supplier_id=loaded["reference_supplier_id"],
+        adopted_offer_id=loaded["adopted_offer_id"])
+    candidates = pool.get("candidates", [])
+    evaluations, skipped, muse_used, muse_error = [], 0, False, None
+    if use_muse:
+        provider = getattr(request.app.state, "ai_provider", None) \
+            if request is not None else None
+        if provider is None or not hasattr(provider, "evaluate_sourcing_axes"):
+            muse_error = "Muse axis evaluation not configured"
+        else:
+            try:
+                prompt = json.dumps(
+                    build_axis_prompt(loaded["name"], candidates),
+                    ensure_ascii=False)
+                evaluations = provider.evaluate_sourcing_axes(prompt)
+                muse_used = True
+            except AxisEvaluationError as exc:
+                muse_error = f"Muse response unusable: {exc}"
+            except Exception as exc:
+                muse_error = (f"Muse evaluation failed: "
+                              f"{type(exc).__name__}")
+    result = assign_axes(
+        ingredient_id=str(ingredient_id), ingredient_name=loaded["name"],
+        candidates=candidates, evaluations=evaluations,
+        skipped_evaluations=skipped, muse_used=muse_used,
+        muse_error=muse_error, max_picks=max_candidates)
+    result["provider"] = {"external": dict(EXTERNAL_PROVIDER_STATUS),
+                          "muse": result.pop("muse_status")}
+    if pool.get("shortage_note") and not result.get("shortage_note"):
+        result["shortage_note"] = pool["shortage_note"]
+    return _json(result)
 
 
 @router.get("/notifications")
