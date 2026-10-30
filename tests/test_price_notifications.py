@@ -214,6 +214,8 @@ class FakeRepo:
             note = {"id": nid, "owner": owner_id,
                     "observation_id": observation_id,
                     "ingredient_id": candidate["ingredient_id"],
+                    "basis_observation_id": basis_id,
+                    "unit_basis": comp.unit_basis,
                     "change_jpy": comp.diff, "status": "unread",
                     "created_at": "2026-10-30T00:00:00+00:00"}
             self.notifications[nid] = note
@@ -552,6 +554,149 @@ class StatusConflictTests(unittest.TestCase):
             "created_at": "2026-10-30T00:00:00+00:00"}
         with self.assertRaises(NotificationConflict):
             repo.update_notification_status(OWNER_1, "n", "resolved")
+
+
+class HistoryInvarianceTests(unittest.TestCase):
+    """Past notifications must not move when adoption changes later."""
+
+    def setUp(self):
+        self.repo = FakeRepo(OWNER_1)
+        app.state.demo_owner_id = OWNER_1
+        app.state.demo_access_token = "test-secret"
+        app.state.repository_factory = lambda: self.repo
+        self.client = TestClient(app, raise_server_exceptions=False)
+        self.h = {"X-Demo-Access": "test-secret"}
+
+    def tearDown(self):
+        self.client.close()
+        del app.state.demo_owner_id
+        del app.state.demo_access_token
+        del app.state.repository_factory
+
+    def _confirm(self, amount):
+        oid = self.repo.create_owned_observation(
+            OWNER_1, OFF_A, amount, currency="JPY", tax_note="税込",
+            shipping_note="送料込", source="purchase", confirmed=True,
+            observed_at="2026-10-21T10:00:00+00:00")
+        r = self.client.post(f"/demo/observations/{oid}/confirm", headers=self.h)
+        self.assertEqual(r.status_code, 201, r.text)
+        return r.json()
+
+    def test_adoption_change_leaves_history_untouched(self):
+        first = self._confirm("420")
+        nid = first["notification"]["id"]
+        before_list = self.client.get(
+            "/demo/notifications", headers=self.h).json()["items"][0]
+        before_detail = self.client.get(
+            f"/demo/notifications/{nid}", headers=self.h).json()
+        # Adopt a different price afterwards.
+        oid2 = self.repo.create_owned_observation(
+            OWNER_1, OFF_A, "500", currency="JPY", tax_note="税込",
+            shipping_note="送料込", source="purchase", confirmed=True,
+            observed_at="2026-10-22T10:00:00+00:00")
+        self.repo.ingredients[ING_A]["adopted"] = oid2
+        after_list = self.client.get(
+            "/demo/notifications", headers=self.h).json()["items"][0]
+        after_detail = self.client.get(
+            f"/demo/notifications/{nid}", headers=self.h).json()
+        self.assertEqual(after_list["basis_observation_id"], OBS_BASE)
+        self.assertEqual(after_list["unit_basis"], before_list["unit_basis"])
+        self.assertEqual(after_list["change_jpy"], before_list["change_jpy"])
+        self.assertEqual(after_detail["basis_observation_id"], OBS_BASE)
+        self.assertEqual(after_detail["comparison"]["unit_basis"],
+                         before_detail["comparison"]["unit_basis"])
+        self.assertEqual(after_detail["comparison"]["diff"],
+                         before_detail["comparison"]["diff"])
+        self.assertEqual(after_detail["comparison"]["diff"], "0.1400")
+        self.assertEqual({i["recipe_id"] for i in after_detail["items"]}, {R1})
+        # A new confirmation uses the new basis.
+        second = self._confirm("300")
+        self.assertEqual(second["comparison"]["basis_observation_id"], oid2)
+
+    def test_legacy_row_without_snapshot_still_readable(self):
+        first = self._confirm("420")
+        nid = first["notification"]["id"]
+        # Simulate a pre-0004 row: snapshot columns absent.
+        row = self.repo.notifications[nid]
+        del row["basis_observation_id"]
+        del row["unit_basis"]
+        items = self.client.get("/demo/notifications", headers=self.h).json()["items"]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["unit_basis"], "g")
+        detail = self.client.get(f"/demo/notifications/{nid}",
+                                 headers=self.h).json()
+        self.assertTrue(detail["comparable"])
+        self.assertEqual(detail["comparison"]["diff"], "0.1400")
+
+
+class AdapterSchemaFallbackTests(unittest.TestCase):
+    """Pre-0004 databases stay usable via the legacy column set."""
+
+    def _repo(self, handler):
+        from chef_ai_workspace.supabase_adapter import SupabasePersistence
+
+        class _Resp:
+            def __init__(self, data):
+                self.data = data
+
+        class _Query:
+            def __init__(self, table, handler):
+                self._table = table
+                self._handler = handler
+                self._cols = ""
+            def select(self, cols):
+                self._cols = cols
+                return self
+            def eq(self, *a, **k):
+                return self
+            def in_(self, *a, **k):
+                return self
+            def order(self, *a, **k):
+                return self
+            def limit(self, *a, **k):
+                return self
+            def update(self, *a, **k):
+                return self
+            def execute(self):
+                return _Resp(self._handler(self._table, self._cols))
+
+        class _Tables:
+            def table(self, name):
+                return _Query(name, handler)
+
+        repo = SupabasePersistence.__new__(SupabasePersistence)
+        repo.client = _Tables()
+        return repo
+
+    def test_list_falls_back_on_missing_columns(self):
+        from postgrest.exceptions import APIError
+        calls = []
+
+        def _handle(table, cols):
+            calls.append(cols)
+            if "basis_observation_id" in cols:
+                raise APIError({"code": "42703",
+                                "message": 'column "basis_observation_id" does not exist'})
+            return [{"id": "n", "observation_id": "o", "ingredient_id": "i",
+                     "change_jpy": "0.1", "status": "unread",
+                     "created_at": "2026-10-30T00:00:00+00:00"}]
+
+        repo = self._repo(_handle)
+        rows = repo.list_owned_notifications(OWNER_1)
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(any("basis_observation_id" in c for c in calls))
+        self.assertTrue(any("basis_observation_id" not in c for c in calls))
+
+    def test_non_column_errors_are_not_swallowed(self):
+        from postgrest.exceptions import APIError
+
+        def _handle(table, cols):
+            raise APIError({"code": "42501",
+                            "message": "permission denied"})
+
+        repo = self._repo(_handle)
+        with self.assertRaises(APIError):
+            repo.list_owned_notifications(OWNER_1)
 
 
 if __name__ == "__main__":

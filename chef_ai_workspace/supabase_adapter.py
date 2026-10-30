@@ -356,6 +356,31 @@ class SupabasePersistence:
 
     # --- M6: price-change notifications (explicit confirmation only) ---
 
+    # price_notifications columns. The basis snapshot (migration 0004)
+    # may be absent on databases created before it is applied; reads
+    # and writes fall back to the legacy column set in that case.
+    _NOTIFICATION_COLS_FULL = ("id,observation_id,ingredient_id,"
+                               "basis_observation_id,unit_basis,change_jpy,"
+                               "status,created_at")
+    _NOTIFICATION_COLS_LEGACY = ("id,observation_id,ingredient_id,change_jpy,"
+                                 "status,created_at")
+
+    @staticmethod
+    def _is_missing_column(exc: Exception) -> bool:
+        code = str(getattr(exc, "code", "") or "")
+        message = str(getattr(exc, "message", None) or exc).lower()
+        return code == "42703" or "basis_observation_id" in message or (
+            "unit_basis" in message and "column" in message)
+
+    def _exec_notification_query(self, build):
+        """Run a notification SELECT, tolerating pre-0004 schemas."""
+        try:
+            return build(self._NOTIFICATION_COLS_FULL).execute()
+        except APIError as exc:
+            if not self._is_missing_column(exc):
+                raise
+            return build(self._NOTIFICATION_COLS_LEGACY).execute()
+
     def confirm_observation_notification(self, owner_id, observation_id):
         """Confirm one price observation and notify exactly once.
 
@@ -404,29 +429,50 @@ class SupabasePersistence:
         comparison = comparison if comparison is not None else compare_observations(base, cand)
         if not should:
             raise ValueError("incomparable: " + "; ".join(reasons))
+        from .price_notifications import comparison_payload
+        payload = comparison_payload(comparison, str(basis_id))
         try:
-            response = (self.client.table("price_notifications").insert({
-                "owner_id": owner_id, "observation_id": observation_id,
-                "ingredient_id": ingredient_id,
-                "change_jpy": comparison.diff,
-                "status": "unread"}).execute())
+            try:
+                response = (self.client.table("price_notifications").insert({
+                    "owner_id": owner_id, "observation_id": observation_id,
+                    "ingredient_id": ingredient_id,
+                    "basis_observation_id": str(basis_id),
+                    "unit_basis": comparison.unit_basis,
+                    "change_jpy": comparison.diff,
+                    "status": "unread"}).execute())
+            except APIError as column_exc:
+                if not self._is_missing_column(column_exc):
+                    raise
+                response = (self.client.table("price_notifications").insert({
+                    "owner_id": owner_id, "observation_id": observation_id,
+                    "ingredient_id": ingredient_id,
+                    "change_jpy": comparison.diff,
+                    "status": "unread"}).execute())
         except Exception as exc:
-            if "23505" in str(getattr(exc, "code", "") or "") or                "duplicate" in str(exc).lower() or "unique" in str(exc).lower() or                "conflict" in str(exc).lower():
-                existing = (self.client.table("price_notifications")
-                            .select("id,observation_id,ingredient_id,change_jpy,"
-                                    "status,created_at")
-                            .eq("owner_id", owner_id)
-                            .eq("observation_id", observation_id)
-                            .limit(1).execute()).data or []
+            if "23505" in str(getattr(exc, "code", "") or "") or \
+               "duplicate" in str(exc).lower() or "unique" in str(exc).lower() or \
+               "conflict" in str(exc).lower():
+                existing = self._exec_notification_query(
+                    lambda cols: self.client.table("price_notifications")
+                    .select(cols)
+                    .eq("owner_id", owner_id)
+                    .eq("observation_id", observation_id)
+                    .limit(1)).data or []
                 if not existing:
                     raise
-                return {"created": False, "notification": existing[0],
+                note = dict(existing[0])
+                note.setdefault("basis_observation_id", str(basis_id))
+                note.setdefault("unit_basis", comparison.unit_basis)
+                return {"created": False, "notification": note,
                         "comparison": payload}
             raise
         rows = response.data or []
         if not rows or "id" not in rows[0]:
             raise RuntimeError("Unexpected notification insert response")
-        return {"created": True, "notification": rows[0],
+        note = dict(rows[0])
+        note.setdefault("basis_observation_id", str(basis_id))
+        note.setdefault("unit_basis", comparison.unit_basis)
+        return {"created": True, "notification": note,
                 "comparison": payload}
 
     def get_owned_observations(self, owner_id, ids):
@@ -470,23 +516,23 @@ class SupabasePersistence:
         from .price_notifications import STATUSES
         if status is not None and status not in STATUSES:
             raise ValueError("Unknown notification status")
-        query = (self.client.table("price_notifications")
-                 .select("id,observation_id,ingredient_id,change_jpy,"
-                         "status,created_at")
-                 .eq("owner_id", owner_id))
-        if status is not None:
-            query = query.eq("status", status)
-        rows = (query.order("created_at", desc=True)
-                .limit(min(max(int(limit), 1), 200)).execute()).data or []
-        return rows
+        def _build(cols):
+            query = (self.client.table("price_notifications")
+                     .select(cols)
+                     .eq("owner_id", owner_id))
+            if status is not None:
+                query = query.eq("status", status)
+            return query.order("created_at", desc=True).limit(
+                min(max(int(limit), 1), 200))
+        return self._exec_notification_query(_build).data or []
 
     def get_owned_notification(self, owner_id, notification_id):
         """One owned notification, or ValueError when inaccessible."""
-        rows = (self.client.table("price_notifications")
-                .select("id,observation_id,ingredient_id,change_jpy,"
-                        "status,created_at")
-                .eq("owner_id", owner_id).eq("id", notification_id)
-                .limit(1).execute()).data or []
+        rows = self._exec_notification_query(
+            lambda cols: self.client.table("price_notifications")
+            .select(cols)
+            .eq("owner_id", owner_id).eq("id", notification_id)
+            .limit(1)).data or []
         if not rows:
             raise ValueError("Notification not owned by caller")
         return rows[0]

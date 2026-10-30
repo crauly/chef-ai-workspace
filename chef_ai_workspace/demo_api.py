@@ -560,11 +560,15 @@ def compare_demo_observations(ingredient_id: UUID, body: CompareBody,
 
 
 def _impact_envelope(owner: str, repository, ingredient_id: str,
-                   observation_id: str) -> dict:
+                   observation_id: str,
+                   basis_override: str | None = None) -> dict:
     """Shared M5 envelope for price-impact and M6 notification detail.
 
-    Compares the candidate against the adopted basis; without a basis
-    or on term mismatch no yen cost difference is produced. Reads only.
+    Compares the candidate against the adopted basis, or against
+    basis_override when a notification carries its creation-time
+    basis: past notifications then reproduce their original numbers
+    even after the adopted price moves. Without a basis or on term
+    mismatch no yen cost difference is produced. Reads only.
     """
     from .price_history import assess_impact, compare_observations, observation_quote
     finder = getattr(repository, "list_recipes_using_ingredient", None)
@@ -581,7 +585,33 @@ def _impact_envelope(owner: str, repository, ingredient_id: str,
         ref = adoption(owner, ingredient_id)
     except ValueError as exc:
         raise HTTPException(404, "Ingredient not found or inaccessible") from exc
-    basis_id = ref.get("adopted_observation_id")
+    if basis_override is not None:
+        basis_id = basis_override
+        try:
+            base = _to_price_observation(_observation_or_404(
+                repository, owner, str(basis_id)))
+        except ValueError:
+            return {"basis_observation_id": str(basis_id),
+                    "comparable": False,
+                    "reasons": ["original price basis unavailable"],
+                    "items": []}
+        if base.ingredient_id != ingredient_id:
+            return {"basis_observation_id": str(basis_id),
+                    "comparable": False,
+                    "reasons": ["original price basis unavailable"],
+                    "items": []}
+        comparison = compare_observations(base, obs)
+        if not comparison.comparable:
+            return {"basis_observation_id": str(basis_id),
+                    "comparable": False,
+                    "reasons": list(comparison.reasons), "items": []}
+        if obs.currency != "JPY" or base.currency != "JPY":
+            return {"basis_observation_id": str(basis_id),
+                    "comparable": False,
+                    "reasons": ["non-JPY currency cannot be used for JPY cost impact"],
+                    "items": []}
+    else:
+        basis_id = ref.get("adopted_observation_id")
     if not basis_id:
         return {"basis_observation_id": None, "comparable": False,
                 "reasons": ["no adopted price basis"], "items": []}
@@ -693,43 +723,60 @@ def list_demo_notifications(status: str | None = Query(default=None, max_length=
     enriched = []
     candidate_rows: dict = {}
     basis_rows: dict = {}
-    basis_by_ingredient: dict = {}
-    if callable(bulk) and callable(adoption) and items:
+    if callable(bulk) and items:
         try:
             candidate_rows = bulk(
                 owner, [str(i["observation_id"]) for i in items])
-            ingredient_ids = sorted({str(r["ingredient_id"])
-                                     for r in candidate_rows.values()})
-            basis_ids: dict[str, str] = {}
-            for iid in ingredient_ids:
-                try:
-                    ref = adoption(owner, iid)
-                except ValueError:
-                    continue
-                if ref.get("adopted_observation_id"):
-                    basis_ids[iid] = str(ref["adopted_observation_id"])
-            if basis_ids:
-                basis_rows = bulk(owner, list(basis_ids.values()))
-            basis_by_ingredient = {
-                iid: basis_rows[bid] for iid, bid in basis_ids.items()
-                if bid in basis_rows}
+            # Stored creation-time bases first: history must not move
+            # when the adopted price changes later.
+            stored_basis_ids = sorted({
+                str(i["basis_observation_id"]) for i in items
+                if i.get("basis_observation_id")})
+            legacy_ingredient_ids: dict[str, str] = {}
+            if callable(adoption):
+                for i in items:
+                    if not i.get("basis_observation_id"):
+                        row0 = candidate_rows.get(str(i["observation_id"]))
+                        if row0 is not None:
+                            legacy_ingredient_ids[str(i["observation_id"])] = \
+                                str(row0["ingredient_id"])
+            current_basis_ids: dict[str, str] = {}
+            if callable(adoption):
+                for oid, iid in legacy_ingredient_ids.items():
+                    try:
+                        ref = adoption(owner, iid)
+                    except ValueError:
+                        continue
+                    if ref.get("adopted_observation_id"):
+                        current_basis_ids[oid] = str(
+                            ref["adopted_observation_id"])
+            wanted = sorted(set(stored_basis_ids)
+                            | set(current_basis_ids.values()))
+            if wanted:
+                basis_rows = bulk(owner, wanted)
         except ValueError:
             candidate_rows, basis_rows = {}, {}
-            basis_by_ingredient = {}
     for item in items:
-        extra: dict = {"unit_basis": None, "currency": None}
+        extra: dict = {"unit_basis": item.get("unit_basis"),
+                       "currency": None}
         row = candidate_rows.get(str(item["observation_id"]))
-        base_row = (basis_by_ingredient.get(str(row["ingredient_id"]))
-                    if row is not None else None)
-        if row is not None and base_row is not None:
-            comp = compare_observations(_to_price_observation(base_row),
-                                        _to_price_observation(row))
-            if comp.comparable:
-                extra = {"unit_basis": comp.unit_basis,
-                         "currency": comp.currency}
-            else:
-                extra = {"unit_basis": None, "currency": None,
-                         "reasons": list(comp.reasons)}
+        basis_id = item.get("basis_observation_id")
+        if row is not None:
+            if not basis_id:
+                basis_id = current_basis_ids.get(str(item["observation_id"]))
+            base_row = basis_rows.get(str(basis_id)) if basis_id else None
+            if base_row is not None:
+                comp = compare_observations(
+                    _to_price_observation(base_row),
+                    _to_price_observation(row))
+                if comp.comparable:
+                    extra = {"unit_basis": item.get("unit_basis")
+                             or comp.unit_basis,
+                             "currency": comp.currency}
+                else:
+                    extra = {"unit_basis": item.get("unit_basis"),
+                             "currency": None,
+                             "reasons": list(comp.reasons)}
         enriched.append({**item, **extra})
     return {"items": [_json(item) for item in enriched]}
 @router.get("/notifications/{notification_id}")
@@ -742,7 +789,9 @@ def get_demo_notification(notification_id: UUID, ctx=Depends(demo_context)):
     note = _notification_or_404(repository, owner, str(notification_id))
     row = _observation_or_404(repository, owner, str(note["observation_id"]))
     envelope = _impact_envelope(owner, repository, str(note["ingredient_id"]),
-                                str(note["observation_id"]))
+                                str(note["observation_id"]),
+                                basis_override=(str(note["basis_observation_id"])
+                                    if note.get("basis_observation_id") else None))
     comparison: dict = {"comparable": envelope["comparable"],
                         "reasons": envelope["reasons"],
                         "currency": None, "unit_basis": None,
@@ -756,7 +805,8 @@ def get_demo_notification(notification_id: UUID, ctx=Depends(demo_context)):
                                     _to_price_observation(row))
         if comp.comparable:
             comparison.update(currency=comp.currency,
-                              unit_basis=comp.unit_basis,
+                              unit_basis=(note.get("unit_basis")
+                                          or comp.unit_basis),
                               base_unit_price=comp.base_unit_price,
                               new_unit_price=comp.new_unit_price,
                               diff=comp.diff, rate_pct=comp.rate_pct)
