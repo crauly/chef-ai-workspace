@@ -154,6 +154,35 @@ class LedgerSaveTests(unittest.TestCase):
         self.assertEqual(a1[0]["id"], a2[0]["id"])
         self.assertNotEqual(a1[0]["id"], b[0]["id"])
 
+    def test_reuse_foreign_id_rejected_without_writes(self):
+        # P1 abnormal: another user's ingredient ID must not attach.
+        db = FakeLedgerRepository()
+        db.load_owned_ingredients = lambda owner, ids: {}
+        db.load_owned_catalog = lambda owner, recipe: {}
+        with self.assertRaises(MutationError):
+            run(db, [{"op": "set_title", "value": "x"}],
+                [LedgerIngredient("reuse", id="99999999-9999-9999-9999-999999999999")])
+        self.assertEqual(db.writes, [])
+
+    def test_new_ingredient_bound_to_line_and_visible_on_reload(self):
+        # P2一体: one approved request registers the ingredient AND links it.
+        db = FakeLedgerRepository()
+        new_id = "55555555-5555-5555-5555-555555555555"
+        out = run(db, [{"op": "link_ingredient", "material_id": "m1",
+                        "ingredient_id": new_id, "price_mode": "override",
+                        "price_jpy": "200", "price_quantity": "100", "price_unit": "g"}],
+                  [LedgerIngredient("new", id=new_id, name="片栗粉")])
+        self.assertFalse(out.replayed)
+        self.assertEqual(out.saved_ingredient_ids, (new_id,))
+        line = [m for m in out.recipe.materials if m.id == "m1"][0]
+        self.assertEqual(line.ingredient_id, new_id)
+        # Reload path: the fake only bumps revision on commit, so persist the
+        # returned candidate the way the real RPC persists state, then reload.
+        db.current = out.recipe
+        reloaded = db.load_owned_recipe("user-a", "r1")
+        self.assertEqual([m for m in reloaded.materials if m.id == "m1"][0].ingredient_id, new_id)
+        self.assertIn(new_id, db.load_owned_catalog("user-a", reloaded))
+
     def test_negative_rpc_revision_counts_as_replay(self):
         db = FakeLedgerRepository()
         orig = db.commit_recipe_with_ledger

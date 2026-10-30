@@ -74,6 +74,18 @@ class LinkTest(unittest.TestCase):
         self.assertEqual(cost.line_price_sources["m1"], "line_override")
         self.assertEqual(cost.line_costs["m1"], 200)
 
+    def test_link_override_foreign_id_rejected(self):
+        # P1 abnormal: another user's ingredient ID is absent from the owned
+        # catalog, so both inherit and override links must be rejected.
+        foreign = "99999999-9999-9999-9999-999999999999"
+        for mode in ("inherit", "override"):
+            op = {"op": "link_ingredient", "material_id": "m1",
+                  "ingredient_id": foreign, "price_mode": mode,
+                  "price_jpy": "999", "price_quantity": "100", "price_unit": "g"}
+            with self.subTest(mode=mode):
+                with self.assertRaises(MutationError):
+                    apply(fixture(), [op], cat=catalog())
+
     def test_unconfirmed_link_is_assumed(self):
         out = apply(fixture(), [{"op": "link_ingredient", "material_id": "m1",
                                  "ingredient_id": IID, "price_mode": "override",

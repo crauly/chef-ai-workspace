@@ -131,6 +131,14 @@ def save_recipe_with_ledger(*, owner_id: str, trusted_user_confirmed: bool,
     Price proposals alone never adopt master prices: new ingredients carry no
     price or adopted reference unless explicitly supplied through later
     adoption flows. Confirmation binding follows prepare_mutation exactly.
+
+    Human Gate: calling this function IS the save. The caller must invoke it
+    only from an explicit user approval action (POST /recipes/{id}/confirm
+    or the operator-gated demo confirm). trusted_user_confirmed selects
+    value provenance (True: attributable instructions become "confirmed";
+    False: values stay "assumed"/estimate) -- it is NOT a save-approval
+    flag, and False still persists. Never derive either argument from
+    model output or client fields.
     """
     if not isinstance(owner_id, str) or not owner_id.strip():
         raise MutationError("Verified user ID required")
@@ -229,6 +237,12 @@ def save_validated_mutation(*, owner_id: str, trusted_user_confirmed: bool,
     The repository's atomic RPC enforces request-id replay and revision CAS.
     The caller MUST derive owner_id and confirmation evidence from auth/session,
     not from client/AI-provided fields.
+
+    Human Gate: calling this function IS the save -- invoke only from an
+    explicit user approval action (POST /recipes/{id}/confirm or the
+    operator-gated demo confirm). trusted_user_confirmed=False still
+    persists; it only keeps values "assumed" (estimate) instead of
+    promoting them to "confirmed".
     """
     if not isinstance(owner_id, str) or not owner_id.strip():
         raise MutationError("Verified user ID required")
