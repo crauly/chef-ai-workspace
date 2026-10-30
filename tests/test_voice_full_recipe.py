@@ -7,6 +7,7 @@ from chef_ai_workspace.api import app
 class Repository:
     def __init__(self):
         self.stored = {}
+        self.snapshots = {}
         self.writes = 0
     def load_owned_recipe(self, owner_id, recipe_id):
         key = (owner_id, recipe_id)
@@ -19,6 +20,7 @@ class Repository:
             raise ValueError("Duplicate")
         assert "total_cost_jpy" in snapshot
         self.stored[key] = recipe
+        self.snapshots[key] = snapshot
         self.writes += 1
 
 
@@ -75,6 +77,37 @@ class VoiceFullRecipeTests(unittest.TestCase):
         self.assertEqual(second.status_code, 201, second.text)
         self.assertEqual(first.json()["id"], second.json()["id"])
         self.assertEqual(self.repo.writes, 1)
+
+    def test_unconfirmed_save_with_missing_prices_stays_partial(self):
+        # Voice unconfirmed scenario: unknown prices arrive as null (the UI
+        # normalizes missing strings), lines store no override, and the cost
+        # stays partial with a null total -- never zero-filled or guessed.
+        body = self.payload()
+        body["materials"][1] = {"name": "卵", "quantity": "100", "unit": "g",
+                                "price_jpy": None, "price_quantity": None,
+                                "price_unit": None}
+        response = self.client.post("/demo/recipes/full", json=body, headers=self.headers)
+        self.assertEqual(response.status_code, 201, response.text)
+        recipe = response.json()
+        line = [m for m in recipe["materials"]
+                if m["material_name"]["value"] == "卵"][0]
+        self.assertIsNone(line["price_override"])
+        snapshot = self.repo.snapshots[(self.owner, recipe["id"])]
+        self.assertTrue(snapshot["partial"])
+        self.assertIsNone(snapshot["total_cost_jpy"])
+        self.assertIn(line["id"], snapshot["unresolved_line_ids"])
+        self.assertEqual(self.repo.writes, 1)
+
+    def test_empty_string_prices_rejected_not_zero_filled(self):
+        # The voice UI must normalize missing prices to null before saving;
+        # raw empty strings are explicit input errors, never silent zeroes.
+        body = self.payload()
+        body["materials"][1] = {"name": "卵", "quantity": "100", "unit": "g",
+                                "price_jpy": "", "price_quantity": "",
+                                "price_unit": ""}
+        response = self.client.post("/demo/recipes/full", json=body, headers=self.headers)
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(self.repo.writes, 0)
 
     def test_invalid_numbers_fail_before_database_write(self):
         for quantity in ["abc", "-10", "NaN"]:
