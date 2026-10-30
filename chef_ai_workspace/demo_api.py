@@ -563,8 +563,13 @@ def compare_demo_observations(ingredient_id: UUID, body: CompareBody,
 def impact_demo_price(ingredient_id: UUID, observation_id: UUID,
                       ctx=Depends(demo_context)):
     """Hypothetical current-cost impact as if the observation were adopted.
-    Reads only: recipes, snapshots, and adopted prices are never written."""
-    from .price_history import assess_impact, observation_quote
+
+    The candidate is gated on the adopted price basis: without an
+    adopted observation, or when currency/tax/shipping/package terms do
+    not match, no yen cost difference is produced -- reasons are
+    returned instead and nothing is guessed. Reads only: recipes,
+    snapshots, and adopted prices are never written."""
+    from .price_history import assess_impact, compare_observations, observation_quote
     owner, repository = ctx
     finder = getattr(repository, "list_recipes_using_ingredient", None)
     if not callable(finder):
@@ -573,6 +578,27 @@ def impact_demo_price(ingredient_id: UUID, observation_id: UUID,
     obs = _to_price_observation(row)
     if obs.ingredient_id != str(ingredient_id):
         raise HTTPException(422, "Observation does not belong to this ingredient")
+    adoption = getattr(repository, "get_owned_ingredient_adoption", None)
+    if not callable(adoption):
+        raise HTTPException(503, "Price history not configured")
+    try:
+        ref = adoption(owner, str(ingredient_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Ingredient not found or inaccessible") from exc
+    basis_id = ref.get("adopted_observation_id")
+    if not basis_id:
+        return {"basis_observation_id": None, "comparable": False,
+                "reasons": ["no adopted price basis"], "items": []}
+    base = _to_price_observation(_observation_or_404(
+        repository, owner, str(basis_id)))
+    comparison = compare_observations(base, obs)
+    if not comparison.comparable:
+        return {"basis_observation_id": str(basis_id), "comparable": False,
+                "reasons": list(comparison.reasons), "items": []}
+    if obs.currency != "JPY" or base.currency != "JPY":
+        return {"basis_observation_id": str(basis_id), "comparable": False,
+                "reasons": ["non-JPY currency cannot be used for JPY cost impact"],
+                "items": []}
     quote = observation_quote(obs)
     if quote is None:
         raise HTTPException(422, "Observation package terms cannot price a line")
@@ -586,4 +612,6 @@ def impact_demo_price(ingredient_id: UUID, observation_id: UUID,
     catalog = loader(owner, needed) if callable(loader) else {}
     impacts = assess_impact(tuple(recipes), catalog or {},
                             str(ingredient_id), quote)
-    return {"items": [_json(asdict(impact)) for impact in impacts]}
+    return {"basis_observation_id": str(basis_id), "comparable": True,
+            "reasons": [],
+            "items": [_json(asdict(impact)) for impact in impacts]}

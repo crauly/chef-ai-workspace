@@ -200,7 +200,8 @@ class FakeRepo:
         return {"ingredient_id": ingredient_id,
                 "adopted_observation_id": row["adopted"], "adopted_at": None}
 
-    def list_recipes_using_ingredient(self, owner_id, ingredient_id, limit=100):
+    def list_recipes_using_ingredient(self, owner_id, ingredient_id, limit=100,
+                                     page_size=200):
         if owner_id != self.owner:
             raise ValueError("Ingredient not owned by caller")
         self._owned_ingredient(owner_id, ingredient_id)
@@ -326,7 +327,11 @@ class ApiTests(unittest.TestCase):
             f"/demo/ingredients/{ING_A}/price-impact?observation_id=" + OBS_BASE + "",
             headers=self.h)
         self.assertEqual(r.status_code, 200, r.text)
-        items = {item["recipe_id"]: item for item in r.json()["items"]}
+        body = r.json()
+        self.assertTrue(body["comparable"])
+        self.assertEqual(body["basis_observation_id"], OBS_BASE)
+        self.assertEqual(body["reasons"], [])
+        items = {item["recipe_id"]: item for item in body["items"]}
         self.assertEqual(set(items), {R1, R2})
         self.assertEqual(items[R1]["diff"], "0")
         self.assertEqual(items[R1]["unchanged_lines"], [L_OVERRIDE])
@@ -345,6 +350,169 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.get(
             f"/demo/ingredients/{ING_A}/observations",
             headers=self.h).status_code, 404)
+
+
+class RoundingRegressionTests(unittest.TestCase):
+    def test_micro_unit_price_rate_from_raw_values(self):
+        # 1 JPY vs 2 JPY per 3000 g: raw unit prices round to 0.0003/0.0007
+        # but the difference and rate must come from raw values.
+        out = compare_observations(
+            obs("m1", amount="1", qty="3000", unit="g"),
+            obs("m2", amount="2", qty="3000", unit="g"))
+        self.assertTrue(out.comparable, out.reasons)
+        self.assertEqual(out.base_unit_price, "0.0003")
+        self.assertEqual(out.new_unit_price, "0.0007")
+        self.assertEqual(out.diff, "0.0003")
+        self.assertEqual(out.rate_pct, "100.0")
+
+    def test_tiny_amounts_do_not_raise(self):
+        out = compare_observations(
+            obs("t1", amount="0.01", qty="1000", unit="g"),
+            obs("t2", amount="0.02", qty="1000", unit="g"))
+        self.assertTrue(out.comparable, out.reasons)
+        self.assertEqual(out.rate_pct, "100.0")
+
+    def test_zero_basis_is_incomparable(self):
+        out = compare_observations(
+            obs("z1", amount="0", qty="500", unit="g"),
+            obs("z2", amount="100", qty="500", unit="g"))
+        self.assertFalse(out.comparable)
+        self.assertTrue(any("zero basis" in r for r in out.reasons))
+        self.assertIsNone(out.diff)
+
+
+class QuoteGateTests(unittest.TestCase):
+    def test_rejects_non_jpy(self):
+        self.assertIsNone(observation_quote(obs("u1", currency="USD", amount="10")))
+
+    def test_rejects_missing_unit(self):
+        bad = obs("u2")
+        bad = bad.__class__(**{**bad.__dict__, "package_unit": ""})
+        self.assertIsNone(observation_quote(bad))
+
+
+class PaginationTests(unittest.TestCase):
+    def test_lists_every_matching_recipe(self):
+        from chef_ai_workspace.supabase_adapter import SupabasePersistence
+        total = 250
+        states = []
+        for i in range(total):
+            states.append({"state": {
+                "id": f"r-{i}",
+                "title": {"value": "t", "status": "confirmed",
+                          "origin": "user"},
+                "materials": [{"id": f"line-{i}",
+                               "material_name": {"value": "x",
+                                                 "status": "confirmed",
+                                                 "origin": "user"},
+                               "quantity": {"value": "10",
+                                            "status": "confirmed",
+                                            "origin": "user"},
+                               "unit": "g", "ingredient_id": ING_A,
+                               "price_mode": "inherit"}],
+                "selling_price_jpy": {"value": "100", "status": "confirmed",
+                                      "origin": "user"},
+                "cost_adjustment_jpy": {"value": "0", "status": "confirmed",
+                                        "origin": "user"},
+                "revision": 1}})
+
+        class _Resp:
+            def __init__(self, data):
+                self.data = data
+
+        class _Query:
+            def __init__(self, rows):
+                self._rows = rows
+                self._lo = 0
+                self._hi = 0
+            def select(self, *a, **k):
+                return self
+            def eq(self, *a, **k):
+                return self
+            def range(self, lo, hi):
+                self._lo, self._hi = lo, hi
+                return self
+            def limit(self, *a, **k):
+                return self
+            def execute(self):
+                return _Resp(self._rows[self._lo:self._hi + 1])
+
+        class _Tables:
+            def __init__(self, rows):
+                self._rows = rows
+            def table(self, name):
+                return _Query(self._rows)
+
+        repo = SupabasePersistence.__new__(SupabasePersistence)
+        repo.client = _Tables(states)
+        repo.load_owned_ingredients = lambda owner, ids: {ING_A: object()}
+        got = repo.list_recipes_using_ingredient(OWNER_1, ING_A, limit=1000,
+                                                 page_size=60)
+        self.assertEqual(len(got), total)
+
+
+class ImpactGateApiTests(unittest.TestCase):
+    def setUp(self):
+        self.repo = FakeRepo(OWNER_1)
+        app.state.demo_owner_id = OWNER_1
+        app.state.demo_access_token = "test-secret"
+        app.state.repository_factory = lambda: self.repo
+        self.client = TestClient(app, raise_server_exceptions=False)
+        self.h = {"X-Demo-Access": "test-secret"}
+
+    def tearDown(self):
+        self.client.close()
+        del app.state.demo_owner_id
+        del app.state.demo_access_token
+        del app.state.repository_factory
+
+    def test_terms_mismatch_returns_reasons_without_items(self):
+        offer = {"owner": OWNER_1, "ingredient_id": ING_A,
+                 "supplier_id": SUP_A, "package_quantity": "400",
+                 "package_unit": "g"}
+        self.repo.offers["99999999-9999-9999-9999-999999999999"] = offer
+        new_id = self.repo.create_owned_observation(
+            OWNER_1, "99999999-9999-9999-9999-999999999999", "300",
+            currency="JPY", tax_note="\u7a0e\u5225",
+            shipping_note="\u9001\u6599\u8fbc", source="purchase",
+            confirmed=True, observed_at="2026-10-21T10:00:00+00:00")
+        r = self.client.get(
+            f"/demo/ingredients/{ING_A}/price-impact?observation_id={new_id}",
+            headers=self.h)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertFalse(r.json()["comparable"])
+        self.assertEqual(r.json()["items"], [])
+        self.assertTrue(r.json()["reasons"])
+
+    def test_no_adopted_basis_returns_reasons(self):
+        offer = {"owner": OWNER_1, "ingredient_id": ING_B,
+                 "supplier_id": SUP_A, "package_quantity": "500",
+                 "package_unit": "g"}
+        self.repo.offers["88888888-8888-8888-8888-888888888888"] = offer
+        new_id = self.repo.create_owned_observation(
+            OWNER_1, "88888888-8888-8888-8888-888888888888", "100",
+            currency="JPY", tax_note="\u7a0e\u8fbc",
+            shipping_note="\u9001\u6599\u8fbc", source="purchase",
+            confirmed=True, observed_at="2026-10-21T10:00:00+00:00")
+        r = self.client.get(
+            f"/demo/ingredients/{ING_B}/price-impact?observation_id={new_id}",
+            headers=self.h)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertFalse(r.json()["comparable"])
+        self.assertEqual(r.json()["reasons"], ["no adopted price basis"])
+        self.assertEqual(r.json()["items"], [])
+
+    def test_non_jpy_candidate_never_prices_jpy_cost(self):
+        new_id = self.repo.create_owned_observation(
+            OWNER_1, OFF_A, "10", currency="USD", tax_note="\u7a0e\u8fbc",
+            shipping_note="\u9001\u6599\u8fbc", source="purchase",
+            confirmed=True, observed_at="2026-10-21T10:00:00+00:00")
+        r = self.client.get(
+            f"/demo/ingredients/{ING_A}/price-impact?observation_id={new_id}",
+            headers=self.h)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertFalse(r.json()["comparable"])
+        self.assertEqual(r.json()["items"], [])
 
 
 if __name__ == "__main__":

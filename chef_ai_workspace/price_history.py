@@ -125,20 +125,30 @@ def compare_observations(base: PriceObservation,
     if reasons:
         return ComparisonResult(False, tuple(reasons), None, None,
                                 None, None, None, None)
+    # Difference and rate come from the raw unit prices; display rounding
+    # happens last so micro unit prices are not distorted. base_unit > 0
+    # here, so the rate division is safe.
+    diff_raw = new_unit - base_unit
+    rate_raw = diff_raw / base_unit * Decimal("100")
     quant = Decimal("0.0001")
     base_out = base_unit.quantize(quant, rounding=ROUND_HALF_UP)
     new_out = new_unit.quantize(quant, rounding=ROUND_HALF_UP)
-    diff = (new_out - base_out).quantize(quant, rounding=ROUND_HALF_UP)
-    rate = (diff / base_out * Decimal("100")).quantize(
-        Decimal("0.1"), rounding=ROUND_HALF_UP)
+    diff = diff_raw.quantize(quant, rounding=ROUND_HALF_UP)
+    rate = rate_raw.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
     return ComparisonResult(True, (), base.currency, unit_basis,
                             str(base_out), str(new_out), str(diff), str(rate))
 
 
 def observation_quote(obs: PriceObservation) -> PriceQuote | None:
-    """Derive a hypothetical quote from an observation, or None when its
-    package terms cannot price anything (never guessed). The quote is
-    marked assumed/estimated so impact results stay estimates."""
+    """Derive a hypothetical JPY quote from an observation, or None when
+    its package terms cannot price anything (never guessed). Non-JPY
+    observations are refused so USD amounts are never copied into
+    yen recipe totals. The quote is marked assumed/estimated so impact
+    results stay estimates."""
+    if obs.currency != "JPY":
+        return None
+    if not (obs.package_unit or "").strip():
+        return None
     if _positive(obs.package_quantity) is None:
         return None
     try:

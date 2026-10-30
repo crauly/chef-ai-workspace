@@ -301,24 +301,48 @@ class SupabasePersistence:
                 "adopted_observation_id": rows[0].get("adopted_observation_id"),
                 "adopted_at": rows[0].get("adopted_at")}
 
-    def list_recipes_using_ingredient(self, owner_id, ingredient_id, limit=100):
-        """Decode owned recipes that reference one ingredient. One state
-        query filtered in Python; no per-recipe round trips."""
+    def list_recipes_using_ingredient(self, owner_id, ingredient_id,
+                                      limit=100, page_size=200):
+        """Decode every owned recipe referencing one ingredient.
+
+        The ingredient predicate runs after paging through the owner's
+        full recipe set, so recipes beyond the first window are never
+        silently dropped. ``limit`` caps returned matches for callers
+        that need a bound; ``page_size`` bounds each state query.
+        """
         owned = self.load_owned_ingredients(owner_id, [ingredient_id])
         if ingredient_id not in owned:
             raise ValueError("Ingredient not owned by caller")
-        rows = (self.client.table("recipes").select("state")
-                .eq("owner_id", owner_id)
-                .range(0, min(max(limit, 1), 200) - 1).execute()).data or []
+        try:
+            wanted = int(limit)
+        except (TypeError, ValueError):
+            wanted = 0
+        if wanted <= 0:
+            return []
+        try:
+            stride = int(page_size)
+        except (TypeError, ValueError):
+            stride = 200
+        stride = min(max(stride, 1), 1000)
         out = []
-        for row in rows:
-            try:
-                recipe = decode_recipe(row.get("state") or {})
-            except (ValueError, TypeError, KeyError, AttributeError):
-                continue
-            if any(m.ingredient_id == ingredient_id for m in recipe.materials):
-                out.append(recipe)
-        return out
+        offset = 0
+        while True:
+            rows = (self.client.table("recipes").select("state")
+                    .eq("owner_id", owner_id)
+                    .range(offset, offset + stride - 1).execute()).data or []
+            for row in rows:
+                try:
+                    recipe = decode_recipe(row.get("state") or {})
+                except (ValueError, TypeError, KeyError, AttributeError):
+                    continue
+                if any(m.ingredient_id == ingredient_id
+                       for m in recipe.materials):
+                    out.append(recipe)
+                    if len(out) >= wanted:
+                        return out
+            if len(rows) < stride:
+                return out
+            offset += stride
 
     def list_ingredient_offers(self, owner_id, ingredient_id):
         owned = self.load_owned_ingredients(owner_id, [ingredient_id])
