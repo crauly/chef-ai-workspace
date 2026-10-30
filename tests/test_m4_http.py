@@ -47,12 +47,21 @@ class Repo:
     def get_mutation_receipt(self, owner_id, request_id):
         return self.receipts.get(request_id)
     def commit_recipe_with_ledger(self, **kw):
-        self.receipts[kw["request_id"]] = (kw["payload_hash"], kw["base_revision"] + 1)
+        state = kw.get("state") or {}
+        revised = state.get("revision", kw["base_revision"] + 1)
+        self.receipts[kw["request_id"]] = (kw["payload_hash"], revised)
         for item in kw["new_ingredients"]:
             self.catalog[item["id"]] = Ingredient(item["id"], item["name"], None)
         current = self.recipes[kw["recipe_id"]]
-        self.recipes[kw["recipe_id"]] = replace(current, revision=kw["base_revision"] + 1)
-        return kw["base_revision"] + 1
+        # Persist the canonical state the orchestration committed, the way
+        # the atomic RPC would, so a reload shows the same links.
+        by_id = {m.get("id"): m for m in state.get("materials", [])}
+        lines = [replace(m, ingredient_id=(by_id[m.id].get("ingredient_id")
+                                           if m.id in by_id else m.ingredient_id))
+                 for m in current.materials]
+        self.recipes[kw["recipe_id"]] = replace(
+            current, materials=tuple(lines), revision=revised)
+        return revised
 
 
 class M4HttpTests(unittest.TestCase):
@@ -111,6 +120,38 @@ class M4HttpTests(unittest.TestCase):
         self.assertEqual(body["recipe"]["display_names"][LINE_ID]["display"],
                          "オリーブオイル")
         self.assertEqual(body["recipe"]["display_names"][LINE_ID]["material"], "パスタ")
+
+    def test_assist_to_confirm_to_reload_same_id(self):
+        # End-to-end with one ID: assist issues suggested_new_id, the same ID
+        # registers+links in confirm, and reload shows the link and display.
+        assist = self.client.post(f"/demo/recipes/{RECIPE_ID}/ingredient-assist",
+                                  json={"material_id": LINE_ID, "name": "オリーブオイル"},
+                                  headers=self.h)
+        self.assertEqual(assist.status_code, 200, assist.text)
+        self.assertEqual(assist.json()["decision"], "new")
+        new_id = assist.json()["suggested_new_id"]
+        confirm = self.client.post(f"/demo/recipes/{RECIPE_ID}/confirm", headers=self.h, json={
+            "base_revision": 0, "request_id": str(uuid4()),
+            "operations": [{"op": "link_ingredient", "material_id": LINE_ID,
+                            "ingredient_id": new_id, "price_mode": "override",
+                            "price_jpy": "200", "price_quantity": "100",
+                            "price_unit": "g"}],
+            "ledger": [{"kind": "new", "id": new_id, "name": "オリーブオイル"}]})
+        self.assertEqual(confirm.status_code, 200, confirm.text)
+        self.assertEqual(confirm.json()["saved_ingredient_ids"], [new_id])
+        reloaded = self.client.get(f"/demo/recipes/{RECIPE_ID}", headers=self.h)
+        self.assertEqual(reloaded.status_code, 200, reloaded.text)
+        reloaded_line = next(m for m in reloaded.json()["materials"] if m["id"] == LINE_ID)
+        self.assertEqual(reloaded_line["ingredient_id"], new_id)
+        self.assertEqual(reloaded.json()["display_names"][LINE_ID]["display"],
+                         "オリーブオイル")
+
+    def test_price_unit_only_is_422(self):
+        r = self.client.post("/demo/recipes/full", headers=self.h, json={
+            "request_id": str(uuid4()), "title": "t",
+            "materials": [{"name": "塩", "quantity": "5", "unit": "g",
+                           "price_unit": "g"}]})
+        self.assertEqual(r.status_code, 422)
 
     def test_incomplete_ledger_and_prices_are_422(self):
         base = {"base_revision": 0, "request_id": str(uuid4()),

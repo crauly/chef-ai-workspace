@@ -232,7 +232,10 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
                                "price_quantity": material.price_quantity,
                                "price_unit": material.price_unit})
         else:
-            if material.price_jpy is not None or material.price_quantity is not None:
+            # Price trio is all-or-nothing: any single field (including a lone
+            # price_unit) is an explicit input error, never silently dropped.
+            if (material.price_jpy is not None or material.price_quantity is not None
+                    or material.price_unit is not None):
                 raise HTTPException(422, "Partial price fields are rejected")
             op = {"op": "add_unpriced_material", "material_id": str(uuid4()),
                   "name": material.name.strip()}
