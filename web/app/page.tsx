@@ -3,6 +3,7 @@ import {useCallback,useEffect,useRef,useState} from "react";
 import {label, type Locale} from "./i18n";
 import AIEditor,{type EditorHandle} from "./AIEditor";
 import VoiceWorkspace from "./VoiceWorkspace";
+import PriceBell from "./PriceBell";
 import {request, startupRead, type Recipe} from "./types";
 type Item={id:string;title:string;revision:number;updated_at?:string};
 export default function Library(){
@@ -85,6 +86,7 @@ export default function Library(){
   return new Promise(resolve=>{browseWaiter.current=resolve;search(target,true);});
  }
  return <main><header><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">日本語</option><option value="en-US">English (US)</option></select></label></div><h1>{t("library")}</h1><p className="muted">{t("intro")}</p></header>
+ <PriceBell locale={locale}/>
  <VoiceWorkspace locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} onCreated={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");setError("");void reload();}}/>
  <form onSubmit={create}><input aria-label={t("newName")} placeholder={t("newName")} value={draft} onChange={e=>setDraft(e.target.value)}/><button disabled={busy||!draft.trim()}>{t("create")}</button></form>
  <form onSubmit={e=>{e.preventDefault();search(searchInput);}}>

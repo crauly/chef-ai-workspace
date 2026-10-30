@@ -354,6 +354,285 @@ class SupabasePersistence:
                 return out
             offset += stride
 
+    # --- M6: price-change notifications (explicit confirmation only) ---
+
+    # price_notifications columns. The basis snapshot (migration 0004)
+    # may be absent on databases created before it is applied; reads
+    # and writes fall back to the legacy column set in that case.
+    _NOTIFICATION_COLS_FULL = ("id,observation_id,ingredient_id,"
+                               "basis_observation_id,unit_basis,change_jpy,"
+                               "status,created_at")
+    _NOTIFICATION_COLS_LEGACY = ("id,observation_id,ingredient_id,change_jpy,"
+                                 "status,created_at")
+
+    @staticmethod
+    def _is_missing_column(exc: Exception) -> bool:
+        code = str(getattr(exc, "code", "") or "")
+        message = str(getattr(exc, "message", None) or exc).lower()
+        return code == "42703" or "basis_observation_id" in message or (
+            "unit_basis" in message and "column" in message)
+
+    def _exec_notification_query(self, build):
+        """Run a notification SELECT, tolerating pre-0004 schemas."""
+        try:
+            return build(self._NOTIFICATION_COLS_FULL).execute()
+        except APIError as exc:
+            if not self._is_missing_column(exc):
+                raise
+            return build(self._NOTIFICATION_COLS_LEGACY).execute()
+
+    def confirm_observation_notification(self, owner_id, observation_id):
+        """Confirm one price observation and notify exactly once.
+
+        Compares the candidate against the ingredient's adopted basis
+        (M5 rules). Missing bases and incomparable terms raise
+        ValueError with reasons and create nothing. The insert relies
+        on unique(observation_id); a conflicting concurrent insert or
+        resend returns the existing row with created=False instead of
+        a duplicate. change_jpy stores the unit-price difference in
+        JPY per comparison unit_basis -- never a recipe total. Never
+        adopts prices or rewrites recipes.
+        """
+        from .price_history import compare_observations
+        from .price_notifications import decide_notification
+        candidate = self.get_owned_observation(owner_id, observation_id)
+        ingredient_id = candidate["ingredient_id"]
+        ref = self.get_owned_ingredient_adoption(owner_id, ingredient_id)
+        basis_id = ref.get("adopted_observation_id")
+        if not basis_id:
+            raise ValueError("no adopted price basis")
+        basis = self.get_owned_observation(owner_id, basis_id)
+        from .price_history import PriceObservation as _Obs
+        base = _Obs(
+            id=str(basis["id"]), ingredient_id=str(basis["ingredient_id"]),
+            offer_id=str(basis["offer_id"]),
+            supplier_id=(str(basis["supplier_id"]) if basis.get("supplier_id") else None),
+            amount=str(basis["amount_jpy"]), currency=str(basis["currency"]),
+            tax_note=basis.get("tax_note"), shipping_note=basis.get("shipping_note"),
+            package_quantity=str(basis.get("package_quantity") or ""),
+            package_unit=str(basis.get("package_unit") or ""),
+            source=str(basis["source"]), confirmed=bool(basis.get("confirmed")),
+            observed_at=str(basis.get("observed_at") or ""))
+        cand = _Obs(
+            id=str(candidate["id"]), ingredient_id=str(candidate["ingredient_id"]),
+            offer_id=str(candidate["offer_id"]),
+            supplier_id=(str(candidate["supplier_id"]) if candidate.get("supplier_id") else None),
+            amount=str(candidate["amount_jpy"]), currency=str(candidate["currency"]),
+            tax_note=candidate.get("tax_note"),
+            shipping_note=candidate.get("shipping_note"),
+            package_quantity=str(candidate.get("package_quantity") or ""),
+            package_unit=str(candidate.get("package_unit") or ""),
+            source=str(candidate["source"]),
+            confirmed=bool(candidate.get("confirmed")),
+            observed_at=str(candidate.get("observed_at") or ""))
+        should, comparison, reasons = decide_notification(base, cand)
+        comparison = comparison if comparison is not None else compare_observations(base, cand)
+        if not should:
+            raise ValueError("incomparable: " + "; ".join(reasons))
+        from .price_notifications import comparison_payload
+        payload = comparison_payload(comparison, str(basis_id))
+        try:
+            try:
+                response = (self.client.table("price_notifications").insert({
+                    "owner_id": owner_id, "observation_id": observation_id,
+                    "ingredient_id": ingredient_id,
+                    "basis_observation_id": str(basis_id),
+                    "unit_basis": comparison.unit_basis,
+                    "change_jpy": comparison.diff,
+                    "status": "unread"}).execute())
+            except APIError as column_exc:
+                if not self._is_missing_column(column_exc):
+                    raise
+                response = (self.client.table("price_notifications").insert({
+                    "owner_id": owner_id, "observation_id": observation_id,
+                    "ingredient_id": ingredient_id,
+                    "change_jpy": comparison.diff,
+                    "status": "unread"}).execute())
+        except Exception as exc:
+            if "23505" in str(getattr(exc, "code", "") or "") or \
+               "duplicate" in str(exc).lower() or "unique" in str(exc).lower() or \
+               "conflict" in str(exc).lower():
+                existing = self._exec_notification_query(
+                    lambda cols: self.client.table("price_notifications")
+                    .select(cols)
+                    .eq("owner_id", owner_id)
+                    .eq("observation_id", observation_id)
+                    .limit(1)).data or []
+                if not existing:
+                    raise
+                note = dict(existing[0])
+                stored_basis = note.get("basis_observation_id")
+                if stored_basis:
+                    try:
+                        basis_row = self.get_owned_observation(
+                            owner_id, str(stored_basis))
+                    except ValueError:
+                        basis_row = None
+                    if basis_row is not None:
+                        base_snap = _Obs(
+                            id=str(basis_row["id"]),
+                            ingredient_id=str(basis_row["ingredient_id"]),
+                            offer_id=str(basis_row["offer_id"]),
+                            supplier_id=(str(basis_row["supplier_id"])
+                                         if basis_row.get("supplier_id") else None),
+                            amount=str(basis_row["amount_jpy"]),
+                            currency=str(basis_row["currency"]),
+                            tax_note=basis_row.get("tax_note"),
+                            shipping_note=basis_row.get("shipping_note"),
+                            package_quantity=str(
+                                basis_row.get("package_quantity") or ""),
+                            package_unit=str(basis_row.get("package_unit") or ""),
+                            source=str(basis_row["source"]),
+                            confirmed=bool(basis_row.get("confirmed")),
+                            observed_at=str(basis_row.get("observed_at") or ""))
+                        cand_snap = _Obs(
+                            id=str(candidate["id"]),
+                            ingredient_id=str(candidate["ingredient_id"]),
+                            offer_id=str(candidate["offer_id"]),
+                            supplier_id=(str(candidate["supplier_id"])
+                                         if candidate.get("supplier_id") else None),
+                            amount=str(candidate["amount_jpy"]),
+                            currency=str(candidate["currency"]),
+                            tax_note=candidate.get("tax_note"),
+                            shipping_note=candidate.get("shipping_note"),
+                            package_quantity=str(
+                                candidate.get("package_quantity") or ""),
+                            package_unit=str(candidate.get("package_unit") or ""),
+                            source=str(candidate["source"]),
+                            confirmed=bool(candidate.get("confirmed")),
+                            observed_at=str(candidate.get("observed_at") or ""))
+                        _should, snap_comp, _reasons = decide_notification(
+                            base_snap, cand_snap)
+                        snap_comp = (snap_comp if snap_comp is not None
+                                     else compare_observations(base_snap, cand_snap))
+                        snap_payload = comparison_payload(
+                            snap_comp, str(stored_basis))
+                        return {"created": False, "notification": note,
+                                "comparison": snap_payload}
+                # Legacy rows (pre-0004, no stored basis) or a basis that
+                # is no longer readable: history cannot be guaranteed, so
+                # return no invented numbers.
+                legacy_payload = {
+                    "comparable": False,
+                    "reasons": ["original price basis unavailable"],
+                    "currency": None,
+                    "unit_basis": note.get("unit_basis"),
+                    "base_unit_price": None,
+                    "new_unit_price": None,
+                    "diff": None,
+                    "rate_pct": None,
+                    "basis_observation_id": stored_basis,
+                }
+                return {"created": False, "notification": note,
+                        "comparison": legacy_payload}
+            raise
+        rows = response.data or []
+        if not rows or "id" not in rows[0]:
+            raise RuntimeError("Unexpected notification insert response")
+        note = dict(rows[0])
+        note.setdefault("basis_observation_id", str(basis_id))
+        note.setdefault("unit_basis", comparison.unit_basis)
+        return {"created": True, "notification": note,
+                "comparison": payload}
+
+    def get_owned_observations(self, owner_id, ids):
+        """Bulk owned observations with offer terms, keyed by id.
+
+        Fail-closed: any missing or foreign id raises ValueError and
+        nothing is returned.
+        """
+        uniq = list(dict.fromkeys(str(i) for i in ids))
+        if not uniq:
+            return {}
+        rows = (self.client.table("price_observations")
+                .select("id,offer_id,amount_jpy,currency,tax_note,"
+                        "shipping_note,source,confirmed,observed_at")
+                .eq("owner_id", owner_id).in_("id", uniq)
+                .execute()).data or []
+        by_id = {row["id"]: row for row in rows}
+        missing = [i for i in uniq if i not in by_id]
+        if missing:
+            raise ValueError("Observation not owned by caller")
+        offers = (self.client.table("offers")
+                  .select("id,ingredient_id,supplier_id,package_quantity,"
+                          "package_unit")
+                  .eq("owner_id", owner_id)
+                  .in_("id", [row["offer_id"] for row in rows])
+                  .execute()).data or []
+        by_offer = {row["id"]: row for row in offers}
+        out = {}
+        for oid, row in by_id.items():
+            offer = by_offer.get(row["offer_id"])
+            if offer is None:
+                raise ValueError("Observation offer not owned by caller")
+            out[oid] = {**row, "ingredient_id": offer["ingredient_id"],
+                        "supplier_id": offer.get("supplier_id"),
+                        "package_quantity": offer.get("package_quantity"),
+                        "package_unit": offer.get("package_unit")}
+        return out
+
+    def list_owned_notifications(self, owner_id, status=None, limit=100):
+        """Owner-scoped notifications, newest first. Optional status filter."""
+        from .price_notifications import STATUSES
+        if status is not None and status not in STATUSES:
+            raise ValueError("Unknown notification status")
+        def _build(cols):
+            query = (self.client.table("price_notifications")
+                     .select(cols)
+                     .eq("owner_id", owner_id))
+            if status is not None:
+                query = query.eq("status", status)
+            return query.order("created_at", desc=True).limit(
+                min(max(int(limit), 1), 200))
+        return self._exec_notification_query(_build).data or []
+
+    def get_owned_notification(self, owner_id, notification_id):
+        """One owned notification, or ValueError when inaccessible."""
+        rows = self._exec_notification_query(
+            lambda cols: self.client.table("price_notifications")
+            .select(cols)
+            .eq("owner_id", owner_id).eq("id", notification_id)
+            .limit(1)).data or []
+        if not rows:
+            raise ValueError("Notification not owned by caller")
+        return rows[0]
+
+    def update_notification_status(self, owner_id, notification_id, status):
+        """Move a notification's status with compare-and-swap.
+
+        The write only applies when the stored status is a legal
+        predecessor of the target, so a concurrent move is detected
+        instead of silently overwritten: no rows then means either a
+        lost race (NotificationConflict) or a foreign id
+        (ValueError). Status only: prices, suppliers, recipes, and
+        snapshots are never touched here.
+        """
+        from .price_notifications import (
+            ALLOWED_SOURCES, STATUSES, NotificationConflict, check_transition)
+        if status not in STATUSES:
+            raise ValueError("Unknown notification status")
+        response = (self.client.table("price_notifications")
+                    .update({"status": status})
+                    .eq("owner_id", owner_id).eq("id", notification_id)
+                    .in_("status", [status, *ALLOWED_SOURCES[status]])
+                    .execute())
+        rows = response.data or []
+        if rows:
+            current_status = rows[0]["status"]
+            if current_status != status:
+                raise RuntimeError("Unexpected notification update response")
+            return rows[0]
+        try:
+            current = self.get_owned_notification(owner_id, notification_id)
+        except ValueError:
+            raise ValueError("Notification not owned by caller") from None
+        if current["status"] == status:
+            return current
+        check_transition(current["status"], status)
+        raise NotificationConflict(
+            f"Notification {notification_id} moved concurrently; "
+            f"stored status is {current['status']}")
+
     def list_ingredient_offers(self, owner_id, ingredient_id):
         owned = self.load_owned_ingredients(owner_id, [ingredient_id])
         if ingredient_id not in owned:
