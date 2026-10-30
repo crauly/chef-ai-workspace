@@ -130,7 +130,7 @@ class MetaResponsesProvider:
         payload = json.dumps({
             "model": self.model, "instructions": instructions,
             "input": json.dumps({"utterance": utterance, "current_mode": current_mode}, ensure_ascii=False),
-            "store": False, "max_output_tokens": 120, "reasoning": {"effort": "low"},
+            "store": False, "max_output_tokens": 1024, "reasoning": {"effort": "low"},
         }, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(ENDPOINT, data=payload, method="POST", headers={
             "Content-Type": "application/json", "Authorization": "Bearer " + self.api_key,

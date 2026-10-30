@@ -53,7 +53,7 @@ class TestMetaVoiceIntent(unittest.TestCase):
         payload = json.loads(opener.request.data)
         self.assertEqual(payload["model"], "muse-spark-1.3")
         self.assertIs(payload["store"], False)
-        self.assertEqual(payload["max_output_tokens"], 120)
+        self.assertEqual(payload["max_output_tokens"], 1024)
 
     def test_reject_unsafe_or_malformed_model_output(self):
         for invalid in [
