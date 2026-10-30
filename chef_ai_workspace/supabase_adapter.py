@@ -364,7 +364,9 @@ class SupabasePersistence:
         ValueError with reasons and create nothing. The insert relies
         on unique(observation_id); a conflicting concurrent insert or
         resend returns the existing row with created=False instead of
-        a duplicate. Never adopts prices or rewrites recipes.
+        a duplicate. change_jpy stores the unit-price difference in
+        JPY per comparison unit_basis -- never a recipe total. Never
+        adopts prices or rewrites recipes.
         """
         from .price_history import compare_observations
         from .price_notifications import decide_notification
@@ -419,20 +421,49 @@ class SupabasePersistence:
                 if not existing:
                     raise
                 return {"created": False, "notification": existing[0],
-                        "comparison": {"comparable": True,
-                                       "reasons": [],
-                                       "diff": comparison.diff,
-                                       "rate_pct": comparison.rate_pct,
-                                       "currency": comparison.currency}}
+                        "comparison": payload}
             raise
         rows = response.data or []
         if not rows or "id" not in rows[0]:
             raise RuntimeError("Unexpected notification insert response")
         return {"created": True, "notification": rows[0],
-                "comparison": {"comparable": True, "reasons": [],
-                               "diff": comparison.diff,
-                               "rate_pct": comparison.rate_pct,
-                               "currency": comparison.currency}}
+                "comparison": payload}
+
+    def get_owned_observations(self, owner_id, ids):
+        """Bulk owned observations with offer terms, keyed by id.
+
+        Fail-closed: any missing or foreign id raises ValueError and
+        nothing is returned.
+        """
+        uniq = list(dict.fromkeys(str(i) for i in ids))
+        if not uniq:
+            return {}
+        rows = (self.client.table("price_observations")
+                .select("id,offer_id,amount_jpy,currency,tax_note,"
+                        "shipping_note,source,confirmed,observed_at")
+                .eq("owner_id", owner_id).in_("id", uniq)
+                .execute()).data or []
+        by_id = {row["id"]: row for row in rows}
+        missing = [i for i in uniq if i not in by_id]
+        if missing:
+            raise ValueError("Observation not owned by caller")
+        offers = (self.client.table("offers")
+                  .select("id,ingredient_id,supplier_id,package_quantity,"
+                          "package_unit")
+                  .eq("owner_id", owner_id)
+                  .in_("id", [row["offer_id"] for row in rows])
+                  .execute()).data or []
+        by_offer = {row["id"]: row for row in offers}
+        out = {}
+        for oid, row in by_id.items():
+            offer = by_offer.get(row["offer_id"])
+            if offer is None:
+                raise ValueError("Observation offer not owned by caller")
+            out[oid] = {**row, "ingredient_id": offer["ingredient_id"],
+                        "supplier_id": offer.get("supplier_id"),
+                        "package_quantity": offer.get("package_quantity"),
+                        "package_unit": offer.get("package_unit")}
+        return out
 
     def list_owned_notifications(self, owner_id, status=None, limit=100):
         """Owner-scoped notifications, newest first. Optional status filter."""
@@ -461,23 +492,40 @@ class SupabasePersistence:
         return rows[0]
 
     def update_notification_status(self, owner_id, notification_id, status):
-        """Move a notification's status. Status only: prices, suppliers,
-        recipes, and snapshots are never touched here."""
-        from .price_notifications import STATUSES, check_transition
+        """Move a notification's status with compare-and-swap.
+
+        The write only applies when the stored status is a legal
+        predecessor of the target, so a concurrent move is detected
+        instead of silently overwritten: no rows then means either a
+        lost race (NotificationConflict) or a foreign id
+        (ValueError). Status only: prices, suppliers, recipes, and
+        snapshots are never touched here.
+        """
+        from .price_notifications import (
+            ALLOWED_SOURCES, STATUSES, NotificationConflict, check_transition)
         if status not in STATUSES:
             raise ValueError("Unknown notification status")
-        current = self.get_owned_notification(owner_id, notification_id)
-        check_transition(current["status"], status)
-        if current["status"] == status:
-            return current
         response = (self.client.table("price_notifications")
                     .update({"status": status})
                     .eq("owner_id", owner_id).eq("id", notification_id)
+                    .in_("status", [status, *ALLOWED_SOURCES[status]])
                     .execute())
         rows = response.data or []
-        if not rows:
-            raise ValueError("Notification not owned by caller")
-        return rows[0]
+        if rows:
+            current_status = rows[0]["status"]
+            if current_status != status:
+                raise RuntimeError("Unexpected notification update response")
+            return rows[0]
+        try:
+            current = self.get_owned_notification(owner_id, notification_id)
+        except ValueError:
+            raise ValueError("Notification not owned by caller") from None
+        if current["status"] == status:
+            return current
+        check_transition(current["status"], status)
+        raise NotificationConflict(
+            f"Notification {notification_id} moved concurrently; "
+            f"stored status is {current['status']}")
 
     def list_ingredient_offers(self, owner_id, ingredient_id):
         owned = self.load_owned_ingredients(owner_id, [ingredient_id])

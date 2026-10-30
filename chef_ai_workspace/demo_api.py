@@ -674,7 +674,12 @@ def confirm_demo_observation(observation_id: UUID, ctx=Depends(demo_context)):
 def list_demo_notifications(status: str | None = Query(default=None, max_length=20),
                             limit: int = Query(default=100, ge=1, le=200),
                             ctx=Depends(demo_context)):
-    """Owner-scoped notifications, newest first, optional status filter."""
+    """Owner-scoped notifications, newest first, optional status filter.
+
+    Each item carries its unit-price difference (change_jpy, JPY per
+    unit_basis) with the unit retained -- never a hardcoded unit.
+    """
+    from .price_history import compare_observations
     owner, repository = ctx
     lister = getattr(repository, "list_owned_notifications", None)
     if not callable(lister):
@@ -683,23 +688,83 @@ def list_demo_notifications(status: str | None = Query(default=None, max_length=
         items = lister(owner, status=status, limit=limit)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return {"items": [_json(item) for item in items]}
-
-
+    bulk = getattr(repository, "get_owned_observations", None)
+    adoption = getattr(repository, "get_owned_ingredient_adoption", None)
+    enriched = []
+    candidate_rows: dict = {}
+    basis_rows: dict = {}
+    basis_by_ingredient: dict = {}
+    if callable(bulk) and callable(adoption) and items:
+        try:
+            candidate_rows = bulk(
+                owner, [str(i["observation_id"]) for i in items])
+            ingredient_ids = sorted({str(r["ingredient_id"])
+                                     for r in candidate_rows.values()})
+            basis_ids: dict[str, str] = {}
+            for iid in ingredient_ids:
+                try:
+                    ref = adoption(owner, iid)
+                except ValueError:
+                    continue
+                if ref.get("adopted_observation_id"):
+                    basis_ids[iid] = str(ref["adopted_observation_id"])
+            if basis_ids:
+                basis_rows = bulk(owner, list(basis_ids.values()))
+            basis_by_ingredient = {
+                iid: basis_rows[bid] for iid, bid in basis_ids.items()
+                if bid in basis_rows}
+        except ValueError:
+            candidate_rows, basis_rows = {}, {}
+            basis_by_ingredient = {}
+    for item in items:
+        extra: dict = {"unit_basis": None, "currency": None}
+        row = candidate_rows.get(str(item["observation_id"]))
+        base_row = (basis_by_ingredient.get(str(row["ingredient_id"]))
+                    if row is not None else None)
+        if row is not None and base_row is not None:
+            comp = compare_observations(_to_price_observation(base_row),
+                                        _to_price_observation(row))
+            if comp.comparable:
+                extra = {"unit_basis": comp.unit_basis,
+                         "currency": comp.currency}
+            else:
+                extra = {"unit_basis": None, "currency": None,
+                         "reasons": list(comp.reasons)}
+        enriched.append({**item, **extra})
+    return {"items": [_json(item) for item in enriched]}
 @router.get("/notifications/{notification_id}")
 def get_demo_notification(notification_id: UUID, ctx=Depends(demo_context)):
     """Notification detail with observation, basis comparison, and the
     related recipes' hypothetical cost impact. Reads only: adopted
     prices and saved recipe versions are never written."""
     owner, repository = ctx
+    from .price_history import compare_observations
     note = _notification_or_404(repository, owner, str(notification_id))
     row = _observation_or_404(repository, owner, str(note["observation_id"]))
     envelope = _impact_envelope(owner, repository, str(note["ingredient_id"]),
                                 str(note["observation_id"]))
+    comparison: dict = {"comparable": envelope["comparable"],
+                        "reasons": envelope["reasons"],
+                        "currency": None, "unit_basis": None,
+                        "base_unit_price": None, "new_unit_price": None,
+                        "diff": None, "rate_pct": None,
+                        "basis_observation_id": envelope["basis_observation_id"]}
+    if envelope["basis_observation_id"]:
+        base_row = _observation_or_404(
+            repository, owner, str(envelope["basis_observation_id"]))
+        comp = compare_observations(_to_price_observation(base_row),
+                                    _to_price_observation(row))
+        if comp.comparable:
+            comparison.update(currency=comp.currency,
+                              unit_basis=comp.unit_basis,
+                              base_unit_price=comp.base_unit_price,
+                              new_unit_price=comp.new_unit_price,
+                              diff=comp.diff, rate_pct=comp.rate_pct)
     return {"notification": _json(note),
             "observation": _json(row),
             "basis_observation_id": envelope["basis_observation_id"],
             "comparable": envelope["comparable"],
+            "comparison": _json(comparison),
             "reasons": envelope["reasons"],
             "items": envelope["items"]}
 
@@ -711,11 +776,14 @@ def update_demo_notification(notification_id: UUID,
     """Move a notification unread/acknowledged/resolved. Status only:
     acknowledging never adopts a price or changes a supplier."""
     owner, repository = ctx
+    from .price_notifications import NotificationConflict
     updater = getattr(repository, "update_notification_status", None)
     if not callable(updater):
         raise HTTPException(503, "Price notifications not configured")
     try:
         updated = updater(owner, str(notification_id), body.status)
+    except NotificationConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         message = str(exc)
         if "not owned" in message:

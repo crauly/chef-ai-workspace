@@ -171,9 +171,16 @@ class FakeRepo:
         return new_id
 
     # -- M6 repo surface --
+    def get_owned_observations(self, owner_id, ids):
+        out = {}
+        for i in ids:
+            out[str(i)] = self.get_owned_observation(owner_id, str(i))
+        return out
+
     def confirm_observation_notification(self, owner_id, observation_id):
         from chef_ai_workspace.price_history import PriceObservation as _Obs
-        from chef_ai_workspace.price_notifications import decide_notification
+        from chef_ai_workspace.price_notifications import (
+            comparison_payload, decide_notification)
         candidate = self.get_owned_observation(owner_id, observation_id)
         ref = self.get_owned_ingredient_adoption(
             owner_id, candidate["ingredient_id"])
@@ -196,15 +203,13 @@ class FakeRepo:
             base, _mk(candidate))
         if not should:
             raise ValueError("; ".join(reasons) or "incomparable")
+        payload = comparison_payload(comp, basis_id)
         with self.lock:
             for note in self.notifications.values():
                 if note["observation_id"] == observation_id \
                         and note["owner"] == owner_id:
                     return {"created": False, "notification": dict(note),
-                            "comparison": {"comparable": True, "reasons": [],
-                                           "diff": comp.diff,
-                                           "rate_pct": comp.rate_pct,
-                                           "currency": comp.currency}}
+                            "comparison": payload}
             nid = str(uuid4())
             note = {"id": nid, "owner": owner_id,
                     "observation_id": observation_id,
@@ -213,9 +218,7 @@ class FakeRepo:
                     "created_at": "2026-10-30T00:00:00+00:00"}
             self.notifications[nid] = note
             return {"created": True, "notification": dict(note),
-                    "comparison": {"comparable": True, "reasons": [],
-                                   "diff": comp.diff, "rate_pct": comp.rate_pct,
-                                   "currency": comp.currency}}
+                    "comparison": payload}
 
     def list_owned_notifications(self, owner_id, status=None, limit=100):
         from chef_ai_workspace.price_notifications import STATUSES
@@ -236,14 +239,22 @@ class FakeRepo:
         return dict(row)
 
     def update_notification_status(self, owner_id, notification_id, status):
-        from chef_ai_workspace.price_notifications import check_transition
-        row = self.get_owned_notification(owner_id, notification_id)
-        check_transition(row["status"], status)
-        if row["status"] == status:
+        from chef_ai_workspace.price_notifications import (
+            ALLOWED_SOURCES, NotificationConflict, check_transition)
+        if status not in ("unread", "acknowledged", "resolved"):
+            raise ValueError("Unknown notification status")
+        with self.lock:
+            row = self.get_owned_notification(owner_id, notification_id)
+            if row["status"] == status:
+                return dict(row)
+            if row["status"] not in ALLOWED_SOURCES[status]:
+                check_transition(row["status"], status)
+                raise NotificationConflict(
+                    f"Notification {notification_id} moved concurrently; "
+                    f"stored status is {row['status']}")
+            row["status"] = status
+            self.notifications[notification_id] = row
             return dict(row)
-        row["status"] = status
-        self.notifications[notification_id] = row
-        return dict(row)
 
 
 class ApiTests(unittest.TestCase):
@@ -373,6 +384,174 @@ class ApiTests(unittest.TestCase):
                                            headers=self.h,
                                            json={"status": "acknowledged"}).status_code,
                          404)
+
+
+class UnitBasisContractTests(unittest.TestCase):
+    def setUp(self):
+        self.repo = FakeRepo(OWNER_1)
+        app.state.demo_owner_id = OWNER_1
+        app.state.demo_access_token = "test-secret"
+        app.state.repository_factory = lambda: self.repo
+        self.client = TestClient(app, raise_server_exceptions=False)
+        self.h = {"X-Demo-Access": "test-secret"}
+
+    def tearDown(self):
+        self.client.close()
+        del app.state.demo_owner_id
+        del app.state.demo_access_token
+        del app.state.repository_factory
+
+    def test_confirm_list_detail_retain_unit_basis(self):
+        oid = self.repo.create_owned_observation(
+            OWNER_1, OFF_A, "420", currency="JPY", tax_note="税込",
+            shipping_note="送料込", source="purchase", confirmed=True,
+            observed_at="2026-10-21T10:00:00+00:00")
+        r = self.client.post(f"/demo/observations/{oid}/confirm", headers=self.h)
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertEqual(r.json()["comparison"]["unit_basis"], "g")
+        self.assertEqual(r.json()["comparison"]["currency"], "JPY")
+        items = self.client.get("/demo/notifications", headers=self.h).json()["items"]
+        self.assertEqual(len(items), 1)
+        # No hardcoded unit: the basis travels with the payload.
+        self.assertEqual(items[0]["unit_basis"], "g")
+        self.assertEqual(items[0]["currency"], "JPY")
+        self.assertEqual(items[0]["change_jpy"],
+                         r.json()["comparison"]["diff"])
+        nid = r.json()["notification"]["id"]
+        detail = self.client.get(f"/demo/notifications/{nid}",
+                                 headers=self.h).json()
+        self.assertEqual(detail["comparison"]["unit_basis"], "g")
+        self.assertEqual(detail["comparison"]["diff"], "0.1400")
+
+    def test_kg_offer_converts_basis_without_hardcoding(self):
+        self.repo.offers["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaab09"] = {
+            "owner": OWNER_1, "ingredient_id": ING_A, "supplier_id": SUP_A,
+            "package_quantity": "1", "package_unit": "kg"}
+        oid = self.repo.create_owned_observation(
+            OWNER_1, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaab09", "700",
+            currency="JPY", tax_note="税込", shipping_note="送料込",
+            source="purchase", confirmed=True,
+            observed_at="2026-10-21T10:00:00+00:00")
+        r = self.client.post(f"/demo/observations/{oid}/confirm", headers=self.h)
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertEqual(r.json()["comparison"]["unit_basis"], "g")
+        self.assertEqual(r.json()["comparison"]["diff"], "0.0000")
+
+
+class StatusConflictTests(unittest.TestCase):
+    def setUp(self):
+        self.repo = FakeRepo(OWNER_1)
+        app.state.demo_owner_id = OWNER_1
+        app.state.demo_access_token = "test-secret"
+        app.state.repository_factory = lambda: self.repo
+        self.client = TestClient(app, raise_server_exceptions=False)
+        self.h = {"X-Demo-Access": "test-secret"}
+
+    def tearDown(self):
+        self.client.close()
+        del app.state.demo_owner_id
+        del app.state.demo_access_token
+        del app.state.repository_factory
+
+    def _notified_id(self):
+        oid = self.repo.create_owned_observation(
+            OWNER_1, OFF_A, "420", currency="JPY", tax_note="税込",
+            shipping_note="送料込", source="purchase", confirmed=True,
+            observed_at="2026-10-21T10:00:00+00:00")
+        r = self.client.post(f"/demo/observations/{oid}/confirm", headers=self.h)
+        self.assertEqual(r.status_code, 201, r.text)
+        return r.json()["notification"]["id"]
+
+    def test_resolved_then_acknowledged_is_rejected(self):
+        nid = self._notified_id()
+        self.assertEqual(self.client.patch(
+            f"/demo/notifications/{nid}", headers=self.h,
+            json={"status": "resolved"}).status_code, 200)
+        bad = self.client.patch(f"/demo/notifications/{nid}", headers=self.h,
+                                json={"status": "acknowledged"})
+        self.assertIn(bad.status_code, (409, 422))
+        self.assertEqual(self.client.get(
+            f"/demo/notifications/{nid}", headers=self.h
+        ).json()["notification"]["status"], "resolved")
+
+    def test_conflict_maps_to_409(self):
+        from chef_ai_workspace.price_notifications import NotificationConflict
+
+        class _ConflictRepo:
+            def update_notification_status(self, owner_id, nid, status):
+                raise NotificationConflict("moved concurrently")
+
+        app.state.repository_factory = lambda: _ConflictRepo()
+        r = self.client.patch(
+            "/demo/notifications/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa99",
+            headers=self.h, json={"status": "acknowledged"})
+        self.assertEqual(r.status_code, 409)
+
+    def test_concurrent_moves_stay_legal(self):
+        import threading
+        nid = self._notified_id()
+        outcomes = []
+
+        def _move(target):
+            try:
+                outcomes.append(self.client.patch(
+                    f"/demo/notifications/{nid}", headers=self.h,
+                    json={"status": target}).status_code)
+            except Exception as exc:  # pragma: no cover
+                outcomes.append(exc)
+
+        threads = [threading.Thread(target=_move, args=(t,))
+                   for t in ("acknowledged", "resolved")]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        self.assertTrue(all(c in (200, 409, 422) for c in outcomes
+                            if isinstance(c, int)), outcomes)
+        final = self.client.get(f"/demo/notifications/{nid}",
+                                headers=self.h).json()["notification"]["status"]
+        self.assertIn(final, ("acknowledged", "resolved"))
+
+    def test_adapter_cas_detects_moved_row(self):
+        from chef_ai_workspace.price_notifications import NotificationConflict
+
+        class _Resp:
+            def __init__(self, data):
+                self.data = data
+
+        class _Query:
+            def __init__(self, table, store):
+                self._table = table
+                self._store = store
+            def select(self, *a, **k):
+                return self
+            def eq(self, *a, **k):
+                return self
+            def in_(self, *a, **k):
+                return self
+            def limit(self, *a, **k):
+                return self
+            def update(self, *a, **k):
+                return self
+            def order(self, *a, **k):
+                return self
+            def execute(self):
+                if self._table == "price_notifications":
+                    # UPDATE misses (row moved); re-read sees acknowledged.
+                    return _Resp([])
+                return _Resp([])
+
+        class _Tables:
+            def table(self, name):
+                return _Query(name, None)
+
+        from chef_ai_workspace.supabase_adapter import SupabasePersistence
+        repo = SupabasePersistence.__new__(SupabasePersistence)
+        repo.client = _Tables()
+        repo.get_owned_notification = lambda o, n: {
+            "id": n, "observation_id": "o", "ingredient_id": "i",
+            "change_jpy": "0.1", "status": "acknowledged",
+            "created_at": "2026-10-30T00:00:00+00:00"}
+        with self.assertRaises(NotificationConflict):
+            repo.update_notification_status(OWNER_1, "n", "resolved")
 
 
 if __name__ == "__main__":

@@ -21,6 +21,19 @@ TRANSITIONS = {
     "resolved": (),
 }
 
+# Reverse index of TRANSITIONS: which stored states may move to the key.
+# Used for compare-and-swap status writes so a stale read can never
+# force an illegal move.
+ALLOWED_SOURCES = {
+    "unread": ("acknowledged",),
+    "acknowledged": ("unread",),
+    "resolved": ("unread", "acknowledged"),
+}
+
+
+class NotificationConflict(ValueError):
+    """A status write lost a race: the stored status moved first."""
+
 
 def check_transition(current: str, nxt: str) -> None:
     """Raise ValueError unless current -> nxt is an allowed status move."""
@@ -50,3 +63,22 @@ def decide_notification(base: PriceObservation | None,
     if candidate.currency != "JPY" or base.currency != "JPY":
         return False, comparison, ["non-JPY currency cannot be used for JPY cost impact"]
     return True, comparison, []
+
+
+def comparison_payload(comparison: ComparisonResult,
+                       basis_observation_id: str | None) -> dict:
+    """JSON-ready comparison with the unit basis retained.
+
+    ``diff`` is a unit-price difference in ``currency`` per
+    ``unit_basis`` -- never a recipe total. Callers must render the
+    unit (e.g. "0.14円/g"), not a hardcoded one.
+    """
+    return {"comparable": bool(comparison.comparable),
+            "reasons": list(comparison.reasons),
+            "currency": comparison.currency,
+            "unit_basis": comparison.unit_basis,
+            "base_unit_price": comparison.base_unit_price,
+            "new_unit_price": comparison.new_unit_price,
+            "diff": comparison.diff,
+            "rate_pct": comparison.rate_pct,
+            "basis_observation_id": basis_observation_id}

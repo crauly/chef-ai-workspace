@@ -33,6 +33,7 @@ export async function PATCH(req:NextRequest,{params}:{params:Promise<{id:string}
    method:"PATCH",headers:{"X-Demo-Access":b.token,"Content-Type":"application/json"},
    body:JSON.stringify({status}),cache:"no-store",redirect:"error",signal:AbortSignal.timeout(20000)});
   if(response.status===422)return NextResponse.json({error:"invalid_transition"},{status:422,headers:{"Cache-Control":"no-store"}});
+  if(response.status===409)return NextResponse.json({error:"status_conflict"},{status:409,headers:{"Cache-Control":"no-store"}});
   if(!response.ok)return fail(response.status>=400&&response.status<600?response.status:502);
   return NextResponse.json(await response.json(),{headers:{"Cache-Control":"no-store"}});
  }catch{return fail(502);}
