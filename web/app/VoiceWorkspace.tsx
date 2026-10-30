@@ -25,6 +25,8 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  const selectedRef=useRef(selected);selectedRef.current=selected;
  const previousTarget=useRef(selected?.id);
  const queue=useRef<Array<{text:string;meta:VoiceCaptureMeta}>>([]),running=useRef(false);
+ const traceCounter=useRef(0);
+ function newTrace(){traceCounter.current++;return `${Date.now().toString(36)}-${traceCounter.current}`;}
  const alive=useRef(true);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;queue.current=[];reviewBoundary.current=null;};},[reviewBoundary]);
  const voice=useVoiceCapture(locale,receive,true);
@@ -43,24 +45,24 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  reviewBoundary.current=mark;
  const labels={idle:"待機",create:"登録",browse:"参照",edit:"編集"};
  function feedback(text:string,error=false){setMessage(text);if(error&&volume>0)playVoiceCue("error",volume);}
- function transition(next:VoiceMode){
+ function transition(next:VoiceMode,traceId=""){
   if(currentMode.current===next)return;
-  logVoiceEvent("mode.transition",`${currentMode.current}->${next}`);
+  logVoiceEvent("mode.transition",`${currentMode.current}->${next}`,traceId);
   registration.current?.suspend();editor.current?.invalidate();
   modeBoundary.current=mark();currentMode.current=next;setMode(next);
   if(next!=="idle"&&volume>0)playVoiceCue(next,volume);
  }
- async function navigate(nav:Navigation,source?:string){
-  if(registration.current?.isSaving()||editor.current?.isBusy()){logVoiceEvent("mode.transition.rejected","busy saving");feedback("保存・変更処理中です。完了後に切り替えてください。",true);return;}
+ async function navigate(nav:Navigation,source?:string,traceId=""){
+  if(registration.current?.isSaving()||editor.current?.isBusy()){logVoiceEvent("mode.transition.rejected","busy saving",traceId);feedback("保存・変更処理中です。完了後に切り替えてください。",true);return;}
   if(editor.current?.hasPending()&&(nav.mode!=="edit"||nav.target)){
-   logVoiceEvent("mode.transition.rejected","unsaved edit proposal");feedback("未保存の変更案があります。保存するか、「変更案を破棄」と話してから切り替えてください。",true);return;
+   logVoiceEvent("mode.transition.rejected","unsaved edit proposal",traceId);feedback("未保存の変更案があります。保存するか、「変更案を破棄」と話してから切り替えてください。",true);return;
   }
   if(nav.mode==="edit"&&nav.target&&selectedRef.current?.title.value!==nav.target){
    transition("browse");feedback("編集対象のレシピを検索しています。");selectedRef.current=await onBrowse(nav.target);
    if(!selectedRef.current){feedback("編集対象を一つに絞れませんでした。検索結果から選んでください。",true);return;}
   }
   if(nav.mode==="edit"&&!selectedRef.current){feedback("編集するレシピを先に呼び出してください。",true);return;}
-  transition(nav.mode);
+  transition(nav.mode,traceId);
   setDraftPending(Boolean(registration.current?.hasPending()));
   if(nav.mode==="browse"){
    feedback("参照モードです。"+(registration.current?.hasPending()?"登録途中の下書きは保持しています。":"")+"検索結果が複数なら、画面から対象を選んでください。");
@@ -73,11 +75,11 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  function receive(text:string,meta?:VoiceCaptureMeta){
   if(!text.trim())return;
   if(registration.current?.isSaving()){feedback("承認された下書きを保存中です。完了後に続きをお願いします。",true);return;}
-  const captured=meta??{reviewEpoch:boundary.current};
+  const captured:VoiceCaptureMeta={reviewEpoch:meta?.reviewEpoch??boundary.current,traceId:meta?.traceId??newTrace()};
   // Approval/navigation from an earlier mode must never affect a new target.
   if(captured.reviewEpoch<modeBoundary.current&&voiceCommand(text)!=="data"){feedback("切り替え前の承認は適用していません。現在のモードを確認して、もう一度お願いします。",true);return;}
   if(currentMode.current==="edit"&&voiceCommand(text)==="data"&&!voiceNavigation(text))editor.current?.invalidate();
-  if(queue.current.length>=30){logVoiceEvent("queue.dropped","30 utterances pending");feedback("処理待ちの発話が多すぎます。処理完了後に再度お願いします。",true);return;}
+  if(queue.current.length>=30){logVoiceEvent("queue.dropped","30 utterances pending",captured.traceId??"");feedback("処理待ちの発話が多すぎます。処理完了後に再度お願いします。",true);return;}
   queue.current.push({text,meta:captured});void drain();
  }
  async function drain(){
@@ -92,7 +94,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    // of starting a new search. Navigation-shaped requests keep normal routing so
    // a mode change never presents an approval the user did not ask for.
    if((control==="review"||control==="save")&&!voiceNavigation(input.text)&&registration.current?.hasPending()&&currentMode.current!=="create"&&currentMode.current!=="edit"){
-    transition("create");feedback("保持していた下書きを確認します。");
+    transition("create",input.meta.traceId??"");feedback("保持していた下書きを確認します。");
     registration.current?.submit(input.text,input.meta);
     setDraftPending(Boolean(registration.current?.hasPending()));
     continue;
@@ -117,10 +119,10 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
     if(!["create","browse","edit"].includes(result.intent)||typeof result.target!=="string"){
      feedback("切り替え先を確認できませんでした。登録・参照・編集のどれかを教えてください。",true);continue;
     }
-    logVoiceEvent("intent.fallback",`${currentMode.current}->${result.intent}`);
+    logVoiceEvent("intent.fallback",`${currentMode.current}->${result.intent}`,input.meta.traceId??"");
     nav={mode:result.intent as Navigation["mode"],target:result.target};
    }
-   if(nav){await navigate(nav,input.text);continue;}
+   if(nav){await navigate(nav,input.text,input.meta.traceId??"");continue;}
    if(currentMode.current==="idle"){
     // Direct dictation is also a supported new-recipe entry, announced audibly.
     transition("create");feedback("登録モードです。料理の内容を下書きにします。");
@@ -146,7 +148,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
   <section id="voice-controls" aria-label="音声操作モード" className="voice-mode-panel">
    <h2>音声操作</h2>
    <p>現在のモード: <strong>{labels[mode]}</strong>{mode==="edit"&&selected?` — ${selected.title.value}`:""}</p>
-   {draftPending&&mode!=="create"&&<p role="status">登録途中の下書きを保持しています。<button type="button" onClick={()=>{transition("create");registration.current?.requestReview();feedback("保持していた下書きを確認します。");}}>下書きに戻る</button></p>}
+   {draftPending&&mode!=="create"&&<p role="status">登録途中の下書きを保持しています。<button type="button" onClick={()=>void (async()=>{await navigate({mode:"create",target:""});if(currentMode.current!=="create")return;registration.current?.requestReview();feedback("保持していた下書きを確認します。");})()}>下書きに戻る</button></p>}
    <p>「レシピを登録します」「〇〇を見せて」「パスタを150gに変更」のように続けて話してください。</p>
    <button type="button" disabled={!voice.recording&&(voice.supported===false||voice.busy)} onClick={voice.recording?voice.stop:()=>void voice.start()} aria-pressed={voice.recording}>{voice.recording?"■ マイクを停止":voice.error||voice.notice?"🎙 音声操作を再開":"🎙 音声操作を開始"}</button>
    <p role="status">{voice.recording?"音声受付中":voice.busy?"音声受付は一時停止・受信済みの音声を処理中":voice.error||voice.notice?"音声受付は停止中・再開できます":"音声受付は停止中"}</p>
@@ -165,10 +167,10 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    <button type="button" onClick={()=>void navigate({mode:"browse",target:""})}>レシピを参照</button>
    <button type="button" onClick={()=>void navigate({mode:"edit",target:""})}>選択レシピを編集</button>
    <details><summary>音声の状態履歴（直近の動作）</summary>
-    <ul>{diag.slice(-10).map(event=><li key={event.seq}>{new Date(event.at).toLocaleTimeString()} {event.kind}{event.detail?`：${event.detail}`:""}</li>)}</ul>
+    <ul>{diag.slice(-10).map(event=><li key={event.seq}>{new Date(event.at).toLocaleTimeString()} {event.kind}{event.trace?` [${event.trace}]`:""}{event.detail?`：${event.detail}`:""}</li>)}</ul>
    </details>
   </section>
-  <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} sharedVoice={{markReview:mark,cancel:()=>{},captureMessage:voice.recording?"音声受付中です。確認後は「登録」「登録してください」でも保存できます。":voice.busy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${voice.error||voice.notice||""}`}} onCreated={(recipe,mode)=>{
+  <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} onDiscarded={()=>setDraftPending(false)} sharedVoice={{markReview:mark,cancel:()=>{},captureMessage:voice.recording?"音声受付中です。確認後は「登録」「登録してください」でも保存できます。":voice.busy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${voice.error||voice.notice||""}`}} onCreated={(recipe,mode)=>{
    setDraftPending(false);transition("browse");feedback(mode==="unconfirmed"?"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"レシピを保存しました。");onCreated(recipe);
   }}/></div>
  </>;

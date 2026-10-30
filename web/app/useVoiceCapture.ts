@@ -6,7 +6,8 @@ import {logVoiceEvent} from "./voice-diagnostics";
 // One microphone across all entry points. Never run overlapping voice sessions.
 let releaseMicrophone: (() => void) | undefined;
 export const VOICE_SILENCE_MS = 1000;
-export type VoiceCaptureMeta = {reviewEpoch: number};
+// traceId is assigned at utterance intake and forwarded through submit/enqueue.
+export type VoiceCaptureMeta = {reviewEpoch: number; traceId?: string};
 
 export async function encodeWav(frames: Float32Array[], rate: number): Promise<ArrayBuffer> {
   const length = frames.reduce((n, frame) => n + frame.length, 0);
