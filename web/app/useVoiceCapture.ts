@@ -1,11 +1,13 @@
 "use client";
 import {useEffect, useRef, useState} from "react";
 import type {Locale} from "./i18n";
+import {logVoiceEvent} from "./voice-diagnostics";
 
 // One microphone across all entry points. Never run overlapping voice sessions.
 let releaseMicrophone: (() => void) | undefined;
 export const VOICE_SILENCE_MS = 1000;
-export type VoiceCaptureMeta = {reviewEpoch: number};
+// traceId is assigned at utterance intake and forwarded through submit/enqueue.
+export type VoiceCaptureMeta = {reviewEpoch: number; traceId?: string};
 
 export async function encodeWav(frames: Float32Array[], rate: number): Promise<ArrayBuffer> {
   const length = frames.reduce((n, frame) => n + frame.length, 0);
@@ -85,8 +87,10 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
         const result: unknown = await response.json();
         const text = result && typeof result === "object" ? (result as {transcript?: unknown}).transcript : null;
         if (typeof text !== "string" || !text.trim() || text.length > 1000) throw new Error("transcription");
+        logVoiceEvent("transcribe.ok", "");
         if (valid()) callback.current(text, {reviewEpoch:capturedReview});
       }).catch(() => {
+        logVoiceEvent("transcribe.fail", "transcription request failed");
         if (valid()) {
           setError(locale === "ja" ? "一部の音声を文字にできませんでした。ほかの受信済み音声は処理を続けます。下書きを確認し、不足分を再開して話してください。" : "Some audio could not be transcribed. Other accepted audio will finish. Review and restart for missing content.");
           controls.current?.stop();
@@ -97,13 +101,15 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
         }}
       });
       if(continuous&&requests>=3){
+        logVoiceEvent("capture.pause", "3 pending transcriptions");
         setNotice(locale==="ja"?"音声受付を一時停止しました。受信済みの音声は破棄せず処理します。完了後に「音声操作を再開」を押してください。下書きは保持しています。":"Capture paused. Accepted audio will finish. Resume afterward; the draft is retained.");
         cleanup();
       }
     };
-    controls.current = {abort, markReview:epoch=>node?.port.postMessage({type:"review",epoch}), stop: () => {if (!closed) {submit(); cleanup();} if (!requests) controls.current = null;}};
+    controls.current = {abort: () => { logVoiceEvent("capture.stop", "cancel"); abort(); }, markReview:epoch=>node?.port.postMessage({type:"review",epoch}), stop: () => { if (!closed && valid()) logVoiceEvent("capture.stop", requests ? "user stop; accepted audio continues" : "user stop"); if (!closed) {submit(); cleanup();} if (!requests) controls.current = null; }};
     releaseMicrophone = abort;
     setError("");setNotice(""); setRecording(true);
+    logVoiceEvent("capture.start", continuous ? "shared microphone" : "local microphone");
     try {
       stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: true, noiseSuppression: true}});
       if (!valid() || closed) {stream.getTracks().forEach(track => track.stop()); return;}
@@ -126,8 +132,10 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
           submit(); if (!continuous) cleanup();
         }
       };
-      stream.getTracks().forEach(track => {track.onended = () => {if (!closed && valid()) {controls.current?.stop();setError(locale === "ja" ? "マイクが切断されました。受信済みの音声の処理後に再開してください。" : "Microphone disconnected. Resume after accepted audio finishes.");}};});
+      stream.getTracks().forEach(track => {track.onended = () => {if (!closed && valid()) {logVoiceEvent("capture.disconnect", "microphone track ended");
+          controls.current?.stop();setError(locale === "ja" ? "マイクが切断されました。受信済みの音声の処理後に再開してください。" : "Microphone disconnected. Resume after accepted audio finishes.");}};});
     } catch {
+      logVoiceEvent("capture.error", "getUserMedia failed");
       if (valid()) {abort(); setError(locale === "ja" ? "マイクを開始できません。権限と対応ブラウザを確認してください。" : "Could not start microphone. Check permission and browser support.");}
     }
   }

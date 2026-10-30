@@ -4,11 +4,12 @@ import type {Locale} from "./i18n";
 import {request,type Recipe} from "./types";
 import {useVoiceCapture,type VoiceCaptureMeta} from "./useVoiceCapture";
 import {voiceCommand,type VoiceCommand} from "./voice-commands";
+import {logVoiceEvent} from "./voice-diagnostics";
 
 type Ingredient={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string};
 type Interpretation={source:string;suggestion:string;reason:string};
 type Draft={title:string;materials:Ingredient[];selling_price_jpy:string;notes:string[];missing:string[];interpretations?:Interpretation[]};
-type Input={text:string;command:VoiceCommand;revision:number;approval:Draft|null};
+type Input={text:string;command:VoiceCommand;revision:number;approval:Draft|null;traceId:string};
 export type SaveMode="confirmed"|"unconfirmed";
 // Missing-entry kinds mirror web/app/api/voice-recipe/route.ts. Only a draft
 // whose gaps are all purchase prices may take the explicit unconfirmed path;
@@ -42,8 +43,8 @@ export function toSaveMaterials(draft:Draft){
   price_unit:m.price_unit||null}));
 }
 
-export type RegistrationHandle={submit:(text:string,meta?:VoiceCaptureMeta)=>void;hasPending:()=>boolean;isSaving:()=>boolean;suspend:()=>void};
-export default function VoiceRecipeRegistration({locale,onCreated,control,sharedVoice}:{locale:Locale;onCreated:(recipe:Recipe,mode:SaveMode)=>void;control?:Ref<RegistrationHandle>;sharedVoice?:{markReview:()=>number;cancel:()=>void;captureMessage:string}}){
+export type RegistrationHandle={submit:(text:string,meta?:VoiceCaptureMeta)=>void;hasPending:()=>boolean;isSaving:()=>boolean;suspend:()=>void;requestReview:()=>void};
+export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,control,sharedVoice}:{locale:Locale;onCreated:(recipe:Recipe,mode:SaveMode)=>void;onDiscarded?:()=>void;control?:Ref<RegistrationHandle>;sharedVoice?:{markReview:()=>number;cancel:()=>void;captureMessage:string}}){
  const ja=locale==="ja";
  const [busy,setBusy]=useState(false),[turns,setTurns]=useState<string[]>([]),[draft,setDraft]=useState<Draft|null>(null);
  const [phase,setPhase]=useState<"dictating"|"review"|"saving">("dictating");
@@ -55,9 +56,10 @@ export default function VoiceRecipeRegistration({locale,onCreated,control,shared
  const reviewMode=useRef<SaveMode|null>(null);
  const inbox=useRef<Input[]>([]),draining=useRef(false),revision=useRef(0),epoch=useRef(0);
  const requestId=useRef<string|null>(null),semanticAbort=useRef<AbortController|null>(null),alive=useRef(true);
+ const clearTrace=useRef("");
  const capture=useVoiceCapture(locale,enqueue,true);
  const voice={...capture,...sharedVoice};
- useImperativeHandle(control,()=>({submit:enqueue,hasPending:()=>Boolean(dataTurns.current.length||inbox.current.length||draftRef.current),isSaving:()=>phaseRef.current==="saving",suspend:()=>{
+ useImperativeHandle(control,()=>({submit:enqueue,hasPending:()=>Boolean(dataTurns.current.length||inbox.current.length||draftRef.current),isSaving:()=>phaseRef.current==="saving",requestReview:()=>{showReview();},suspend:()=>{
   reviewed.current=null;inbox.current=inbox.current.filter(input=>input.command==="data");setStage("dictating");
  }}));
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;semanticAbort.current?.abort();inbox.current=[];};},[]);
@@ -67,23 +69,26 @@ export default function VoiceRecipeRegistration({locale,onCreated,control,shared
   if(phaseRef.current==="saving")return;
   epoch.current++;revision.current++;semanticAbort.current?.abort();voice.cancel();inbox.current=[];
   dataTurns.current=[];setTurns([]);draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);requestId.current=null;
-  setStage("dictating");say("下書きを破棄しました。新しいレシピを話してください。");
+  setStage("dictating");logVoiceEvent("draft.discarded.explicit","explicit cancel",clearTrace.current);clearTrace.current="";onDiscarded?.();say("下書きを破棄しました。新しいレシピを話してください。");
  }
- async function parse(next:string[],version:number){
+ async function parse(next:string[],version:number,traceId=""){
   const current=epoch.current,aborter=new AbortController();semanticAbort.current=aborter;
-  say("Museが料理の文脈・数量・価格を解釈しています…");
+  logVoiceEvent("muse.start",`${next.length} turns`,traceId);say("Museが料理の文脈・数量・価格を解釈しています…");
   try{
    const out=await request<Draft>("/api/voice-recipe",{method:"POST",body:JSON.stringify({turns:next}),signal:aborter.signal});
-   if(!alive.current||epoch.current!==current||revision.current!==version)return;
+   if(!alive.current||epoch.current!==current||revision.current!==version){logVoiceEvent("muse.ok","stale result ignored",traceId);return;}
+   logVoiceEvent(draftRef.current?"draft.updated":"draft.created", "voice-recipe",traceId);
    draftRef.current=out;setDraft(out);reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
    say(out.missing.length||out.notes.length?"確認が必要です："+[...out.missing,...out.notes].join("、"):
     "下書きを更新しました。内容を確認し、「保存してください」と話すか、確認ボタンを押してください。");
   }catch{
-   if(alive.current&&epoch.current===current&&revision.current===version&&!aborter.signal.aborted)
+   if(alive.current&&epoch.current===current&&revision.current===version&&!aborter.signal.aborted){
+    logVoiceEvent("muse.fail","voice-recipe failed; draft kept",traceId);
     say("料理の解釈に失敗しました。保存していません。「解析を再試行」か補助入力で再開できます。");
+   }
   }
  }
- function showReview(){
+ function showReview(traceId=""){
   const d=draftRef.current;
   if(!d){say(dataTurns.current.length?"最新の入力を解釈中、または解釈に失敗しています。解析が終わるまで保存しません。":"新しいレシピを登録します。料理名・食材・分量・仕入単価を話してください。");return;}
   const mode=saveModeFor(d);
@@ -119,13 +124,13 @@ export default function VoiceRecipeRegistration({locale,onCreated,control,shared
     if(input.command==="data"){
      const batch=[input];while(inbox.current[0]?.command==="data")batch.push(inbox.current.shift()!);
      dataTurns.current=[...dataTurns.current,...batch.map(item=>item.text)].slice(-30);
-     await parse(dataTurns.current,batch[batch.length-1].revision);
+     await parse(dataTurns.current,batch[batch.length-1].revision,batch[batch.length-1].traceId);
     }else if(input.revision===revision.current){
-     if(input.command==="review")showReview();
+     if(input.command==="review")showReview(input.traceId);
      else if(input.command==="save"){
       // An explicit save request presents review first; a later request approves it.
       if(input.approval&&phaseRef.current==="review"&&input.approval===reviewed.current&&reviewed.current===draftRef.current)await save();
-      else showReview();
+      else showReview(input.traceId);
      }else if(input.command==="hold"){
       reviewed.current=null;setStage("dictating");say("保存せず、下書きを保持します。");
      }
@@ -136,13 +141,13 @@ export default function VoiceRecipeRegistration({locale,onCreated,control,shared
  function enqueue(text:string,meta?:VoiceCaptureMeta){
   if(!text.trim()||phaseRef.current==="saving")return;
   const command=voiceCommand(text);
-  if(command==="cancel"){clear();return;}
+  if(command==="cancel"){clearTrace.current=meta?.traceId??"";clear();return;}
   setTurns(previous=>[...previous,text].slice(-30));
   if(command==="data"){
    revision.current++;reviewed.current=null;reviewMode.current=null;draftRef.current=null;requestId.current=null;setStage("dictating");
   }
   const afterReview=!meta||meta.reviewEpoch===approvalEpoch.current;
-  inbox.current.push({text,command,revision:revision.current,approval:afterReview&&phaseRef.current==="review"?reviewed.current:null});void drain();
+  inbox.current.push({text,command,revision:revision.current,approval:afterReview&&phaseRef.current==="review"?reviewed.current:null,traceId:meta?.traceId??""});void drain();
  }
  function retry(){
   if(!dataTurns.current.length||draining.current)return;
@@ -179,7 +184,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,control,shared
    {draft.notes.length>0&&<p role="alert">要確認：{draft.notes.join("、")}</p>}
    <p>{phase==="review"?(reviewMode.current==="unconfirmed"?"確認待ち（価格未確定）：数量は確定、価格は未確定として保存します。よければ明示承認してください。":"確認待ち：内容が正しければ、保存を明示承認してください。"):"まだ保存されていません。"}</p>
    {sharedVoice&&<><p role="status">{sharedVoice.captureMessage}</p><a href="#voice-controls">音声操作・再開へ戻る</a></>}
-   <button type="button" disabled={busy||!eligible||phase==="saving"} onClick={showReview}>内容を確認</button>
+   <button type="button" disabled={busy||!eligible||phase==="saving"} onClick={()=>showReview()}>内容を確認</button>
    <button type="button" disabled={busy||phase!=="review"||!eligible} onClick={()=>void save()}>{phase==="review"&&reviewMode.current==="unconfirmed"?"価格未確定として承認して保存":"内容を承認して保存"}</button>
    <button type="button" disabled={phase==="saving"} onClick={clear}>下書きを破棄</button>
   </div>}
