@@ -37,6 +37,13 @@
 
 ### F-03a: Recipe Material and Ingredient Separation
 
+2026-10-29 clarification: [ADR-009](ADR_009_INGREDIENT_PROCUREMENT_ASSISTANCE.md)
+records ingredient reuse, supplier-specific price information and price-change
+assistance as core product direction. The historical exclusion of full
+procurement administration below must not be used to drop ingredient creation,
+linking/reuse or the lightweight assistance goals. Implementation and unsettled
+details are tracked separately in the linked plan.
+
 レシピ上の「材料名」と実際に使用する「共通食材」を概念として分ける。材料名は自由に記述でき、共通食材への紐付けは任意とする。
 
 共通食材が存在しない段階でも、仮設定単価によるレシピ作成・概算・保存を完了できること。本格的な仕入先・仕入商品マスター管理や全レシピへの一括価格反映はMVPの必須範囲に追加しない。
