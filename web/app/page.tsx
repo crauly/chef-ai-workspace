@@ -108,12 +108,18 @@ export default function Library(){
  <form onSubmit={change}><input aria-label={t("rename")} value={rename} onChange={e=>setRename(e.target.value)}/><button disabled={busy||!rename.trim()}>{t("save")}</button></form>
  <h2>{t("ingredients")}</h2>{selected.materials.length===0?<p className="muted">{t("noIngredients")}</p>:<ul>{selected.materials.map(m=><li key={m.id}><strong>{selected.display_names?.[m.id]?.display?.trim() || m.material_name.value?.trim() || t("unnamed")}</strong> — {m.quantity.value??t("missing")} {m.unit??""}{m.quantity.status==="assumed"?` (${t("assumed")})`:m.quantity.status==="unresolved"?` (${t("unresolved")})`:""} <button disabled={busy} type="button" onClick={()=>{const v=prompt(locale==="ja"?"新しい数量":"New quantity",m.quantity.value||"");if(v!==null&&v.trim())void updateQuantity(m.id,v,m.unit||"g");}}>{locale==="ja"?"数量変更":"Edit qty"}</button> <button disabled={busy} type="button" onClick={()=>{const p=m.price_override;const v=prompt(locale==="ja"?"新しい仕入単価（円）":"New price JPY",p?.amount_jpy.value||"");if(v!==null&&v.trim())void updatePrice(m.id,v,p?.per_quantity||"1",p?.per_unit||m.unit||"g");}}>{locale==="ja"?"単価変更":"Edit price"}</button></li>)}</ul>}
  <form onSubmit={addFood} className="material-form">
+ <fieldset><legend>{locale==="ja"?"食材":"Ingredient"}</legend>
  <input aria-label={locale==="ja"?"食材名":"Ingredient name"} placeholder={locale==="ja"?"食材名（例：片栗粉）":"Ingredient name"} value={food} onChange={e=>setFood(e.target.value)} required/>
+ </fieldset>
+ <fieldset><legend>{locale==="ja"?"分量":"Quantity"}</legend>
  <input aria-label={locale==="ja"?"数量":"Quantity"} placeholder={locale==="ja"?"数量":"Quantity"} inputMode="decimal" value={qty} onChange={e=>setQty(e.target.value)} required/>
  <select aria-label="Unit" value={unit} onChange={e=>setUnit(e.target.value)}><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option></select>
+ </fieldset>
+ <fieldset><legend>{locale==="ja"?"仕入単価":"Unit price"}</legend>
  <input aria-label={locale==="ja"?"仕入単価（円）":"Price (JPY)"} placeholder={locale==="ja"?"仕入単価 ¥":"Price ¥"} inputMode="decimal" value={price} onChange={e=>setPrice(e.target.value)} required/>
  <input aria-label={locale==="ja"?"単価の基準数量":"Price per quantity"} placeholder="1" inputMode="decimal" value={priceQty} onChange={e=>setPriceQty(e.target.value)} required/>
  <select aria-label="Price unit" value={priceUnit} onChange={e=>setPriceUnit(e.target.value)}><option value="kg">kg</option><option value="g">g</option><option value="L">L</option><option value="ml">ml</option></select>
+ </fieldset>
  <button disabled={busy||!food.trim()||!qty.trim()||!price.trim()}>{locale==="ja"?"食材を追加":"Add ingredient"}</button>
  </form>
  {cost&&<section aria-label="Recipe cost summary" className="cost-summary"><strong>{locale==="ja"?"現在の原価":"Current food cost"}: {cost.total_cost_jpy===null?(locale==="ja"?"要確認":"Needs review"):`¥${cost.total_cost_jpy}`}</strong><span>{locale==="ja"?"原価率":"Food cost %"}: {cost.cost_rate_pct===null?"—":`${cost.cost_rate_pct}%`}{cost.estimated?` (${t("assumed")})`:""}</span></section>}
