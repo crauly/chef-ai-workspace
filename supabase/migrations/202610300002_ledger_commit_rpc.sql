@@ -36,7 +36,9 @@ begin
    if v_receipt.recipe_id <> p_recipe_id or v_receipt.payload_hash <> p_payload_hash then
      raise exception 'Request ID reused with a different mutation';
    end if;
-   return v_receipt.resulting_revision;
+   -- Negative revision signals a receipt replay so concurrent losers can
+   -- distinguish replay from a fresh commit at the same revision number.
+   return -v_receipt.resulting_revision;
  end if;
  if v_revision <> p_expected_revision then raise exception 'Stale recipe revision'; end if;
  -- Ledger second gate: the trusted backend already validated, but the database
@@ -53,6 +55,7 @@ begin
    select owner_id into v_ing_owner from public.ingredients where id = v_ing_id;
    if found then
      if v_ing_owner <> v_owner then raise exception 'Ingredient not owned by caller'; end if;
+     raise exception 'Ingredient already registered';
    else
      insert into public.ingredients(id, owner_id, name, brand, spec)
      values(v_ing_id, v_owner, v_ing_name,

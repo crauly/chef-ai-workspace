@@ -112,9 +112,9 @@ def prepare_mutation(recipe: Recipe, proposal: Proposal, *, user_confirmed: bool
             mode = op["price_mode"]
             if mode not in ("inherit", "override"):
                 raise MutationError("Link requires explicit inherit or override")
+            if catalog is None or op["ingredient_id"] not in catalog:
+                raise MutationError("Linked ingredient not in catalog")
             if mode == "inherit":
-                if catalog is None or op["ingredient_id"] not in catalog:
-                    raise MutationError("Linked ingredient not in catalog")
                 new_line = replace(matches[0], ingredient_id=op["ingredient_id"],
                                    price_mode="inherit", price_override=None)
             else:

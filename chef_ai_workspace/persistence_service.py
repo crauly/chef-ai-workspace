@@ -64,7 +64,13 @@ class SavedRecipeWithLedger:
 
 
 class LedgerPersistence(TrustedPersistence, Protocol):
-    """Extended repository. Adds one atomic commit; all other methods stay."""
+    """Extended repository. Adds one atomic commit; all other methods stay.
+
+    The atomic commit returns a non-negative revision on a fresh commit and
+    the negated revision (negative int) when an existing receipt is replayed,
+    so concurrent losers can distinguish replay from a fresh commit at the
+    same revision number.
+    """
     def commit_recipe_with_ledger(self, *, owner_id: str, recipe_id: str,
                                   request_id: str, base_revision: int,
                                   state: dict, title: str, cost_snapshot: dict,
@@ -73,11 +79,12 @@ class LedgerPersistence(TrustedPersistence, Protocol):
 
 
 def _validate_ledger(ledger: tuple[LedgerIngredient, ...],
-                     owned: Mapping[str, Ingredient]) -> tuple[dict, ...]:
-    from uuid import UUID as _UUID
+                     owned: Mapping[str, Ingredient],
+                     request_id: str | None = None) -> tuple[dict, ...]:
+    from uuid import UUID as _UUID, NAMESPACE_URL as _NS, uuid4 as _uuid4, uuid5 as _uuid5
     prepared: list[dict] = []
     seen: set[str] = set()
-    for entry in ledger:
+    for index, entry in enumerate(ledger):
         if entry.kind == "reuse":
             if not entry.id or entry.id not in owned:
                 raise MutationError("Reuse requires an ingredient owned by the caller")
@@ -88,7 +95,14 @@ def _validate_ledger(ledger: tuple[LedgerIngredient, ...],
         elif entry.kind == "new":
             if not entry.name or not entry.name.strip():
                 raise MutationError("New ingredient requires a name")
-            new_id = entry.id or __import__("uuid").uuid4().__str__()
+            # Deterministic IDs keep concurrent retries with the same request_id
+            # on the same identity; explicit IDs stay caller-supplied.
+            if entry.id:
+                new_id = entry.id
+            elif request_id:
+                new_id = str(_uuid5(_NS, f"{request_id}:ledger-new:{index}"))
+            else:
+                new_id = str(_uuid4())
             try:
                 _UUID(new_id)
             except (ValueError, TypeError, AttributeError) as exc:
@@ -142,12 +156,16 @@ def save_recipe_with_ledger(*, owner_id: str, trusted_user_confirmed: bool,
     recipe = repository.load_owned_recipe(owner_id, proposal.recipe_id)
     if catalog is None:
         catalog = repository.load_owned_catalog(owner_id, recipe)
-    reuse_ids = [e.id for e in ledger if e.kind == "reuse" and e.id]
+    # Load explicitly named IDs (reuse targets and explicit new IDs) so
+    # _validate_ledger can reject collisions with owned ingredients that the
+    # recipe-scoped catalog does not contain.
+    explicit_ids = [e.id for e in ledger if e.id]
     loader = getattr(repository, "load_owned_ingredients", None)
-    if reuse_ids and callable(loader):
-        owned_extra = loader(owner_id, reuse_ids) or {}
+    if explicit_ids and callable(loader):
+        owned_extra = loader(owner_id, explicit_ids) or {}
         catalog = {**(catalog or {}), **owned_extra}
-    prepared_ledger = _validate_ledger(ledger, catalog or {})
+    prepared_ledger = _validate_ledger(ledger, catalog or {},
+                                       request_id=proposal.request_id)
     effective = dict(catalog or {})
     for item in prepared_ledger:
         if item["kind"] == "new":
@@ -186,9 +204,12 @@ def save_recipe_with_ledger(*, owner_id: str, trusted_user_confirmed: bool,
         cost_snapshot=_json(snapshot), payload_hash=payload_hash,
         save_version=save_version, new_ingredients=tuple(
             item for item in prepared_ledger if item["kind"] == "new"))
-    if revised != candidate.revision:
+    if revised < 0 or revised != candidate.revision:
+        # Negative values are explicit receipt replays from the atomic RPC;
+        # a matching positive value at an unexpected number is also treated
+        # as a replay for backward compatibility with the previous RPC.
         canonical = repository.load_owned_recipe(owner_id, recipe.id)
-        return SavedRecipeWithLedger(canonical, revised, True, ())
+        return SavedRecipeWithLedger(canonical, abs(revised), True, ())
     saved_ids = tuple(item["id"] for item in prepared_ledger if item["kind"] == "new")
     return SavedRecipeWithLedger(candidate, revised, False, saved_ids)
 

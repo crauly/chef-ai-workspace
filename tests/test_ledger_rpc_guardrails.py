@@ -30,6 +30,12 @@ class LedgerRpcGuardrails(unittest.TestCase):
     def test_cross_owner_second_gate(self):
         self.assertIn("Ingredient not owned by caller", SQL)
 
+    def test_existing_id_rejected_and_replay_signalled(self):
+        self.assertIn("Ingredient already registered", SQL)
+        # Receipt replay returns a negated revision so concurrent losers
+        # can distinguish replay from a fresh commit at the same number.
+        self.assertIn("-v_receipt.resulting_revision", SQL)
+
     def test_service_role_only(self):
         self.assertIn("revoke all on function public.commit_recipe_with_ledger", SQL)
         self.assertIn("to service_role;", SQL)

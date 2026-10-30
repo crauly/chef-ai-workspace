@@ -6,11 +6,11 @@
 --
 -- ROLLBACK (manual, never auto-applied):
 --   drop table public.price_notifications;
+--   alter table public.ingredients drop column adopted_observation_id;
+--   alter table public.ingredients drop column adopted_at;
 --   drop table public.price_observations;
 --   drop table public.offers;
 --   drop table public.suppliers;
---   alter table public.ingredients drop column adopted_observation_id;
---   alter table public.ingredients drop column adopted_at;
 --   alter table public.ingredients drop column aliases;
 --   alter table public.ingredients drop column spec;
 --   alter table public.ingredients drop column brand;

@@ -41,6 +41,10 @@ class FakeLedgerRepository:
         return dict(self.catalog)
     def get_mutation_receipt(self, owner_id, request_id):
         return self.receipts.get(request_id)
+    def load_owned_ingredients(self, owner_id, ids):
+        if owner_id != "user-a":
+            raise ValueError("Not found")
+        return {i: self.catalog[i] for i in ids if i in self.catalog}
     def commit_recipe_revision(self, **kwargs):
         raise AssertionError("legacy path must not be used here")
     def commit_recipe_with_ledger(self, *, owner_id, recipe_id, request_id,
@@ -129,6 +133,39 @@ class LedgerSaveTests(unittest.TestCase):
             run(db, [{"op": "set_title", "value": "Pasta"}])
         self.assertEqual(db.current.revision, 0)
 
+    def test_explicit_new_id_colliding_with_owned_extra_rejected(self):
+        from chef_ai_workspace.models import Ingredient as _Ing
+        db = FakeLedgerRepository()
+        # Owned ingredient not referenced by the recipe: only visible via
+        # the explicit-ID loader, not the recipe-scoped catalog.
+        extra = "44444444-4444-4444-4444-444444444444"
+        db.catalog[extra] = _Ing(extra, "既存だし", None)
+        db.load_owned_catalog = lambda owner_id, recipe: {k: v for k, v in db.catalog.items() if k == PASTA_ID}
+        with self.assertRaises(MutationError):
+            run(db, [{"op": "set_title", "value": "x"}],
+                [LedgerIngredient("new", id=extra, name="別名だし")])
+        self.assertEqual(db.writes, [])
+
+    def test_auto_new_ids_are_deterministic_per_request(self):
+        from chef_ai_workspace.persistence_service import _validate_ledger
+        a1 = _validate_ledger((LedgerIngredient("new", name="塩"),), {}, request_id="req-det")
+        a2 = _validate_ledger((LedgerIngredient("new", name="塩"),), {}, request_id="req-det")
+        b = _validate_ledger((LedgerIngredient("new", name="塩"),), {}, request_id="req-other")
+        self.assertEqual(a1[0]["id"], a2[0]["id"])
+        self.assertNotEqual(a1[0]["id"], b[0]["id"])
+
+    def test_negative_rpc_revision_counts_as_replay(self):
+        db = FakeLedgerRepository()
+        orig = db.commit_recipe_with_ledger
+        def neg_commit(**kwargs):
+            return -orig(**kwargs)
+        db.commit_recipe_with_ledger = neg_commit
+        out = run(db, [{"op": "set_title", "value": "Pasta"}],
+                  [], request="req-neg-1")
+        self.assertTrue(out.replayed)
+        self.assertEqual(out.resulting_revision, 1)
+        self.assertEqual(out.saved_ingredient_ids, ())
+
     def test_legacy_path_still_works(self):
         db = FakeLedgerRepository()
         db.commit_recipe_revision = lambda **k: 1
@@ -155,6 +192,9 @@ class LedgerLoaderTests(unittest.TestCase):
 
     def test_legacy_repository_without_loader_still_works(self):
         db = FakeLedgerRepository()
-        self.assertFalse(hasattr(db, "load_owned_ingredients"))
+        # Simulate a repository predating the explicit-ID loader: the
+        # orchestration treats a missing/non-callable loader as legacy.
+        db.load_owned_ingredients = None
+        self.assertFalse(callable(getattr(db, "load_owned_ingredients", None)))
         out = run(db, [{"op": "set_title", "value": "Pasta"}])
         self.assertEqual(out.resulting_revision, 1)

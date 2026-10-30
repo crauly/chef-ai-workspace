@@ -147,9 +147,12 @@ class SupabasePersistence:
         try:
             response = self.client.rpc("commit_recipe_with_ledger", params).execute()
         except APIError as exc:
+            # Negative ints pass through: they signal a receipt replay, and the
+            # orchestration maps them to replayed=True with canonical state.
             if exc.code == "P0001" and exc.message in (
                 "Stale recipe revision", "Request ID reused with a different mutation",
-                "Ingredient not owned by caller", "Invalid ledger ingredient",
+                "Ingredient not owned by caller", "Ingredient already registered",
+                "Invalid ledger ingredient",
                 "Invalid ledger payload", "Invalid mutation payload",
             ):
                 raise MutationError(exc.message) from exc

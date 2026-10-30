@@ -33,6 +33,11 @@ class ProcurementSchemaGuardrails(unittest.TestCase):
         self.assertNotIn("auto", SQL.lower())
         self.assertIn("default 'unread'", SQL)
 
+    def test_manual_rollback_removes_fk_before_observations(self):
+        drop_obs = RAW.index("drop table public.price_observations;")
+        drop_adopted = RAW.index("drop column adopted_observation_id;")
+        self.assertLess(drop_adopted, drop_obs)
+
     def test_history_is_append_only_shaped(self):
         self.assertIn("references public.offers(id) on delete cascade", SQL)
         self.assertIn("unique(observation_id)", SQL)
