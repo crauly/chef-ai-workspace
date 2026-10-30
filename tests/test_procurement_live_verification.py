@@ -46,6 +46,8 @@ class EphemeralStore:
     OWNERS = ("user-a", "user-b")
 
     def __init__(self):
+        import threading as _th
+        self._lock = _th.Lock()  # mirrors the RPC row lock on recipes
         self.recipes = {("user-a", "r1"): recipe()}
         self.ingredients = {}
         self.receipts = {}
@@ -71,6 +73,18 @@ class EphemeralStore:
     def commit_recipe_with_ledger(self, *, owner_id, recipe_id, request_id,
                                   base_revision, state, title, cost_snapshot,
                                   payload_hash, save_version, new_ingredients):
+        # Serialized like the RPC row lock: concurrent losers observe the
+        # winner's receipt instead of double-applying.
+        with self._lock:
+            return self._commit_locked(
+                owner_id=owner_id, recipe_id=recipe_id, request_id=request_id,
+                base_revision=base_revision, state=state, title=title,
+                cost_snapshot=cost_snapshot, payload_hash=payload_hash,
+                save_version=save_version, new_ingredients=new_ingredients)
+
+    def _commit_locked(self, *, owner_id, recipe_id, request_id,
+                       base_revision, state, title, cost_snapshot,
+                       payload_hash, save_version, new_ingredients):
         # Receipt replay first (same semantics as the RPC: same payload
         # returns the recorded revision; different payload is a conflict).
         hit = self.receipts.get((owner_id, request_id))
@@ -160,6 +174,38 @@ class EphemeralVerificationTests(unittest.TestCase):
         self.assertEqual(out.resulting_revision, first.resulting_revision)
         self.assertEqual(len(db.writes), 1)
 
+    def test_concurrent_threads_single_commit_one_replay(self):
+        # True concurrency (threads, barrier-synced start), distinct from a
+        # sequential resend: exactly one write lands, the loser replays.
+        import threading as _th
+        db = EphemeralStore()
+        ledger = (LedgerIngredient("new", id=NEW_ID, name="塩"),)
+        ops = ({"op": "set_title", "value": "New"},)
+        barrier = _th.Barrier(2)
+        outs, errs = [], []
+
+        def fire():
+            try:
+                barrier.wait(timeout=10)
+                outs.append(save_recipe_with_ledger(
+                    owner_id="user-a", trusted_user_confirmed=True,
+                    proposal=Proposal("r1", 0, "req-conc", ops),
+                    ledger=ledger, repository=db, save_version=True))
+            except Exception as exc:  # noqa: BLE001
+                errs.append(exc)
+
+        threads = [_th.Thread(target=fire), _th.Thread(target=fire)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+        self.assertEqual(errs, [])
+        self.assertEqual(len(outs), 2)
+        self.assertEqual(len(db.writes), 1)
+        flags = sorted(o.replayed for o in outs)
+        self.assertEqual(flags, [False, True])
+        self.assertEqual(outs[0].resulting_revision, outs[1].resulting_revision)
+
     def test_same_request_resend_is_idempotent(self):
         db = EphemeralStore()
         ledger = (LedgerIngredient("new", id=NEW_ID, name="塩"),)
@@ -187,29 +233,155 @@ class EphemeralVerificationTests(unittest.TestCase):
 
 TEST_URL = os.getenv("SUPABASE_TEST_URL", "")
 TEST_KEY = os.getenv("SUPABASE_TEST_SERVICE_KEY", "")
+ALLOW_WRITE = os.getenv("SUPABASE_TEST_ALLOW_WRITE") == "1"
 PROD_REF = "dfvryaybdelgjxihdmth"
-ENABLED = bool(TEST_URL and TEST_KEY and PROD_REF not in TEST_URL)
+ENABLED = bool(TEST_URL and TEST_KEY and ALLOW_WRITE and PROD_REF not in TEST_URL)
 
 
 @unittest.skipUnless(ENABLED, "実DB未接続: 使い捨てテストDB未設定のため未検証")
 class DisposableDbVerificationTests(unittest.TestCase):
-    """Layer B: runs only against a disposable test project. Each case
-    creates its own owner/recipe rows and removes them afterwards."""
+    """Layer B: runs only against a disposable test project with
+    SUPABASE_TEST_ALLOW_WRITE=1. Each case creates its own auth users and
+    rows, then removes them in cleanup. Never runs against production."""
+
+    def _client(self):
+        from supabase import create_client
+        return create_client(TEST_URL, TEST_KEY)
+
+    def _setup(self, with_second_owner=False):
+        """Create temp users + one rev-0 recipe. Returns ids; cleanup stacked."""
+        import uuid
+        client = self._client()
+        owner = client.auth.admin.create_user(
+            {"email": f"lv-a-{uuid.uuid4().hex[:8]}@example.invalid",
+             "email_confirm": True}).user.id
+        self.addCleanup(lambda: self._cleanup(client, owner))
+        owner_b = None
+        if with_second_owner:
+            owner_b = client.auth.admin.create_user(
+                {"email": f"lv-b-{uuid.uuid4().hex[:8]}@example.invalid",
+                 "email_confirm": True}).user.id
+            self.addCleanup(lambda: self._cleanup(client, owner_b))
+        recipe_id = str(uuid.uuid4())
+        state = {"id": recipe_id, "revision": 0, "title": "live-check",
+                 "materials": []}
+        snapshot = {"partial": True}
+        client.rpc("create_owned_recipe", {
+            "p_owner_id": owner, "p_recipe_id": recipe_id, "p_title": "live-check",
+            "p_initial_state": state, "p_cost_snapshot": snapshot}).execute()
+        self.addCleanup(client.table("recipes").delete().eq("id", recipe_id).execute)
+        return client, owner, owner_b, recipe_id
+
+    def _cleanup(self, client, owner):
+        for table, col in (("mutation_receipts", "owner_id"),
+                           ("price_notifications", "owner_id"),
+                           ("price_observations", "owner_id"),
+                           ("offers", "owner_id"),
+                           ("ingredients", "owner_id")):
+            try:
+                client.table(table).delete().eq(col, owner).execute()
+            except Exception:  # noqa: BLE001 -- best-effort cleanup
+                pass
+        try:
+            client.auth.admin.delete_user(owner)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _commit(self, client, owner, recipe_id, request_id, new_ingredients=()):
+        import hashlib
+        import json as _json
+        payload = _json.dumps({"request_id": request_id,
+                               "ledger": list(new_ingredients)}, sort_keys=True)
+        digest = hashlib.sha256(payload.encode()).hexdigest()
+        return client.rpc("commit_recipe_with_ledger", {
+            "p_owner_id": owner, "p_recipe_id": recipe_id,
+            "p_request_id": request_id, "p_expected_revision": 0,
+            "p_new_state": {"id": recipe_id, "revision": 1},
+            "p_title": "live-check", "p_cost_snapshot": {"partial": True},
+            "p_payload_hash": digest, "p_save_version": False,
+            "p_new_ingredients": list(new_ingredients)}).execute().data
 
     def test_b_atomic_commit(self):
-        self.fail("テストDB接続後に実施: 一体commitの全件成功を確認")
+        import uuid
+        client, owner, _, recipe_id = self._setup()
+        ing_id = str(uuid.uuid4())
+        rev = self._commit(client, owner, recipe_id, str(uuid.uuid4()),
+                           [{"id": ing_id, "name": "塩", "brand": None, "spec": None}])
+        self.assertEqual(rev, 1)
+        self.assertEqual(client.table("recipes").select("revision")
+                         .eq("id", recipe_id).single().execute().data["revision"], 1)
+        self.assertEqual(client.table("ingredients").select("id")
+                         .eq("id", ing_id).execute().data[0]["id"], ing_id)
 
     def test_b_rollback(self):
-        self.fail("テストDB接続後に実施: 競合時の全件ロールバックを確認")
+        import uuid
+        client, owner, _, recipe_id = self._setup()
+        ing_id = str(uuid.uuid4())
+        client.table("ingredients").insert(
+            {"id": ing_id, "owner_id": owner, "name": "既存塩"}).execute()
+        with self.assertRaises(Exception) as ctx:
+            self._commit(client, owner, recipe_id, str(uuid.uuid4()),
+                         [{"id": ing_id, "name": "別名塩", "brand": None, "spec": None}])
+        self.assertIn("Ingredient already registered", str(ctx.exception))
+        self.assertEqual(client.table("recipes").select("revision")
+                         .eq("id", recipe_id).single().execute().data["revision"], 0)
 
     def test_b_concurrent_replay(self):
-        self.fail("テストDB接続後に実施: 並行同一request_idで単一commit＋片方replayを確認")
+        # Threads in flight simultaneously (barrier-synced), unlike the
+        # sequential resend case below: one commit wins, the loser replays
+        # with the negated revision.
+        import threading as _th
+        import uuid
+        client, owner, _, recipe_id = self._setup()
+        request_id = str(uuid.uuid4())
+        barrier = _th.Barrier(2)
+        results, errs = [], []
+
+        def fire():
+            try:
+                barrier.wait(timeout=30)
+                results.append(self._commit(client, owner, recipe_id, request_id))
+            except Exception as exc:  # noqa: BLE001
+                errs.append(exc)
+
+        threads = [_th.Thread(target=fire), _th.Thread(target=fire)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=120)
+        self.assertEqual(errs, [])
+        self.assertEqual(len(results), 2)
+        self.assertEqual(sorted(abs(r) for r in results), [1, 1])
+        self.assertEqual(sorted(r < 0 for r in results), [False, True])
+        receipts = client.table("mutation_receipts").select("request_id") \
+            .eq("owner_id", owner).eq("request_id", request_id).execute().data
+        self.assertEqual(len(receipts), 1)
 
     def test_b_idempotent_resend(self):
-        self.fail("テストDB接続後に実施: 同一再送のべき等性を確認")
+        import uuid
+        client, owner, _, recipe_id = self._setup()
+        request_id = str(uuid.uuid4())
+        first = self._commit(client, owner, recipe_id, request_id)
+        second = self._commit(client, owner, recipe_id, request_id)
+        self.assertEqual(first, 1)
+        self.assertEqual(second, -1)
 
     def test_b_owner_separation(self):
-        self.fail("テストDB接続後に実施: 他者参照の全経路拒否を確認")
+        import uuid
+        client, owner, owner_b, recipe_id = self._setup(with_second_owner=True)
+        foreign = str(uuid.uuid4())
+        client.table("ingredients").insert(
+            {"id": foreign, "owner_id": owner_b, "name": "他者塩"}).execute()
+        with self.assertRaises(Exception) as ctx:
+            self._commit(client, owner, recipe_id, str(uuid.uuid4()),
+                         [{"id": foreign, "name": "塩", "brand": None, "spec": None}])
+        self.assertIn("not owned by caller", str(ctx.exception))
+        # Trigger-level check: cross-owner offer insert is rejected by 0003.
+        with self.assertRaises(Exception) as ctx2:
+            client.table("offers").insert(
+                {"owner_id": owner, "ingredient_id": foreign,
+                 "product_url": "https://example.invalid/x"}).execute()
+        self.assertIn("not owned by caller", str(ctx2.exception))
 
 
 if __name__ == "__main__":
