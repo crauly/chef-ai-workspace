@@ -208,8 +208,40 @@ class FakeRepo:
             for note in self.notifications.values():
                 if note["observation_id"] == observation_id \
                         and note["owner"] == owner_id:
+                    stored_basis = note.get("basis_observation_id")
+                    if stored_basis:
+                        try:
+                            basis_row = self.get_owned_observation(
+                                owner_id, str(stored_basis))
+                        except ValueError:
+                            basis_row = None
+                        if basis_row is not None:
+                            from chef_ai_workspace.price_history import (
+                                compare_observations as _compare)
+                            snap_base = _mk(basis_row)
+                            snap_cand = _mk(candidate)
+                            _should, snap_comp, _reasons = decide_notification(
+                                snap_base, snap_cand)
+                            snap_comp = (snap_comp if snap_comp is not None
+                                         else _compare(snap_base, snap_cand))
+                            snap_payload = comparison_payload(
+                                snap_comp, str(stored_basis))
+                            return {"created": False,
+                                    "notification": dict(note),
+                                    "comparison": snap_payload}
+                    legacy_payload = {
+                        "comparable": False,
+                        "reasons": ["original price basis unavailable"],
+                        "currency": None,
+                        "unit_basis": note.get("unit_basis"),
+                        "base_unit_price": None,
+                        "new_unit_price": None,
+                        "diff": None,
+                        "rate_pct": None,
+                        "basis_observation_id": stored_basis,
+                    }
                     return {"created": False, "notification": dict(note),
-                            "comparison": payload}
+                            "comparison": legacy_payload}
             nid = str(uuid4())
             note = {"id": nid, "owner": owner_id,
                     "observation_id": observation_id,
@@ -627,6 +659,170 @@ class HistoryInvarianceTests(unittest.TestCase):
                                  headers=self.h).json()
         self.assertTrue(detail["comparable"])
         self.assertEqual(detail["comparison"]["diff"], "0.1400")
+
+
+class ResendSnapshotTests(unittest.TestCase):
+    """Resending one observation must replay its creation snapshot."""
+
+    def setUp(self):
+        self.repo = FakeRepo(OWNER_1)
+        app.state.demo_owner_id = OWNER_1
+        app.state.demo_access_token = "test-secret"
+        app.state.repository_factory = lambda: self.repo
+        self.client = TestClient(app, raise_server_exceptions=False)
+        self.h = {"X-Demo-Access": "test-secret"}
+
+    def tearDown(self):
+        self.client.close()
+        del app.state.demo_owner_id
+        del app.state.demo_access_token
+        del app.state.repository_factory
+
+    def _confirm(self, amount):
+        oid = self.repo.create_owned_observation(
+            OWNER_1, OFF_A, amount, currency="JPY", tax_note="税込",
+            shipping_note="送料込", source="purchase", confirmed=True,
+            observed_at="2026-10-21T10:00:00+00:00")
+        r = self.client.post(f"/demo/observations/{oid}/confirm", headers=self.h)
+        self.assertEqual(r.status_code, 201, r.text)
+        return oid, r.json()
+
+    def test_resend_after_adoption_change_replays_snapshot(self):
+        oid, first = self._confirm("420")
+        nid = first["notification"]["id"]
+        # Adopt a different price afterwards.
+        oid2 = self.repo.create_owned_observation(
+            OWNER_1, OFF_A, "500", currency="JPY", tax_note="税込",
+            shipping_note="送料込", source="purchase", confirmed=True,
+            observed_at="2026-10-22T10:00:00+00:00")
+        self.repo.ingredients[ING_A]["adopted"] = oid2
+        again = self.client.post(f"/demo/observations/{oid}/confirm",
+                                 headers=self.h)
+        self.assertEqual(again.status_code, 201, again.text)
+        body = again.json()
+        self.assertFalse(body["created"])
+        self.assertEqual(body["notification"]["id"], nid)
+        self.assertEqual(body["comparison"]["basis_observation_id"], OBS_BASE)
+        self.assertEqual(body["comparison"]["unit_basis"],
+                         first["comparison"]["unit_basis"])
+        self.assertEqual(body["comparison"]["diff"], first["comparison"]["diff"])
+        self.assertEqual(body["comparison"]["diff"], "0.1400")
+        self.assertEqual(len(self.repo.notifications), 1)
+
+    def test_legacy_resend_returns_no_invented_numbers(self):
+        oid, first = self._confirm("420")
+        nid = first["notification"]["id"]
+        row = self.repo.notifications[nid]
+        del row["basis_observation_id"]
+        del row["unit_basis"]
+        again = self.client.post(f"/demo/observations/{oid}/confirm",
+                                 headers=self.h)
+        self.assertEqual(again.status_code, 201, again.text)
+        body = again.json()
+        self.assertFalse(body["created"])
+        self.assertEqual(body["notification"]["id"], nid)
+        self.assertFalse(body["comparison"]["comparable"])
+        self.assertIsNone(body["comparison"]["diff"])
+        self.assertTrue(body["comparison"]["reasons"])
+        self.assertEqual(len(self.repo.notifications), 1)
+
+
+class AdapterResendSnapshotTests(unittest.TestCase):
+    """Adapter conflict path must replay the stored basis snapshot."""
+
+    def _repo_with_conflict(self, note, rows):
+        from chef_ai_workspace.supabase_adapter import SupabasePersistence
+
+        class _Conflict(Exception):
+            pass
+
+        class _Resp:
+            def __init__(self, data):
+                self.data = data
+
+        class _Insert:
+            def execute(self):
+                exc = Exception("duplicate key value violates unique constraint")
+                exc.code = "23505"
+                raise exc
+
+        class _Select:
+            def __init__(self, data):
+                self._data = data
+            def eq(self, *a, **k):
+                return self
+            def limit(self, *a, **k):
+                return self
+            def execute(self):
+                return _Resp(self._data)
+
+        class _Table:
+            def __init__(self, note):
+                self._note = note
+            def insert(self, payload):
+                return _Insert()
+            def select(self, cols):
+                return _Select([dict(self._note)])
+
+        class _Tables:
+            def __init__(self, note):
+                self._note = note
+            def table(self, name):
+                return _Table(self._note)
+
+        repo = SupabasePersistence.__new__(SupabasePersistence)
+        repo.client = _Tables(note)
+        return repo
+
+    def _row(self, oid, amount):
+        return {"id": oid, "ingredient_id": ING_A, "offer_id": OFF_A,
+                "supplier_id": SUP_A, "amount_jpy": amount, "currency": "JPY",
+                "tax_note": "税込", "shipping_note": "送料込",
+                "package_quantity": "500", "package_unit": "g",
+                "source": "purchase", "confirmed": True,
+                "observed_at": "2026-10-21T10:00:00+00:00"}
+
+    def test_conflict_replays_stored_basis_not_current_adoption(self):
+        old_basis = self._row(OBS_BASE, "350")
+        cand_id = "cccccccc-cccc-cccc-cccc-cccccccccc01"
+        cand = self._row(cand_id, "420")
+        new_basis = self._row("dddddddd-dddd-dddd-dddd-dddddddddd01", "500")
+        note = {"id": "n1", "observation_id": cand_id, "ingredient_id": ING_A,
+                "basis_observation_id": OBS_BASE, "unit_basis": "g",
+                "change_jpy": "0.1400", "status": "unread",
+                "created_at": "2026-10-30T00:00:00+00:00"}
+        repo = self._repo_with_conflict(note, None)
+        repo.get_owned_observation = lambda o, i: {
+            cand_id: cand, OBS_BASE: old_basis,
+            "dddddddd-dddd-dddd-dddd-dddddddddd01": new_basis}[str(i)]
+        repo.get_owned_ingredient_adoption = lambda o, i: {
+            "ingredient_id": i,
+            "adopted_observation_id": "dddddddd-dddd-dddd-dddd-dddddddddd01",
+            "adopted_at": None}
+        out = repo.confirm_observation_notification(OWNER_1, cand_id)
+        self.assertFalse(out["created"])
+        self.assertEqual(out["notification"]["id"], "n1")
+        self.assertEqual(out["comparison"]["basis_observation_id"], OBS_BASE)
+        self.assertEqual(out["comparison"]["unit_basis"], "g")
+        self.assertEqual(out["comparison"]["diff"], "0.1400")
+
+    def test_conflict_legacy_note_returns_incomparable(self):
+        cand_id = "cccccccc-cccc-cccc-cccc-cccccccccc02"
+        cand = self._row(cand_id, "420")
+        note = {"id": "n2", "observation_id": cand_id, "ingredient_id": ING_A,
+                "change_jpy": "0.1400", "status": "unread",
+                "created_at": "2026-10-30T00:00:00+00:00"}
+        repo = self._repo_with_conflict(note, None)
+        repo.get_owned_observation = lambda o, i: cand
+        repo.get_owned_ingredient_adoption = lambda o, i: {
+            "ingredient_id": i, "adopted_observation_id": OBS_BASE,
+            "adopted_at": None}
+        out = repo.confirm_observation_notification(OWNER_1, cand_id)
+        self.assertFalse(out["created"])
+        self.assertEqual(out["notification"]["id"], "n2")
+        self.assertFalse(out["comparison"]["comparable"])
+        self.assertIsNone(out["comparison"]["diff"])
+        self.assertTrue(out["comparison"]["reasons"])
 
 
 class AdapterSchemaFallbackTests(unittest.TestCase):

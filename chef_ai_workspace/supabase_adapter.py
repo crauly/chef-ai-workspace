@@ -461,10 +461,70 @@ class SupabasePersistence:
                 if not existing:
                     raise
                 note = dict(existing[0])
-                note.setdefault("basis_observation_id", str(basis_id))
-                note.setdefault("unit_basis", comparison.unit_basis)
+                stored_basis = note.get("basis_observation_id")
+                if stored_basis:
+                    try:
+                        basis_row = self.get_owned_observation(
+                            owner_id, str(stored_basis))
+                    except ValueError:
+                        basis_row = None
+                    if basis_row is not None:
+                        base_snap = _Obs(
+                            id=str(basis_row["id"]),
+                            ingredient_id=str(basis_row["ingredient_id"]),
+                            offer_id=str(basis_row["offer_id"]),
+                            supplier_id=(str(basis_row["supplier_id"])
+                                         if basis_row.get("supplier_id") else None),
+                            amount=str(basis_row["amount_jpy"]),
+                            currency=str(basis_row["currency"]),
+                            tax_note=basis_row.get("tax_note"),
+                            shipping_note=basis_row.get("shipping_note"),
+                            package_quantity=str(
+                                basis_row.get("package_quantity") or ""),
+                            package_unit=str(basis_row.get("package_unit") or ""),
+                            source=str(basis_row["source"]),
+                            confirmed=bool(basis_row.get("confirmed")),
+                            observed_at=str(basis_row.get("observed_at") or ""))
+                        cand_snap = _Obs(
+                            id=str(candidate["id"]),
+                            ingredient_id=str(candidate["ingredient_id"]),
+                            offer_id=str(candidate["offer_id"]),
+                            supplier_id=(str(candidate["supplier_id"])
+                                         if candidate.get("supplier_id") else None),
+                            amount=str(candidate["amount_jpy"]),
+                            currency=str(candidate["currency"]),
+                            tax_note=candidate.get("tax_note"),
+                            shipping_note=candidate.get("shipping_note"),
+                            package_quantity=str(
+                                candidate.get("package_quantity") or ""),
+                            package_unit=str(candidate.get("package_unit") or ""),
+                            source=str(candidate["source"]),
+                            confirmed=bool(candidate.get("confirmed")),
+                            observed_at=str(candidate.get("observed_at") or ""))
+                        _should, snap_comp, _reasons = decide_notification(
+                            base_snap, cand_snap)
+                        snap_comp = (snap_comp if snap_comp is not None
+                                     else compare_observations(base_snap, cand_snap))
+                        snap_payload = comparison_payload(
+                            snap_comp, str(stored_basis))
+                        return {"created": False, "notification": note,
+                                "comparison": snap_payload}
+                # Legacy rows (pre-0004, no stored basis) or a basis that
+                # is no longer readable: history cannot be guaranteed, so
+                # return no invented numbers.
+                legacy_payload = {
+                    "comparable": False,
+                    "reasons": ["original price basis unavailable"],
+                    "currency": None,
+                    "unit_basis": note.get("unit_basis"),
+                    "base_unit_price": None,
+                    "new_unit_price": None,
+                    "diff": None,
+                    "rate_pct": None,
+                    "basis_observation_id": stored_basis,
+                }
                 return {"created": False, "notification": note,
-                        "comparison": payload}
+                        "comparison": legacy_payload}
             raise
         rows = response.data or []
         if not rows or "id" not in rows[0]:
