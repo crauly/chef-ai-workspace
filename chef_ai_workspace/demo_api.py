@@ -750,6 +750,8 @@ def suggest_demo_sourcing(
         owner, [offer.get("id") for offer in offers])
     reference_supplier_id = (
         adopted.supplier_id if adopted is not None else None)
+    adopted_offer_id = (
+        adopted.offer_id if adopted is not None else None)
     same_offers = []
     for offer in offers:
         row = per_offer.get(str(offer.get("id")))
@@ -809,7 +811,8 @@ def suggest_demo_sourcing(
         ingredient_id=str(ingredient_id), ingredient_name=name,
         adopted=adopted, same_offers=same_offers, similar=similar,
         max_candidates=max_candidates,
-        reference_supplier_id=reference_supplier_id))
+        reference_supplier_id=reference_supplier_id,
+        adopted_offer_id=adopted_offer_id))
 
 
 @router.get("/notifications")

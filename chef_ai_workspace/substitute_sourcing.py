@@ -36,6 +36,16 @@ class ExternalRetrievalUnavailable(Exception):
     """Raised when live web sourcing is requested but unavailable."""
 
 
+def _first_present(*values, default=None):
+    """First value that is not None. Zero and "" are real values: a zero
+    price is valid (schema allows amount >= 0) and must not fall through
+    to a fallback or become the string "None"."""
+    for value in values:
+        if value is not None:
+            return value
+    return default
+
+
 def fetch_external_candidates(query):
     """Live web sourcing seam. Always raises:実在する取得手段が未確認の
     ため、架空の候補一覧を返さない."""
@@ -51,7 +61,8 @@ def _observation(ingredient_id, offer_id, observation, package_quantity,
         offer_id=str(offer_id or ""),
         supplier_id=(str(observation.get("supplier_id"))
                      if observation.get("supplier_id") else None),
-        amount=str(observation.get("amount") or observation.get("amount_jpy") or ""),
+        amount=str(_first_present(observation.get("amount"),
+                               observation.get("amount_jpy"), default="")),
         currency=str(observation.get("currency") or ""),
         tax_note=observation.get("tax_note"),
         shipping_note=observation.get("shipping_note"),
@@ -60,6 +71,12 @@ def _observation(ingredient_id, offer_id, observation, package_quantity,
         source=str(observation.get("source") or ""),
         confirmed=bool(observation.get("confirmed")),
         observed_at=str(observation.get("observed_at") or ""))
+
+
+def _present_amount(observation):
+    value = _first_present(observation.get("amount"),
+                           observation.get("amount_jpy"), default=None)
+    return str(value) if value is not None else None
 
 
 def _unknowns(*, package_quantity, package_unit, shipping_note, tax_note,
@@ -111,8 +128,7 @@ def _candidate(*, kind, ingredient_id, ingredient_name, offer_id,
         "offer_id": str(offer_id) if offer_id else None,
         "supplier_name": supplier_name,
         "product_url": product_url,
-        "amount": (str(observation.get("amount")
-                       or observation.get("amount_jpy"))
+        "amount": (_present_amount(observation)
                    if observation else None),
         "currency": (str(observation.get("currency"))
                      if observation else None),
@@ -136,10 +152,14 @@ def _candidate(*, kind, ingredient_id, ingredient_name, offer_id,
 def suggest_sourcing(*, ingredient_id, ingredient_name,
                      adopted=None, same_offers=(), similar=(),
                      max_candidates=MAX_CANDIDATES,
-                     reference_supplier_id=None):
+                     reference_supplier_id=None,
+                     adopted_offer_id=None):
     """Assemble up to ``max_candidates`` suggestions from owned ledger rows.
 
     ``adopted`` is the ingredient's adopted-basis PriceObservation or None.
+    The adopted basis's own offer (``adopted_offer_id``) is excluded from
+    the alternates: it is the current purchase, not an alternative, and
+    must not consume the candidate limit.
     ``same_offers`` rows carry the offer (with ``supplier_id``) plus its
     latest observation (or None). Same-supplier offers are labelled
     ``same_product_same_supplier`` only when their supplier matches
@@ -161,6 +181,10 @@ def suggest_sourcing(*, ingredient_id, ingredient_name,
     for offer in same_offers or ():
         if not isinstance(offer, dict):
             continue
+        offer_id = offer.get("offer_id") or offer.get("id")
+        if (adopted_offer_id is not None and offer_id is not None
+                and str(offer_id) == str(adopted_offer_id)):
+            continue
         supplier_id = offer.get("supplier_id")
         if (reference_supplier_id is not None and supplier_id is not None
                 and str(supplier_id) == str(reference_supplier_id)):
@@ -171,7 +195,7 @@ def suggest_sourcing(*, ingredient_id, ingredient_name,
             kind=kind,
             ingredient_id=ingredient_id,
             ingredient_name=ingredient_name,
-            offer_id=offer.get("offer_id") or offer.get("id"),
+            offer_id=offer_id,
             supplier_id=supplier_id,
             supplier_name=offer.get("supplier_name"),
             product_url=offer.get("product_url"),

@@ -27,6 +27,8 @@ OFF_1 = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaab11"
 OFF_2 = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaab12"
 OFF_3 = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaab13"
 OFF_S1 = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaab14"
+OFF_4 = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaab17"
+OBS_4 = "33333333-3333-3333-3333-333333333305"
 SUP_1 = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa21"
 SUP_2 = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa22"
 OBS_BASE = "33333333-3333-3333-3333-333333333300"
@@ -76,6 +78,10 @@ class FakeLedger:
                     "supplier_id": None, "product_url": None,
                     "package_quantity": "500", "package_unit": "g",
                     "shipping_note": None},
+            OFF_4: {"id": OFF_4, "owner": owner, "ingredient_id": ING,
+                    "supplier_id": SUP_1, "product_url": None,
+                    "package_quantity": "1000", "package_unit": "g",
+                    "shipping_note": None},
             OFF_S1: {"id": OFF_S1, "owner": owner,
                      "ingredient_id": ING_SIM1, "supplier_id": SUP_1,
                      "product_url": None, "package_quantity": "500",
@@ -100,6 +106,8 @@ class FakeLedger:
             OBS_2: _obs(OBS_2, OFF_2, "300", tax="税別",
                         source="web_reference", confirmed=False,
                         observed_at="2026-10-22T10:00:00+00:00"),
+            OBS_4: _obs(OBS_4, OFF_4, "680",
+                         observed_at="2026-10-21T10:00:00+00:00"),
             OBS_S1: _obs(OBS_S1, OFF_S1, "380",
                          observed_at="2026-10-20T10:00:00+00:00"),
             OBS_S5: _obs(OBS_S5, OFF_S5, "300",
@@ -261,19 +269,24 @@ class SuggestTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         body = r.json()
         self.assertEqual(body["ingredient_id"], ING)
-        # 3 same-product offers + 5 similar = 8 found, 3 returned.
+        # Adopted offer excluded: 3 alternate offers + 5 similar = 8.
         self.assertEqual(body["total_found"], 8)
         self.assertEqual(body["returned"], 3)
         self.assertIsNone(body["shortage_note"])
         kinds = [c["kind"] for c in body["candidates"]]
-        self.assertEqual(kinds, ["same_product_same_supplier",
+        self.assertEqual(kinds, ["same_product_other_supplier",
                                  "same_product_other_supplier",
-                                 "same_product_other_supplier"])
+                                 "same_product_same_supplier"])
         first = body["candidates"][0]
-        self.assertEqual(first["offer_id"], OFF_1)
-        self.assertEqual(first["supplier_name"], "スーパーA")
-        self.assertTrue(first["comparison"]["comparable"])
-        self.assertEqual(first["comparison"]["diff"], "0.1400")
+        self.assertEqual(first["offer_id"], OFF_2)
+        self.assertEqual(first["supplier_name"], "ネットB")
+        # OFF_2 is a tax-mismatched web reference: reasons, no verdict.
+        self.assertFalse(first["comparison"]["comparable"])
+        self.assertIsNone(first["comparison"]["diff"])
+        third = body["candidates"][2]
+        self.assertEqual(third["offer_id"], OFF_4)
+        self.assertTrue(third["comparison"]["comparable"])
+        self.assertEqual(third["comparison"]["diff"], "-0.0200")
         self.assertFalse(body["provider"]["available"])
         self.assertTrue(body["provider"]["reason"])
         # Read-only: nothing in the ledger moved.
@@ -286,6 +299,8 @@ class SuggestTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         body = r.json()
         self.assertEqual(body["returned"], 8)
+        self.assertFalse(any(c["offer_id"] == OFF_1
+                             for c in body["candidates"]))
         similar = [c for c in body["candidates"]
                    if c["kind"] == "similar_product"]
         self.assertEqual(len(similar), 5)
@@ -332,9 +347,12 @@ class SuggestTests(unittest.TestCase):
         r = self._get(ING, max_candidates=10)
         self.assertEqual(r.status_code, 200, r.text)
         by_offer = {c["offer_id"]: c for c in r.json()["candidates"]}
-        # OFF_1 shares the adopted basis supplier: same-supplier offer.
-        self.assertEqual(by_offer[OFF_1]["kind"],
+        # The adopted offer itself is not an alternative.
+        self.assertNotIn(OFF_1, by_offer)
+        # OFF_4 shares the adopted basis supplier: same-supplier offer.
+        self.assertEqual(by_offer[OFF_4]["kind"],
                          "same_product_same_supplier")
+        self.assertEqual(by_offer[OFF_4]["comparison"]["diff"], "-0.0200")
         # OFF_2 is a different supplier; OFF_3 has an unknown supplier:
         # both are labelled other-supplier, matching reality.
         self.assertEqual(by_offer[OFF_2]["kind"],
@@ -342,7 +360,7 @@ class SuggestTests(unittest.TestCase):
         self.assertEqual(by_offer[OFF_3]["kind"],
                          "same_product_other_supplier")
         self.assertIn("仕入先不明", by_offer[OFF_3]["unknowns"])
-        self.assertNotIn("仕入先不明", by_offer[OFF_1]["unknowns"])
+        self.assertNotIn("仕入先不明", by_offer[OFF_4]["unknowns"])
 
     def test_no_basis_labels_all_same_ingredient_other(self):
         # ING_SIM1 has no adopted basis: no same-supplier claim is made.
@@ -374,7 +392,7 @@ class SuggestTests(unittest.TestCase):
         for n in range(250):
             oid = f"40000000-0000-4000-8000-{n:012d}"
             self.repo.observations[oid] = _obs(
-                oid, OFF_1, "500",
+                oid, OFF_2, "500",
                 observed_at=f"2026-10-23T{n // 60:02d}:{n % 60:02d}:00+00:00")
         self.repo.observations["40000000-0000-4000-8000-999999999999"] = _obs(
             "40000000-0000-4000-8000-999999999999", OFF_3, "260",
@@ -382,10 +400,26 @@ class SuggestTests(unittest.TestCase):
         r = self._get(ING, max_candidates=10)
         self.assertEqual(r.status_code, 200, r.text)
         by_offer = {c["offer_id"]: c for c in r.json()["candidates"]
-                    if c["offer_id"] in (OFF_1, OFF_3)}
-        self.assertEqual(by_offer[OFF_1]["amount"], "500")
+                    if c["offer_id"] in (OFF_2, OFF_3)}
+        self.assertEqual(by_offer[OFF_2]["amount"], "500")
         self.assertEqual(by_offer[OFF_3]["amount"], "260")
         self.assertNotIn("価格情報なし", by_offer[OFF_3]["unknowns"])
+
+    def test_numeric_zero_price_is_preserved(self):
+        # Supabase numeric(0) must survive as "0", not "" or "None", and
+        # compare as a valid decrease against the adopted basis.
+        self.repo.observations["50000000-0000-4000-8000-000000000001"] = {
+            "id": "50000000-0000-4000-8000-000000000001",
+            "offer_id": OFF_4, "amount_jpy": 0, "currency": "JPY",
+            "tax_note": "税込", "shipping_note": "送料込",
+            "source": "purchase", "confirmed": True,
+            "observed_at": "2026-10-24T00:00:00+00:00"}
+        r = self._get(ING, max_candidates=10)
+        self.assertEqual(r.status_code, 200, r.text)
+        cand = {c["offer_id"]: c for c in r.json()["candidates"]}[OFF_4]
+        self.assertEqual(cand["amount"], "0")
+        self.assertTrue(cand["comparison"]["comparable"])
+        self.assertEqual(cand["comparison"]["diff"], "-0.7000")
 
     def test_owner_isolation(self):
         other = FakeLedger(OWNER_2)

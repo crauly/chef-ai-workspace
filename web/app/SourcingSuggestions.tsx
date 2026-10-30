@@ -12,8 +12,9 @@ function verdict(c:Candidate,ja:boolean):string{
  if(!c.comparison)return ja?"採用価格なしのため比較なし":"No adopted basis; no comparison";
  if(!c.comparison.comparable)return (c.comparison.reasons.join("; ")||(ja?"比較不可":"Not comparable"));
  const sign=Number(c.comparison.diff)>=0?"+":"";
- const unit=c.comparison.unit_basis?`円/${c.comparison.unit_basis}`:(ja?"円":" JPY");
- return `${sign}${c.comparison.diff}${unit}${c.comparison.rate_pct?` (${c.comparison.rate_pct}%)`:""}`;
+ const currency=c.comparison.currency||"JPY";
+ const shown=c.comparison.unit_basis?(currency==="JPY"?`${sign}${c.comparison.diff}${ja?"円":" JPY"}/${c.comparison.unit_basis}`:`${sign}${c.comparison.diff} ${currency}/${c.comparison.unit_basis}`):`${sign}${c.comparison.diff} ${currency}`;
+ return `${shown}${c.comparison.rate_pct?` (${c.comparison.rate_pct}%)`:""}`;
 }
 export default function SourcingSuggestions({locale}:{locale:string}){
  const [ingredientId,setIngredientId]=useState("");
