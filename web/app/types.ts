@@ -5,6 +5,7 @@ export type Recipe = {
     price_override?: {amount_jpy: Tracked; per_quantity: string; per_unit: string} | null;
     price_mode: string}[];
   selling_price_jpy: Tracked;
+  display_names?: Record<string, {display: string; material: string}>;
 };
 export type Operation = Record<string, string>;
 export type AIProposal = {recipe_id: string; base_revision: number; operations: Operation[]; requires_confirmation: true;

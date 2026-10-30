@@ -146,8 +146,8 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    <button type="button" onClick={()=>void navigate({mode:"browse",target:""})}>レシピを参照</button>
    <button type="button" onClick={()=>void navigate({mode:"edit",target:""})}>選択レシピを編集</button>
   </section>
-  <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} sharedVoice={{markReview:mark,cancel:()=>{},captureMessage:voice.recording?"音声受付中です。確認後は「登録」「登録してください」でも保存できます。":voice.busy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${voice.error||voice.notice||""}`}} onCreated={recipe=>{
-   transition("browse");feedback("レシピを保存しました。");onCreated(recipe);
+  <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} sharedVoice={{markReview:mark,cancel:()=>{},captureMessage:voice.recording?"音声受付中です。確認後は「登録」「登録してください」でも保存できます。":voice.busy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${voice.error||voice.notice||""}`}} onCreated={(recipe,mode)=>{
+   transition("browse");feedback(mode==="unconfirmed"?"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"レシピを保存しました。");onCreated(recipe);
   }}/></div>
  </>;
 }
