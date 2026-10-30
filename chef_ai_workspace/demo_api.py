@@ -559,30 +559,26 @@ def compare_demo_observations(ingredient_id: UUID, body: CompareBody,
     return _json(asdict(compare_observations(base, candidate)))
 
 
-@router.get("/ingredients/{ingredient_id}/price-impact")
-def impact_demo_price(ingredient_id: UUID, observation_id: UUID,
-                      ctx=Depends(demo_context)):
-    """Hypothetical current-cost impact as if the observation were adopted.
+def _impact_envelope(owner: str, repository, ingredient_id: str,
+                   observation_id: str) -> dict:
+    """Shared M5 envelope for price-impact and M6 notification detail.
 
-    The candidate is gated on the adopted price basis: without an
-    adopted observation, or when currency/tax/shipping/package terms do
-    not match, no yen cost difference is produced -- reasons are
-    returned instead and nothing is guessed. Reads only: recipes,
-    snapshots, and adopted prices are never written."""
+    Compares the candidate against the adopted basis; without a basis
+    or on term mismatch no yen cost difference is produced. Reads only.
+    """
     from .price_history import assess_impact, compare_observations, observation_quote
-    owner, repository = ctx
     finder = getattr(repository, "list_recipes_using_ingredient", None)
     if not callable(finder):
         raise HTTPException(503, "Price history not configured")
-    row = _observation_or_404(repository, owner, str(observation_id))
+    row = _observation_or_404(repository, owner, observation_id)
     obs = _to_price_observation(row)
-    if obs.ingredient_id != str(ingredient_id):
+    if obs.ingredient_id != ingredient_id:
         raise HTTPException(422, "Observation does not belong to this ingredient")
     adoption = getattr(repository, "get_owned_ingredient_adoption", None)
     if not callable(adoption):
         raise HTTPException(503, "Price history not configured")
     try:
-        ref = adoption(owner, str(ingredient_id))
+        ref = adoption(owner, ingredient_id)
     except ValueError as exc:
         raise HTTPException(404, "Ingredient not found or inaccessible") from exc
     basis_id = ref.get("adopted_observation_id")
@@ -603,7 +599,7 @@ def impact_demo_price(ingredient_id: UUID, observation_id: UUID,
     if quote is None:
         raise HTTPException(422, "Observation package terms cannot price a line")
     try:
-        recipes = finder(owner, str(ingredient_id))
+        recipes = finder(owner, ingredient_id)
     except ValueError as exc:
         raise HTTPException(404, "Ingredient not found or inaccessible") from exc
     needed = sorted({m.ingredient_id for recipe in recipes for m in recipe.materials
@@ -611,7 +607,118 @@ def impact_demo_price(ingredient_id: UUID, observation_id: UUID,
     loader = getattr(repository, "load_owned_ingredients", None)
     catalog = loader(owner, needed) if callable(loader) else {}
     impacts = assess_impact(tuple(recipes), catalog or {},
-                            str(ingredient_id), quote)
+                            ingredient_id, quote)
     return {"basis_observation_id": str(basis_id), "comparable": True,
             "reasons": [],
             "items": [_json(asdict(impact)) for impact in impacts]}
+
+
+@router.get("/ingredients/{ingredient_id}/price-impact")
+def impact_demo_price(ingredient_id: UUID, observation_id: UUID,
+                      ctx=Depends(demo_context)):
+    """Hypothetical current-cost impact as if the observation were adopted.
+
+    The candidate is gated on the adopted price basis: without an
+    adopted observation, or when currency/tax/shipping/package terms do
+    not match, no yen cost difference is produced -- reasons are
+    returned instead and nothing is guessed. Reads only: recipes,
+    snapshots, and adopted prices are never written."""
+    owner, repository = ctx
+    return _impact_envelope(owner, repository, str(ingredient_id),
+                            str(observation_id))
+
+
+# --- M6: price-change bell notifications (explicit confirmation only) ---
+
+class NotificationStatusBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: str = Field(max_length=20)
+
+
+def _notification_or_404(repository, owner: str, notification_id: str) -> dict:
+    getter = getattr(repository, "get_owned_notification", None)
+    if not callable(getter):
+        raise HTTPException(503, "Price notifications not configured")
+    try:
+        return getter(owner, notification_id)
+    except ValueError as exc:
+        raise HTTPException(404, "Notification not found or inaccessible") from exc
+
+
+@router.post("/observations/{observation_id}/confirm", status_code=201)
+def confirm_demo_observation(observation_id: UUID, ctx=Depends(demo_context)):
+    """Explicitly confirm one price observation, notifying exactly once.
+
+    Comparable confirmations create (or reuse, on resend) one
+    notification; missing bases and incomparable terms yield reasons
+    and create nothing. Thresholds and cadence are undecided, so no
+    automatic or scheduled confirmation exists here.
+    """
+    owner, repository = ctx
+    confirmer = getattr(repository, "confirm_observation_notification", None)
+    if not callable(confirmer):
+        raise HTTPException(503, "Price notifications not configured")
+    try:
+        result = confirmer(owner, str(observation_id))
+    except ValueError as exc:
+        message = str(exc)
+        if "not owned" in message or "not owned by caller" in message:
+            raise HTTPException(404, "Observation not found or inaccessible") from exc
+        raise HTTPException(422, message) from exc
+    return {"created": bool(result["created"]),
+            "notification": _json(result["notification"]),
+            "comparison": _json(result["comparison"])}
+
+
+@router.get("/notifications")
+def list_demo_notifications(status: str | None = Query(default=None, max_length=20),
+                            limit: int = Query(default=100, ge=1, le=200),
+                            ctx=Depends(demo_context)):
+    """Owner-scoped notifications, newest first, optional status filter."""
+    owner, repository = ctx
+    lister = getattr(repository, "list_owned_notifications", None)
+    if not callable(lister):
+        raise HTTPException(503, "Price notifications not configured")
+    try:
+        items = lister(owner, status=status, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"items": [_json(item) for item in items]}
+
+
+@router.get("/notifications/{notification_id}")
+def get_demo_notification(notification_id: UUID, ctx=Depends(demo_context)):
+    """Notification detail with observation, basis comparison, and the
+    related recipes' hypothetical cost impact. Reads only: adopted
+    prices and saved recipe versions are never written."""
+    owner, repository = ctx
+    note = _notification_or_404(repository, owner, str(notification_id))
+    row = _observation_or_404(repository, owner, str(note["observation_id"]))
+    envelope = _impact_envelope(owner, repository, str(note["ingredient_id"]),
+                                str(note["observation_id"]))
+    return {"notification": _json(note),
+            "observation": _json(row),
+            "basis_observation_id": envelope["basis_observation_id"],
+            "comparable": envelope["comparable"],
+            "reasons": envelope["reasons"],
+            "items": envelope["items"]}
+
+
+@router.patch("/notifications/{notification_id}")
+def update_demo_notification(notification_id: UUID,
+                             body: NotificationStatusBody,
+                             ctx=Depends(demo_context)):
+    """Move a notification unread/acknowledged/resolved. Status only:
+    acknowledging never adopts a price or changes a supplier."""
+    owner, repository = ctx
+    updater = getattr(repository, "update_notification_status", None)
+    if not callable(updater):
+        raise HTTPException(503, "Price notifications not configured")
+    try:
+        updated = updater(owner, str(notification_id), body.status)
+    except ValueError as exc:
+        message = str(exc)
+        if "not owned" in message:
+            raise HTTPException(404, "Notification not found or inaccessible") from exc
+        raise HTTPException(422, message) from exc
+    return _json(updated)
