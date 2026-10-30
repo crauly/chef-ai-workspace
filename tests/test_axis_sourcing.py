@@ -111,6 +111,48 @@ class AssignTests(unittest.TestCase):
         self.assertEqual(
             result["axes"]["compatibility"]["pick"]["reason_source"], "muse")
 
+    def test_mixed_kg_and_g_bases_rank_cheapest_correctly(self):
+        # Adopted basis in kg: M5 keeps per-kg for the kg offer but
+        # converts the g offer to per-g. Bare values (500 vs 0.9) would
+        # misrank; normalized values (0.5/g vs 0.9/g) must pick 500/kg.
+        per_kg = _candidate(0, price="500.0000", name="業務用パスタ")
+        per_kg["comparison"]["unit_basis"] = "kg"
+        per_g = _candidate(1, price="0.9000", name="小分けパスタ")
+        per_g["comparison"]["unit_basis"] = "g"
+        result = assign_axes(
+            ingredient_id=ING, ingredient_name="パスタ",
+            candidates=[per_g, per_kg], evaluations=[])
+        self.assertEqual(result["axes"]["cost"]["pick"]["candidate_index"], 1)
+        self.assertEqual(
+            result["axes"]["cost"]["pick"]["candidate"]["ingredient_name"],
+            "業務用パスタ")
+
+    def test_unknown_basis_is_never_ranked(self):
+        odd = _candidate(0, price="0.1000")
+        odd["comparison"]["unit_basis"] = "袋"
+        result = assign_axes(
+            ingredient_id=ING, ingredient_name="パスタ",
+            candidates=[odd], evaluations=[])
+        self.assertIsNone(result["axes"]["cost"]["pick"])
+
+    def test_every_pick_is_either_slotted_or_extra(self):
+        pool = [_candidate(i, price=str(0.5 + i * 0.1)) for i in range(5)]
+        result = assign_axes(
+            ingredient_id=ING, ingredient_name="パスタ", candidates=pool,
+            evaluations=[], max_picks=5)
+        slotted = {slot["pick"]["candidate_index"]
+                   for slot in result["axes"].values()
+                   if slot["pick"] is not None}
+        self.assertEqual(result["returned"], len(result["picks"]))
+        extra = [p for p in result["picks"]
+                 if p["candidate_index"] not in slotted]
+        self.assertTrue(extra)  # fills beyond the cost slot exist here
+        for pick in extra:
+            # Fill extras are deterministic cost-axis backups only; the UI
+            # must render them as extras so displayed counts match.
+            self.assertEqual(pick["axis"], "cost")
+            self.assertEqual(pick["reason_source"], "deterministic")
+
     def test_incomparable_pool_leaves_cost_empty_with_reason(self):
         result = assign_axes(
             ingredient_id=ING, ingredient_name="パスタ",

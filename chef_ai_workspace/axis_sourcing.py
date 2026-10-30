@@ -16,6 +16,8 @@ only retrieved-with-source rows may be treated as real data.
 """
 from decimal import Decimal, InvalidOperation
 
+from .costing import convert_quantity
+
 AXES = ("cost", "compatibility", "quality")
 AXIS_LABELS = {
     "cost": "コスト重視",
@@ -35,14 +37,33 @@ class AxisEvaluationError(ValueError):
 
 
 def _unit_price(candidate):
-    """Comparable unit price as Decimal, or None (never guessed)."""
+    """Comparable unit price normalized to per-g/per-ml, or None.
+
+    M5 keeps the raw unit when the adopted basis shares it (e.g. per-kg)
+    but converts mixed units to g/ml, so bare ``new_unit_price`` values
+    across candidates are not mutually comparable (500/kg vs 0.9/g).
+    Normalization reuses M5's own factors from ``costing`` instead of a
+    second conversion table. Returns ``(dimension, price)``; unrankable
+    terms (unknown basis, bad numbers) yield None and are never ranked.
+    """
     comparison = candidate.get("comparison") if isinstance(candidate, dict) else None
     if not isinstance(comparison, dict) or not comparison.get("comparable"):
         return None
     try:
-        return Decimal(str(comparison.get("new_unit_price")))
+        price = Decimal(str(comparison.get("new_unit_price")))
+        basis = str(comparison.get("unit_basis") or "")
     except (InvalidOperation, ValueError, TypeError, AttributeError):
         return None
+    if price < 0:
+        return None
+    for target in ("g", "ml"):
+        try:
+            factor = convert_quantity(Decimal(1), basis, target)
+        except (InvalidOperation, ValueError, TypeError, AttributeError):
+            factor = None
+        if factor is not None and factor > 0:
+            return (target, price / factor)
+    return None
 
 
 def build_axis_prompt(ingredient_name, candidates):
@@ -178,11 +199,20 @@ def assign_axes(*, ingredient_id, ingredient_name, candidates,
     # Cost compares same-ingredient offers only: a similar (different)
     # product is never auto-picked as cheaper; substitutability needs
     # Muse/human judgment on the compatibility axis.
+    # All comparable candidates passed M5 against the same adopted
+    # basis, so they share one dimension; the dimension check below is a
+    # guard, not a cross-dimension ranking (mass vs volume never competes).
+    normalized = []
+    for i, c in enumerate(pool):
+        if c.get("kind") == "similar_product":
+            continue
+        ranked = _unit_price(c)
+        if ranked is not None:
+            normalized.append((i,) + ranked)
+    dimension = normalized[0][1] if normalized else None
     priced = sorted(
-        ((index, price) for index, price in
-         ((i, _unit_price(c)) for i, c in enumerate(pool)
-          if c.get("kind") != "similar_product")
-         if price is not None),
+        ((index, value) for index, dim, value in normalized
+         if dim == dimension),
         key=lambda pair: pair[1])
     cost_pick = None
     if priced:

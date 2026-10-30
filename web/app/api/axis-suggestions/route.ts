@@ -21,7 +21,7 @@ export async function GET(req:NextRequest){
   const response=await fetch(target,{headers:{"X-Demo-Access":token},cache:"no-store",redirect:"error",signal:AbortSignal.timeout(45000)});
   if(!response.ok)return fail(response.status>=400&&response.status<600?response.status:502);
   const data:unknown=await response.json();
-  if(!data||typeof data!=="object"||typeof (data as {axes?:unknown}).axes!=="object")return fail(502);
+  if(!data||typeof data!=="object"||typeof (data as {axes?:unknown}).axes!=="object"||!Array.isArray((data as {picks?:unknown}).picks))return fail(502);
   return NextResponse.json(data,{headers:{"Cache-Control":"no-store"}});
  }catch{return fail(502);}
 }

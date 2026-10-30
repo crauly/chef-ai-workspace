@@ -1,11 +1,11 @@
 "use client";
-import {useState} from "react";
+import {useRef,useState} from "react";
 type Comparison={comparable:boolean;reasons:string[];currency:string|null;unit_basis:string|null;diff:string|null;rate_pct:string|null};
 type Candidate={kind:string;ingredient_id:string;ingredient_name:string|null;offer_id:string|null;supplier_name:string|null;product_url:string|null;amount:string|null;currency:string|null;package_quantity:string|null;package_unit:string|null;shipping_note:string|null;tax_note:string|null;source:string|null;observed_at:string|null;data_origin:string;unknowns:string[];comparison:Comparison|null};
 type Result={ingredient_id:string;ingredient_name:string|null;candidates:Candidate[];total_found:number;returned:number;shortage_note:string|null;provider:{available:boolean;reason:string}};
 type AxisPick={axis:string;candidate_index:number;candidate:Candidate;reason:string;reason_source:string;confidence:string|null};
 type AxisSlot={pick:AxisPick|null;label:string;empty_reason?:string};
-type AxisResult={ingredient_id:string;ingredient_name:string|null;axes:{cost:AxisSlot;compatibility:AxisSlot;quality:AxisSlot};returned:number;shortage_note:string|null;provider:{external:{available:boolean;reason:string};muse:{used:boolean;evaluated:number;skipped:number;error:string|null}}};
+type AxisResult={ingredient_id:string;ingredient_name:string|null;axes:{cost:AxisSlot;compatibility:AxisSlot;quality:AxisSlot};picks:AxisPick[];returned:number;shortage_note:string|null;provider:{external:{available:boolean;reason:string};muse:{used:boolean;evaluated:number;skipped:number;error:string|null}}};
 async function read<T>(path:string):Promise<T>{
  const response=await fetch(path,{headers:{"Content-Type":"application/json"}});
  if(!response.ok){const err=new Error(`request failed: ${response.status}`);(err as {status?:number}).status=response.status;throw err;}
@@ -26,6 +26,7 @@ export default function SourcingSuggestions({locale}:{locale:string}){
  const [error,setError]=useState("");
  const [busy,setBusy]=useState(false);
  const [axisBusy,setAxisBusy]=useState(false);
+ const axisSeq=useRef(0);
  const ja=locale==="ja";
  async function lookup(e:React.FormEvent){
   e.preventDefault();
@@ -34,6 +35,10 @@ export default function SourcingSuggestions({locale}:{locale:string}){
   setBusy(true);
   try{
    const data=await read<Result>(`/api/sourcing-suggestions?ingredient_id=${encodeURIComponent(id)}`);
+   // A retargeted search invalidates any in-flight axis request: the
+   // late response is ignored by sequence, and busy is released here
+   // so the button never wedges on an orphaned request.
+   axisSeq.current++;setAxisBusy(false);
    setResult(data);setAxes(null);setError("");
   }catch(e){const code=(e as {status?:number}).status;
    if(code===404)setError(ja?"食材が見つかりません。":"Ingredient not found.");
@@ -41,14 +46,30 @@ export default function SourcingSuggestions({locale}:{locale:string}){
   finally{setBusy(false);}
  }
  async function lookupAxes(){
-  const id=ingredientId.trim();
-  if(!id||axisBusy)return;
-  setAxisBusy(true);
+  // Bind to the displayed candidate result, never the live input: a
+  // retargeted search or a late response must not mix ingredients.
+  const target=result?.ingredient_id;
+  if(!target||axisBusy)return;
+  const seq=++axisSeq.current;setAxisBusy(true);
   try{
-   const data=await read<AxisResult>(`/api/axis-suggestions?ingredient_id=${encodeURIComponent(id)}&max_candidates=3`);
+   const data=await read<AxisResult>(`/api/axis-suggestions?ingredient_id=${encodeURIComponent(target)}&max_candidates=3`);
+   if(axisSeq.current!==seq)return;
    setAxes(data);setError("");
-  }catch{setError(ja?"軸別候補を取得できませんでした。":"Could not load axis picks.");}
-  finally{setAxisBusy(false);}
+  }catch{if(axisSeq.current===seq)setError(ja?"軸別候補を取得できませんでした。":"Could not load axis picks.");}
+  finally{if(axisSeq.current===seq)setAxisBusy(false);}
+ }
+ function extraPicks(axes:AxisResult,ja:boolean){
+  const slotted=new Set([axes.axes.cost.pick,axes.axes.compatibility.pick,axes.axes.quality.pick].filter((p):p is AxisPick=>p!==null).map(p=>p.candidate_index));
+  const rest=axes.picks.filter(p=>!slotted.has(p.candidate_index));
+  if(rest.length===0)return null;
+  return <div><p className="muted">{ja?"その他の候補（コスト順の予備）":"Other candidates (cost-ordered backups)"}</p>
+   <ul>{rest.map((p,i)=>{const c=p.candidate;return <li key={`extra-${p.candidate_index}-${i}`}>
+    <span>{c.ingredient_name||c.ingredient_id}{c.supplier_name?` / ${c.supplier_name}`:""}</span>
+    <br/><span>{c.amount!==null?`${c.amount}${c.currency||""}`:(ja?"価格情報なし":"No price")} {c.package_quantity&&c.package_unit?`(${c.package_quantity}${c.package_unit})`:""}</span>
+    <br/><span className="muted">{ja?"比較":"Comparison"}: {verdict(c,ja)}</span>
+    {c.product_url&&<span> <a href={c.product_url} target="_blank" rel="noreferrer">{ja?"出典":"Source"}</a></span>}
+    {c.unknowns.length>0&&<span className="muted"> [{c.unknowns.join("; ")}]</span>}
+   </li>;})}</ul></div>;
  }
  function axisSlot(slot:AxisSlot,ja:boolean){
   if(!slot.pick)return <p className="muted">{slot.label}: {slot.empty_reason||(ja?"選定なし":"No pick")}</p>;
@@ -81,13 +102,14 @@ export default function SourcingSuggestions({locale}:{locale:string}){
     {c.unknowns.length>0&&<span className="muted"> [{c.unknowns.join("; ")}]</span>}
    </li>)}</ul>}
    <div className="toolbar"><button type="button" onClick={lookupAxes} disabled={axisBusy||!ingredientId.trim()}>{ja?"3軸で比べる（コスト・互換性・品質）":"Compare on 3 axes"}</button></div>
-   {axes&&<div>
-    <p className="muted">{ja?"軸別選定":"Axis picks"}: {axes.returned}{axes.shortage_note?` — ${axes.shortage_note}`:""}</p>
+   {axes&&axes.ingredient_id===result?.ingredient_id&&<div>
+    <p className="muted">{ja?"軸別選定":"Axis picks"} ({axes.ingredient_name||axes.ingredient_id}): {axes.returned}{axes.shortage_note?` — ${axes.shortage_note}`:""}</p>
     {!axes.provider.external.available&&<p className="muted">{ja?"外部Web取得は未利用":"External web retrieval unavailable"}: {axes.provider.external.reason}</p>}
     {!axes.provider.muse.used&&<p className="muted">{ja?"Muse評価なし（コスト軸のみ確定計算）":"No Muse evaluation (cost axis only)"}{axes.provider.muse.error?`: ${axes.provider.muse.error}`:""}</p>}
     {axisSlot(axes.axes.cost,ja)}
     {axisSlot(axes.axes.compatibility,ja)}
     {axisSlot(axes.axes.quality,ja)}
+    {extraPicks(axes,ja)}
    </div>}
   </div>}
  </section>;
