@@ -644,6 +644,93 @@ class SupabasePersistence:
                     .execute())
         return response.data or []
 
+    def list_latest_observations_for_offers(self, owner_id, offer_ids):
+        """Latest observation per offer, owner-scoped, exact for long histories.
+
+        One paginated SELECT series over price_observations -- never one
+        query per offer. Newest-first pages of 1000 rows are folded with
+        first-row wins, so every requested offer's latest is found no
+        matter how many older rows exist. Read-only.
+        """
+        uniq = [i for i in dict.fromkeys(
+            str(x) for x in (offer_ids or []) if x)]
+        if not uniq:
+            return {}
+        offers = (self.client.table("offers")
+                  .select("id,ingredient_id,supplier_id,product_url,"
+                          "package_quantity,package_unit,shipping_note")
+                  .eq("owner_id", owner_id).in_("id", uniq)
+                  .execute()).data or []
+        by_offer = {row["id"]: row for row in offers}
+        if not by_offer:
+            return {}
+        supplier_ids = sorted({row["supplier_id"] for row in offers
+                               if row.get("supplier_id")})
+        names: dict[str, str] = {}
+        if supplier_ids:
+            suppliers = (self.client.table("suppliers").select("id,name")
+                         .eq("owner_id", owner_id).in_("id", supplier_ids)
+                         .execute()).data or []
+            names = {row["id"]: row["name"] for row in suppliers}
+        latest: dict[str, dict] = {}
+        offset = 0
+        stride = 1000
+        while True:
+            rows = (self.client.table("price_observations")
+                    .select("id,offer_id,amount_jpy,currency,tax_note,"
+                            "shipping_note,source,confirmed,observed_at")
+                    .eq("owner_id", owner_id)
+                    .in_("offer_id", list(by_offer))
+                    .order("observed_at", desc=True)
+                    .range(offset, offset + stride - 1)
+                    .execute()).data or []
+            for row in rows:
+                oid = row.get("offer_id")
+                if oid in by_offer and oid not in latest:
+                    offer = by_offer[oid]
+                    supplier_id = offer.get("supplier_id")
+                    latest[oid] = {
+                        **row, "ingredient_id": offer["ingredient_id"],
+                        "package_quantity": offer.get("package_quantity"),
+                        "package_unit": offer.get("package_unit"),
+                        "supplier_id": supplier_id,
+                        "supplier_name": names.get(supplier_id or ""),
+                        "product_url": offer.get("product_url")}
+                    if len(latest) >= len(by_offer):
+                        return latest
+            if len(rows) < stride:
+                return latest
+            offset += stride
+
+    def list_latest_observations_for_ingredients(self, owner_id,
+                                                 ingredient_ids):
+        """Latest observation per ingredient, owner-scoped. A fixed small
+        number of owner-filtered SELECTs (offers, then the per-offer
+        latest above) regardless of ingredient count -- never one query
+        per ingredient. Read-only.
+        """
+        uniq = [i for i in dict.fromkeys(
+            str(x) for x in (ingredient_ids or []) if x)]
+        if not uniq:
+            return {}
+        offers = (self.client.table("offers")
+                  .select("id,ingredient_id")
+                  .eq("owner_id", owner_id).in_("ingredient_id", uniq)
+                  .execute()).data or []
+        offer_ids = [row["id"] for row in offers]
+        if not offer_ids:
+            return {}
+        per_offer = self.list_latest_observations_for_offers(
+            owner_id, offer_ids)
+        best: dict[str, dict] = {}
+        for row in per_offer.values():
+            iid = row.get("ingredient_id")
+            current = best.get(iid)
+            if current is None or str(row.get("observed_at") or "") > str(
+                    current.get("observed_at") or ""):
+                best[iid] = row
+        return best
+
     def commit_recipe_revision(self, *, owner_id, recipe_id, request_id,
                                base_revision, state, title, cost_snapshot,
                                payload_hash, save_version):

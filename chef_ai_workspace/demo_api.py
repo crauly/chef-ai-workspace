@@ -700,6 +700,121 @@ def confirm_demo_observation(observation_id: UUID, ctx=Depends(demo_context)):
             "comparison": _json(result["comparison"])}
 
 
+@router.get("/ingredients/{ingredient_id}/sourcing-suggestions")
+def suggest_demo_sourcing(
+        ingredient_id: UUID,
+        max_candidates: int = Query(default=3, ge=1, le=10),
+        ctx=Depends(demo_context)):
+    """Propose alternate suppliers / substitute products (M7). Read-only.
+
+    Candidates come only from the caller's owned ledger: other offers of
+    the same ingredient, then similarly named owned ingredients (never
+    merged by name). External web retrieval is unavailable, so the
+    provider status says so instead of inventing listings. Nothing here
+    writes, adopts, or switches anything; the chef decides.
+    """
+    from .substitute_sourcing import suggest_sourcing
+    owner, repository = ctx
+    loaders = ("load_owned_ingredients", "list_ingredient_offers",
+               "list_latest_observations_for_offers",
+               "list_latest_observations_for_ingredients",
+               "get_owned_ingredient_adoption", "search_owned_ingredients")
+    if any(not callable(getattr(repository, name, None)) for name in loaders):
+        raise HTTPException(503, "Sourcing suggestions not configured")
+    try:
+        owned = repository.load_owned_ingredients(owner, [str(ingredient_id)])
+    except ValueError as exc:
+        raise HTTPException(404, "Ingredient not found or inaccessible") from exc
+    ingredient = owned.get(str(ingredient_id))
+    if ingredient is None:
+        raise HTTPException(404, "Ingredient not found or inaccessible")
+    name = getattr(ingredient, "name", str(ingredient_id))
+    adopted = None
+    try:
+        ref = repository.get_owned_ingredient_adoption(owner, str(ingredient_id))
+    except ValueError as exc:
+        raise HTTPException(404, "Ingredient not found or inaccessible") from exc
+    if ref.get("adopted_observation_id"):
+        try:
+            adopted = _to_price_observation(_observation_or_404(
+                repository, owner, str(ref["adopted_observation_id"])))
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            adopted = None
+    # Bulk latest-price reads: one bounded call per group, never one
+    # query per offer or per similar ingredient (N+1), and exact even
+    # when an offer's history is long (no top-N truncation dropout).
+    offers = repository.list_ingredient_offers(owner, str(ingredient_id))
+    per_offer = repository.list_latest_observations_for_offers(
+        owner, [offer.get("id") for offer in offers])
+    reference_supplier_id = (
+        adopted.supplier_id if adopted is not None else None)
+    adopted_offer_id = (
+        adopted.offer_id if adopted is not None else None)
+    same_offers = []
+    for offer in offers:
+        row = per_offer.get(str(offer.get("id")))
+        obs = None
+        if row is not None:
+            obs = {"id": row.get("id"),
+                   "amount": row.get("amount_jpy"),
+                   "currency": row.get("currency"),
+                   "tax_note": row.get("tax_note"),
+                   "shipping_note": row.get("shipping_note"),
+                   "source": row.get("source"),
+                   "confirmed": row.get("confirmed"),
+                   "observed_at": row.get("observed_at"),
+                   "supplier_id": row.get("supplier_id")}
+        same_offers.append({
+            "offer_id": offer.get("id"),
+            "supplier_id": offer.get("supplier_id"),
+            "supplier_name": (row or {}).get("supplier_name"),
+            "product_url": offer.get("product_url") or (row or {}).get("product_url"),
+            "package_quantity": offer.get("package_quantity"),
+            "package_unit": offer.get("package_unit"),
+            "observation": obs,
+            "data_origin": ("registered_reference"
+                            if row is not None
+                            and row.get("source") == "web_reference"
+                            else "ledger")})
+    hits = [hit for hit in
+            repository.search_owned_ingredients(owner, name, limit=6)
+            if str(hit.get("id")) != str(ingredient_id)][:5]
+    per_ingredient = (repository.list_latest_observations_for_ingredients(
+        owner, [hit.get("id") for hit in hits]) if hits else {})
+    similar = []
+    for hit in hits:
+        row = per_ingredient.get(str(hit.get("id")))
+        obs = None
+        if row is not None:
+            obs = {"id": row.get("id"),
+                   "amount": row.get("amount_jpy"),
+                   "currency": row.get("currency"),
+                   "tax_note": row.get("tax_note"),
+                   "shipping_note": row.get("shipping_note"),
+                   "source": row.get("source"),
+                   "confirmed": row.get("confirmed"),
+                   "observed_at": row.get("observed_at"),
+                   "supplier_id": row.get("supplier_id")}
+        similar.append({"ingredient_id": hit.get("id"),
+                        "ingredient_name": hit.get("name"),
+                        "offer_id": row.get("offer_id") if row else None,
+                        "supplier_id": row.get("supplier_id") if row else None,
+                        "supplier_name": row.get("supplier_name") if row else None,
+                        "product_url": row.get("product_url") if row else None,
+                        "package_quantity": row.get("package_quantity") if row else None,
+                        "package_unit": row.get("package_unit") if row else None,
+                        "observation": obs,
+                        "data_origin": "ledger"})
+    return _json(suggest_sourcing(
+        ingredient_id=str(ingredient_id), ingredient_name=name,
+        adopted=adopted, same_offers=same_offers, similar=similar,
+        max_candidates=max_candidates,
+        reference_supplier_id=reference_supplier_id,
+        adopted_offer_id=adopted_offer_id))
+
+
 @router.get("/notifications")
 def list_demo_notifications(status: str | None = Query(default=None, max_length=20),
                             limit: int = Query(default=100, ge=1, le=200),
