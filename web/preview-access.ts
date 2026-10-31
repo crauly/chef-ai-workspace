@@ -1,5 +1,11 @@
 // Operator gate only: no user accounts or browser-side backend secrets.
 export async function previewAuthorized(req: Request): Promise<boolean> {
+  // Local UI development has no operator-password prompt. Never bypass in production,
+  // even if a production request uses a loopback Host header.
+  const url = new URL(req.url);
+  if (process.env.NODE_ENV === "development" &&
+      (url.hostname === "localhost" || url.hostname === "127.0.0.1") &&
+      (req.headers.get("host")?.split(":")[0] === url.hostname)) return true;
   const secret = process.env.DEMO_PREVIEW_PASSWORD;
   if (!secret || secret.length < 24) return false;
   const header = req.headers.get("authorization");
