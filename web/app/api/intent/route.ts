@@ -1,5 +1,6 @@
 import {NextRequest, NextResponse} from "next/server";
 import {previewAuthorized} from "../../../preview-access";
+import {INTENT_SCHEMA,chatResponseFormat} from "../../../muse-schemas";
 
 export const runtime = "nodejs";
 const fail=(code:number)=>NextResponse.json({error:"Voice command failed"},{status:code,headers:{"Cache-Control":"no-store"}});
@@ -35,6 +36,7 @@ export async function POST(req:NextRequest) {
       body:JSON.stringify({
         model:"muse-spark-1.3",
         reasoning_effort:"low",max_completion_tokens:2048,
+        response_format:chatResponseFormat("chef_intent",INTENT_SCHEMA),
         messages:[
           {role:"system",content:INSTRUCTION},
           {role:"user",content:JSON.stringify({utterance:record.utterance,current_mode:record.current_mode})}
