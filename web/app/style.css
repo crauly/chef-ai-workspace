@@ -154,3 +154,8 @@ a,.link{color:#b3d5ff}
 /* Frosted floating navigation: content remains visible while scrolling beneath. */
 .bottom-nav{background:rgba(18,20,23,.38);border-color:rgba(220,232,245,.18);-webkit-backdrop-filter:blur(16px) saturate(125%);backdrop-filter:blur(16px) saturate(125%);box-shadow:0 10px 28px rgba(0,0,0,.23)}
 .bottom-nav a:hover,.bottom-nav button:not(.bottom-nav-mic):hover{background:rgba(255,255,255,.09)}
+
+/* Use the same microphone artwork for primary voice action and floating nav. */
+.mic-primary{display:flex;align-items:center;justify-content:center;gap:10px}
+.mic-primary svg{width:23px;height:23px;flex:none;display:block}
+.mic-primary .stop-glyph{width:17px;height:17px;border-radius:3px;display:block;background:currentColor;flex:none}
