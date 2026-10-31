@@ -1,5 +1,5 @@
 "use client";
-import {useCallback,useEffect,useState} from "react";
+import {useCallback,useEffect,useRef,useState} from "react";
 type Notification={id:string;observation_id:string;ingredient_id:string;change_jpy:string|null;unit_basis:string|null;currency:string|null;status:string;created_at:string};
 type ImpactItem={recipe_id:string;title:string|null;current_total:string|null;hypo_total:string|null;diff:string|null};
 type Detail={notification:Notification;observation:{id:string;amount_jpy:string;currency:string;observed_at:string;supplier_id:string|null}|null;basis_observation_id:string|null;comparable:boolean;comparison:{unit_basis:string|null;currency:string|null;diff:string|null;rate_pct:string|null}|null;reasons:string[];items:ImpactItem[]};
@@ -21,6 +21,9 @@ export default function PriceBell({locale}:{locale:string}){
  const [error,setError]=useState("");
  const [busy,setBusy]=useState(false);
  const [observationId,setObservationId]=useState("");
+ const [open,setOpen]=useState(false);
+ const [animate,setAnimate]=useState(false);
+ const previousUnread=useRef<number|null>(null);
  const ja=locale==="ja";
  const reload=useCallback(async()=>{
   try{const result=await read<{items:Notification[]}>("/api/notifications");
@@ -57,14 +60,26 @@ export default function PriceBell({locale}:{locale:string}){
   finally{setBusy(false);}
  }
  const unread=items.filter(i=>i.status==="unread").length;
- return <section className="card" aria-label={ja?"価格通知":"Price notifications"}>
+ useEffect(()=>{
+  if(previousUnread.current!==null&&unread>previousUnread.current)setAnimate(true);
+  previousUnread.current=unread;
+ },[unread]);
+ return <div className="price-bell-wrap">
+  <button type="button" className={"price-bell-trigger"+(animate?" price-bell-ring":"")} aria-label={ja?"価格通知を開く":"Open price notifications"} aria-expanded={open} aria-controls="price-notifications-panel" onAnimationEnd={()=>setAnimate(false)} onClick={()=>setOpen(value=>!value)}>
+   <svg width="22" height="22" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
+   {unread>0&&<span className="price-bell-count" aria-hidden="true">{unread>99?"99+":unread}</span>}
+   {error&&<span className="price-bell-error" aria-hidden="true">!</span>}
+  </button>
+  {open&&<section id="price-notifications-panel" className="price-bell-panel" aria-label={ja?"価格通知":"Price notifications"}>
+  <div className="toolbar"><h2>{ja?"価格通知":"Price notifications"} {unread>0&&<span role="status">({unread}{ja?"件の未読":" unread"})</span>}</h2>
+  <button type="button" disabled={busy} onClick={()=>void reload()}>{ja?"更新":"Refresh"}</button><button type="button" onClick={()=>setOpen(false)} aria-label={ja?"通知を閉じる":"Close notifications"}>×</button></div>
   <div className="toolbar"><h2>{ja?"価格通知":"Price notifications"} 🔔 {unread>0&&<span role="status">({unread}{ja?"件の未読":" unread"})</span>}</h2>
   <button type="button" disabled={busy} onClick={()=>void reload()}>{ja?"更新":"Refresh"}</button></div>
   {error&&<p role="alert" className="error">{error}</p>}
-  <form onSubmit={confirm}>
+  <details className="price-bell-advanced"><summary>{ja?"価格観測から通知を作成":"Create notification from observation"}</summary><form onSubmit={confirm}>
    <input aria-label={ja?"価格観測ID":"Price observation ID"} placeholder={ja?"価格観測ID":"Price observation ID"} value={observationId} onChange={e=>setObservationId(e.target.value)} required/>
    <button type="submit" disabled={busy||!observationId.trim()}>{ja?"価格を確認して通知":"Confirm price"}</button>
-  </form>
+  </form></details>
   {items.length===0?<p className="muted">{ja?"通知はありません。":"No notifications."}</p>:
   <ul>{items.map(n=><li key={n.id}>
    <button type="button" disabled={busy} onClick={()=>setOpenId(openId===n.id?null:n.id)}>
@@ -81,5 +96,6 @@ export default function PriceBell({locale}:{locale:string}){
     </div>
    </div>}
   </li>)}</ul>}
- </section>;
+ </section>}
+ </div>;
 }

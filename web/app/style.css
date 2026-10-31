@@ -177,3 +177,23 @@ a,.link{color:#b3d5ff}
 .voice-transcript ol{max-height:220px;overflow-y:auto;overflow-x:hidden;overflow-wrap:anywhere;padding-left:24px;margin-bottom:0}
 .voice-transcript li{margin-bottom:6px}
 @media(max-width:560px){.voice-quick-modes button{flex:1;min-width:0}.voice-heading{gap:8px}.voice-settings-panel{padding:12px}}
+
+/* Header price notifications — no persistent dashboard card. */
+.chef-header .toolbar{position:relative}
+.price-bell-wrap{position:relative;margin-left:auto}
+.price-bell-trigger{position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;padding:8px;border-radius:50%;background:transparent;color:inherit;border:1px solid rgba(151,169,162,.35)}
+.price-bell-trigger:hover,.price-bell-trigger[aria-expanded="true"]{background:rgba(130,151,151,.15)}
+.price-bell-count{position:absolute;top:-5px;right:-7px;display:flex;align-items:center;justify-content:center;min-width:19px;height:19px;padding:0 4px;border-radius:10px;background:#b64949;color:white;font-size:11px;font-weight:700;line-height:1}
+.price-bell-error{position:absolute;bottom:-4px;right:-6px;display:flex;align-items:center;justify-content:center;width:17px;height:17px;background:#a05c2e;color:white;font-size:12px;border-radius:50%;font-weight:700}
+.price-bell-panel{position:absolute;z-index:40;right:0;top:calc(100% + 8px);width:min(420px,calc(100vw - 36px));max-height:min(74vh,620px);overflow-y:auto;padding:16px;border-radius:14px;border:1px solid rgba(140,162,154,.35);background:var(--color-paper,#f7f6f2);color:var(--color-ink,#1e2522);box-shadow:0 12px 32px rgba(0,0,0,.22)}
+.price-bell-panel h2{margin:0;font-size:1rem}
+.price-bell-panel .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.price-bell-panel button{padding:8px 10px}
+.price-bell-panel ul{padding-left:20px}
+.price-bell-advanced{margin:12px 0}
+.price-bell-advanced summary{cursor:pointer}
+.price-bell-advanced form{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.price-bell-advanced input{min-width:0;flex:1 1 170px}
+@keyframes chef-bell-ring{0%,100%{transform:rotate(0)}20%{transform:rotate(13deg)}40%{transform:rotate(-10deg)}60%{transform:rotate(7deg)}80%{transform:rotate(-3deg)}}
+.price-bell-ring svg{animation:chef-bell-ring .7s ease-in-out 1;transform-origin:top center}
+@media(prefers-reduced-motion:reduce){.price-bell-ring svg{animation:none}}
