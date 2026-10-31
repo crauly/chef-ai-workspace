@@ -217,7 +217,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
   <nav aria-label={locale==="ja"?"主要":"Primary"} className="bottom-nav">
    <a href="#top">{locale==="ja"?"ホーム":"Home"}</a>
    <a href="#recipes">{locale==="ja"?"レシピ":"Recipes"}</a>
-   <button type="button" aria-label={locale==="ja"?"下部の音声操作":"Bottom voice control"} aria-pressed={micRecording} disabled={micDisabled} onClick={toggleMic}>{micRecording?"■":"🎙"}</button>
+   <button type="button" className="bottom-nav-mic" aria-label={locale==="ja"?"下部の音声操作":"Bottom voice control"} aria-pressed={micRecording} disabled={micDisabled} onClick={toggleMic}>{micRecording?"■":"🎙"}</button>
    <button type="button" onClick={()=>void revealDraft()}>{locale==="ja"?"下書き":"Draft"}</button>
    <a href="#assist">{locale==="ja"?"その他":"More"}</a>
   </nav>
