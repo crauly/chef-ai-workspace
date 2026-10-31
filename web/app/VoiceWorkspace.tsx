@@ -8,6 +8,7 @@ import {playVoiceCue,type VoiceMode} from "./VoiceModePanel";
 import {voiceNavigation,explicitEditRequest,type Navigation} from "./voice-navigation";
 import {voiceCommand} from "./voice-commands";
 import {useVoiceCapture,type VoiceCaptureMeta} from "./useVoiceCapture";
+import {useRealtimeVoiceCapture} from "./useRealtimeVoiceCapture";
 import {logVoiceEvent,getVoiceEvents,subscribeVoiceEvents,type VoiceDiagEvent} from "./voice-diagnostics";
 
 export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreated,reviewBoundary}:{
@@ -30,11 +31,17 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  const alive=useRef(true);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;queue.current=[];reviewBoundary.current=null;};},[reviewBoundary]);
  const voice=useVoiceCapture(locale,receive,true);
+ const realtime=useRealtimeVoiceCapture(locale,receive,{getEpoch:()=>boundary.current});
+ const [realtimeMode,setRealtimeMode]=useState(false);
+ const micRecording=realtimeMode?realtime.recording:voice.recording;
+ const micBusy=!realtimeMode&&voice.busy;
+ const micError=realtimeMode?realtime.error:voice.error;
+ const micNotice=realtimeMode?realtime.notice:voice.notice;
  const wasRecording=useRef(false);
  useEffect(()=>{
-  if(wasRecording.current&&!voice.recording)playVoiceCue(voice.error?"error":"stop",volume);
-  wasRecording.current=voice.recording;
- },[voice.recording,voice.error,volume]);
+  if(wasRecording.current&&!micRecording)playVoiceCue(micError?"error":"stop",volume);
+  wasRecording.current=micRecording;
+ },[micRecording,micError,volume]);
  useEffect(()=>{
   if(selected?.id&&selected.id!==previousTarget.current&&currentMode.current==="idle"){
    transition("browse");feedback("参照モードです。表示中のレシピの変更内容を話すと編集へ進みます。");
@@ -150,12 +157,14 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    <p>現在のモード: <strong>{labels[mode]}</strong>{mode==="edit"&&selected?` — ${selected.title.value}`:""}</p>
    {draftPending&&mode!=="create"&&<p role="status">登録途中の下書きを保持しています。<button type="button" onClick={()=>void (async()=>{await navigate({mode:"create",target:""});if(currentMode.current!=="create")return;registration.current?.requestReview();feedback("保持していた下書きを確認します。");})()}>下書きに戻る</button></p>}
    <p>「レシピを登録します」「〇〇を見せて」「パスタを150gに変更」のように続けて話してください。</p>
-   <button type="button" disabled={!voice.recording&&(voice.supported===false||voice.busy)} onClick={voice.recording?voice.stop:()=>void voice.start()} aria-pressed={voice.recording}>{voice.recording?"■ マイクを停止":voice.error||voice.notice?"🎙 音声操作を再開":"🎙 音声操作を開始"}</button>
-   <p role="status">{voice.recording?"音声受付中":voice.busy?"音声受付は一時停止・受信済みの音声を処理中":voice.error||voice.notice?"音声受付は停止中・再開できます":"音声受付は停止中"}</p>
-   {voice.notice&&<p role="status">{voice.notice}</p>}
+   <button type="button" disabled={!voice.recording&&(voice.supported===false||voice.busy)} onClick={micRecording?(realtimeMode?realtime.stop:voice.stop):()=>void (realtimeMode?realtime.start():voice.start())} aria-pressed={micRecording}>{micRecording?"■ マイクを停止":micError||micNotice?"🎙 音声操作を再開":"🎙 音声操作を開始"}</button>
+   <button type="button" disabled={micRecording} onClick={()=>setRealtimeMode(value=>!value)}>{realtimeMode?"通常音声に切替":"リアルタイム音声に切替"}</button>
+   <p role="status">{micRecording?(realtimeMode?"リアルタイム音声受付中":"音声受付中"):micBusy?"音声受付は一時停止・受信済みの音声を処理中":micError||micNotice?"音声受付は停止中・再開できます":"音声受付は停止中"}</p>
+   {micNotice&&<p role="status">{micNotice}</p>}
+   {realtimeMode&&realtime.partial&&<p role="status">認識中：{realtime.partial}</p>}
    <p>音声はMetaへ送信して文字起こしします。録音は保存しません。切り替え音の後に話してください。</p>
-   <p aria-live="polite">{voice.recording?"聞き取り中… ":""}{voice.busy?"音声を文字にしています… ":""}{routing?"操作を処理中… ":""}{message}</p>
-   {voice.error&&<p role="alert">{voice.error}</p>}
+   <p aria-live="polite">{micRecording?"聞き取り中… ":""}{micBusy?"音声を文字にしています… ":""}{routing?"操作を処理中… ":""}{message}</p>
+   {micError&&<p role="alert">{micError}</p>}
    {heard&&<p>認識した指示：{heard}</p>}
    <form onSubmit={event=>{event.preventDefault();receive(manual);setManual("");}}>
     <input aria-label="音声認識できない場合の入力" value={manual} onChange={event=>setManual(event.target.value)} placeholder="音声認識できないときの補助入力"/>
@@ -170,7 +179,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
     <ul>{diag.slice(-10).map(event=><li key={event.seq}>{new Date(event.at).toLocaleTimeString()} {event.kind}{event.trace?` [${event.trace}]`:""}{event.detail?`：${event.detail}`:""}</li>)}</ul>
    </details>
   </section>
-  <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} onDiscarded={()=>setDraftPending(false)} sharedVoice={{markReview:mark,cancel:()=>{},captureMessage:voice.recording?"音声受付中です。確認後は「登録」「登録してください」でも保存できます。":voice.busy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${voice.error||voice.notice||""}`}} onCreated={(recipe,mode)=>{
+  <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} onDiscarded={()=>setDraftPending(false)} sharedVoice={{markReview:mark,cancel:()=>{},captureMessage:micRecording?"音声受付中です。確認後は「登録」「登録してください」でも保存できます。":micBusy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${micError||micNotice||""}`}} onCreated={(recipe,mode)=>{
    setDraftPending(false);transition("browse");feedback(mode==="unconfirmed"?"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"レシピを保存しました。");onCreated(recipe);
   }}/></div>
  </>;

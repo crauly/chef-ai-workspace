@@ -68,3 +68,6 @@ def confirm_recipe_mutation(recipe_id: UUID, body: MutationBody,
 # Operator-gated hackathon library; independent of production Supabase login.
 from .demo_api import router as demo_router
 app.include_router(demo_router)
+
+# Phase B realtime relay routes (registration only; no I/O at import).
+from . import voice_realtime as _voice_realtime  # noqa: E402,F401

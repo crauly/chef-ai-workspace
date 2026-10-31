@@ -19,6 +19,7 @@ Target: **Vercel** for `web/` (Next.js), **Render Free** for FastAPI, and **only
 ## Vercel (manual Next.js deployment)
 - Root directory: `web`; Framework: Next.js; install/build via lockfile (`npm ci`, `npm run build`).
 - Server-only settings: `DEMO_PREVIEW_PASSWORD` (>=24 ASCII characters), `DEMO_ACCESS_TOKEN` (same backend-only demo token), `FASTAPI_BASE_URL` (the Render HTTPS origin).
+- Public (non-secret) setting: `NEXT_PUBLIC_DEMO_WS_URL` (the Render `wss://` origin for the realtime relay). Unset means realtime stays unavailable and REST is the path; never put keys behind `NEXT_PUBLIC_`.
 - **Do not set** any of the above with `NEXT_PUBLIC_`. Do not expose Supabase or Meta keys in Vercel.
 - HTTPS and the existing HTTP Basic preview gate remain mandatory.
 
