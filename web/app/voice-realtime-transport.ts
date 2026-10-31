@@ -2,6 +2,13 @@
 // No API keys here; the browser presents only a single-use ticket.
 // The socket factory is injectable so fixture tests run without a microphone.
 //
+// Connection contract:
+// - The ticket is sent only after the socket opens. A close, error, or
+//   explicit cancel before open sends nothing and never becomes ready.
+// - Stopping is a two-phase drain: endStream first, then the socket closes
+//   after the relay answers (or after a finite timeout). The final
+//   speechComplete still commits through the shared store exactly once.
+//
 // Turn contract (SSOT: VoiceTurnStore):
 // - transcript events are provisional display info only, even with final:true.
 // - speechComplete is the sole committed transcript, once per turnId, and
@@ -10,11 +17,12 @@
 import {VoiceTurnStore} from "./voice-turn-store";
 import {
   REALTIME_BACKLOG_BYTES,
+  REALTIME_DRAIN_TIMEOUT_MS,
   REALTIME_REFRESH_MS,
   REALTIME_SESSION_LIMIT_MS,
 } from "./voice-realtime-audio";
 
-export type RealtimeState = "idle" | "connecting" | "ready" | "closed" | "failed";
+export type RealtimeState = "idle" | "connecting" | "ready" | "draining" | "closed" | "failed";
 export type RealtimeCallbacks = {
   onCommitted?: (text: string, turnId: string) => void;
   onPartial?: (text: string, turnId: string) => void;
@@ -23,12 +31,18 @@ export type RealtimeCallbacks = {
 export type SocketLike = {
   send(data: string | ArrayBuffer): void;
   close(code?: number): void;
+  onopen: (() => void) | null;
   onmessage: ((ev: {data: unknown}) => void) | null;
   onclose: ((ev: {code: number}) => void) | null;
   onerror: (() => void) | null;
 };
 
-export {REALTIME_BACKLOG_BYTES, REALTIME_REFRESH_MS, REALTIME_SESSION_LIMIT_MS};
+export {
+  REALTIME_BACKLOG_BYTES,
+  REALTIME_DRAIN_TIMEOUT_MS,
+  REALTIME_REFRESH_MS,
+  REALTIME_SESSION_LIMIT_MS,
+};
 
 export function backlogExceeded(pendingBytes: number): boolean {
   return pendingBytes > REALTIME_BACKLOG_BYTES;
@@ -37,6 +51,8 @@ export function backlogExceeded(pendingBytes: number): boolean {
 export class RealtimeTransport {
   private socket: SocketLike | null = null;
   private state: RealtimeState = "idle";
+  private epoch = 0;
+  private drainTimer: ReturnType<typeof setTimeout> | null = null;
   constructor(
     private openSocket: (url: string) => SocketLike,
     private callbacks: RealtimeCallbacks = {},
@@ -44,13 +60,34 @@ export class RealtimeTransport {
   ) {}
 
   connect(url: string, ticket: string): void {
+    this.cancelPending("reconnecting");
+    const my = ++this.epoch;
     this.setState("connecting", "opening relay");
     const socket = this.openSocket(url);
     this.socket = socket;
-    socket.onclose = () => this.setState("closed", "relay closed");
-    socket.onerror = () => this.setState("failed", "relay error");
-    socket.onmessage = ev => this.onFrame(ev.data);
-    socket.send(JSON.stringify({ticket}));
+    socket.onopen = () => {
+      if (my !== this.epoch || this.socket !== socket) return;
+      try {
+        socket.send(JSON.stringify({ticket}));
+      } catch {
+        if (my === this.epoch) this.setState("failed", "ticket send failed");
+      }
+    };
+    socket.onclose = () => {
+      if (my !== this.epoch || this.socket !== socket) return;
+      // A closed socket is never reused: late open/message frames are dead.
+      this.detachSocket();
+      this.setState("closed", "relay closed");
+    };
+    socket.onerror = () => {
+      if (my !== this.epoch || this.socket !== socket) return;
+      this.detachSocket();
+      this.setState("failed", "relay error");
+    };
+    socket.onmessage = ev => {
+      if (my !== this.epoch || this.socket !== socket) return;
+      this.onFrame(ev.data);
+    };
   }
 
   sendPcm(chunk: ArrayBuffer, pendingBytes: number): boolean {
@@ -60,13 +97,59 @@ export class RealtimeTransport {
     return true;
   }
 
+  /** Signal end of audio without closing: used by the refresh path. */
   finish(): void {
     try { this.socket?.send(JSON.stringify({type: "endStream"})); } catch { /* ignore */ }
   }
 
+  /**
+   * User stop: end audio, then wait for the relay to answer with the final
+   * speechComplete (or a finite timeout) before closing. Late duplicates
+   * are absorbed by the shared turn store; a timeout or cut keeps the draft.
+   */
+  finishAndDrain(timeoutMs: number = REALTIME_DRAIN_TIMEOUT_MS): void {
+    if (this.state !== "ready") { this.close(); return; }
+    try {
+      this.socket?.send(JSON.stringify({type: "endStream"}));
+    } catch {
+      this.close();
+      return;
+    }
+    this.setState("draining", "waiting for final transcript");
+    if (this.drainTimer) clearTimeout(this.drainTimer);
+    const my = this.epoch;
+    this.drainTimer = setTimeout(() => {
+      this.drainTimer = null;
+      if (my !== this.epoch) return;
+      this.close();
+    }, Math.max(0, timeoutMs));
+  }
+
   close(code?: number): void {
-    try { this.socket?.close(code); } catch { /* ignore */ }
+    this.cancelPending("explicit stop");
     this.setState("closed", "explicit stop");
+  }
+
+  private detachSocket(): void {
+    const socket = this.socket;
+    this.socket = null;
+    if (socket) {
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onclose = null;
+      socket.onerror = null;
+    }
+  }
+
+  private cancelPending(_reason: string): void {
+    this.epoch++;
+    if (this.drainTimer) { clearTimeout(this.drainTimer); this.drainTimer = null; }
+    const socket = this.socket;
+    this.detachSocket();
+    if (socket) {
+      try { socket.close(); } catch { /* ignore */ }
+    }
+    void _reason;
   }
 
   private setState(state: RealtimeState, reason: string): void {
@@ -83,7 +166,14 @@ export class RealtimeTransport {
       event = parsed as Record<string, unknown>;
     } catch { return; }
     const type = event["type"];
-    if (type === "ready") { this.setState("ready", "relay ready"); return; }
+    // Ready is meaningful only while connecting. Past that point (ready,
+    // draining, closed, failed) a stray ready must not resurrect the state;
+    // late turn events still flow to the store during the drain.
+    if (type === "ready") {
+      if (this.state !== "connecting") return;
+      this.setState("ready", "relay ready");
+      return;
+    }
     if (type === "error") { this.setState("failed", String(event["reason"] ?? "upstream")); return; }
     if (type === "speechStart" && typeof event["turnId"] === "string") {
       this.turns.handle({type: "speechStart", turnId: event["turnId"]});

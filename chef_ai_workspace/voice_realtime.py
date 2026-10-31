@@ -24,6 +24,10 @@ SESSION_LIMIT_S = 60 * 60
 # record it here rather than guessing server behaviour.
 MAX_KEYWORDS = 50
 TICKET_TTL_S = 120
+# Upper bound for forwarding Meta's final events after the browser ends
+# audio. The browser applies its own timeout as well; neither side waits
+# forever, and a timeout never touches a draft (the relay stores none).
+RELAY_DRAIN_S = 4.0
 
 
 def build_language_bias(locale: str) -> list[str]:
@@ -255,6 +259,8 @@ async def _relay(websocket, model_key: str, ticket: WsTicket) -> None:
             await websocket.send_json({"type": "ready",
                                        "sessionId": str(hello["sessionId"])[:64]})
 
+            end_stream = _asyncio.Event()
+
             async def browser_to_meta():
                 try:
                     while True:
@@ -274,6 +280,7 @@ async def _relay(websocket, model_key: str, ticket: WsTicket) -> None:
                                     await upstream.send(json.dumps({"type": "endStream"}))
                                 except Exception:
                                     pass
+                                end_stream.set()
                                 return
                 except Exception:
                     pass
@@ -301,10 +308,19 @@ async def _relay(websocket, model_key: str, ticket: WsTicket) -> None:
                 except Exception:
                     pass
 
-            await _asyncio.wait(
-                [_asyncio.create_task(browser_to_meta()),
-                 _asyncio.create_task(meta_to_browser())],
-                return_when=_asyncio.FIRST_COMPLETED)
+            browser_task = _asyncio.create_task(browser_to_meta())
+            meta_task = _asyncio.create_task(meta_to_browser())
+            await _asyncio.wait([browser_task],
+                                return_when=_asyncio.FIRST_COMPLETED)
+            if end_stream.is_set() and not meta_task.done():
+                # Graceful stop: forward Meta's final events (including the
+                # last speechComplete) before closing, with a finite bound.
+                try:
+                    await _asyncio.wait_for(meta_task, RELAY_DRAIN_S)
+                except _asyncio.TimeoutError:
+                    pass
+            if not meta_task.done():
+                meta_task.cancel()
     except Exception:
         try:
             await websocket.send_json({"type": "error", "reason": "realtime_failed"})

@@ -11,6 +11,8 @@ export const REALTIME_SEND_INTERVAL_MS = 100;
 export const REALTIME_MAX_SEND_SAMPLES = REALTIME_SAMPLE_RATE / 10;
 /** Proactive session refresh before Meta's 60-minute limit. */
 export const REALTIME_REFRESH_MS = 55 * 60 * 1000;
+/** Upper bound for the endStream drain after the user stops. */
+export const REALTIME_DRAIN_TIMEOUT_MS = 4000;
 /** Meta's default realtime session limit. */
 export const REALTIME_SESSION_LIMIT_MS = 60 * 60 * 1000;
 

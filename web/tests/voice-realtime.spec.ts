@@ -67,12 +67,13 @@ test("transport: final:true never commits; speechComplete body is canonical", as
       const committed = [];
       const partials = [];
       const t = new exports.RealtimeTransport(url => {
-        const s = {send(d) {}, close(c) {}, onmessage: null, onclose: null, onerror: null};
+        const s = {send(d) {}, close(c) {}, onopen: null, onmessage: null, onclose: null, onerror: null};
         box = s; return s;
       }, {onCommitted: (text, id) => committed.push([text, id]),
           onPartial: (text, id) => partials.push([text, id]),
           onState: () => {}});
       t.connect("wss://relay/demo/voice-realtime", "ticket");
+      box.onopen();
       box.onmessage({data: JSON.stringify({type: "ready"})});
       box.onmessage({data: JSON.stringify({type: "speechStart", turnId: "t1"})});
       box.onmessage({data: JSON.stringify({type: "transcript", transcript: "エビ1尾", final: false})});
@@ -134,4 +135,110 @@ test("audio helpers: 24kHz resampling, silence, and endpoint guard", async ({pag
   // No public relay origin in test env: realtime must report unconfigured.
   expect(result["endpointUnset"]).toBeNull();
   expect(result["backlog"]).toBe(5 * 24000 * 2);
+});
+
+test("connection: ticket waits for open; pre-open close sends nothing", async ({page}) => {
+  await page.goto("/");
+  const result = await page.evaluate(([bundle, boot]: [RealtimeSources, string]) => {
+    const run = new Function("bundle", boot + `
+      const states = [];
+      const frames = [];
+      let box = null;
+      const t = new exports.RealtimeTransport(url => {
+        const s = {send(d) { frames.push(d); }, close(c) {}, onopen: null,
+          onmessage: null, onclose: null, onerror: null};
+        box = s; return s;
+      }, {onState: s => states.push(s)});
+      t.connect("wss://relay/demo/voice-realtime", "tick-123");
+      const beforeOpen = frames.length;
+      box.onclose({code: 1006}); // connection failed before open
+      // The socket is detached by construction: late frames are no-ops.
+      box.onopen?.(); // must not send the ticket
+      box.onmessage?.({data: JSON.stringify({type: "ready"})}); // ignored
+      // A fresh connect sends the ticket only after open.
+      const frames2 = [];
+      let box2 = null;
+      const t2 = new exports.RealtimeTransport(url => {
+        const s = {send(d) { frames2.push(d); }, close(c) {}, onopen: null,
+          onmessage: null, onclose: null, onerror: null};
+        box2 = s; return s;
+      }, {});
+      t2.connect("wss://relay/demo/voice-realtime", "tick-456");
+      const queued = frames2.length;
+      box2.onopen();
+      return {beforeOpen, after: frames.length, states,
+        queued, ticket: frames2.length ? JSON.parse(frames2[0]).ticket : null};
+    `);
+    return run(bundle) as Record<string, unknown>;
+  }, [bundle(), BOOT] as [RealtimeSources, string]);
+  expect(result["beforeOpen"]).toBe(0);
+  expect(result["after"]).toBe(0);
+  expect(result["states"]).toEqual(["connecting", "closed"]);
+  expect(result["queued"]).toBe(0);
+  expect(result["ticket"]).toBe("tick-456");
+});
+
+test("drain: endStream first, late speechComplete commits once, close finalizes", async ({page}) => {
+  await page.goto("/");
+  const result = await page.evaluate(([bundle, boot]: [RealtimeSources, string]) => {
+    const run = new Function("bundle", boot + `
+      const states = [];
+      const frames = [];
+      const committed = [];
+      let box = null;
+      const t = new exports.RealtimeTransport(url => {
+        const s = {send(d) { frames.push(d); }, close(c) {}, onopen: null,
+          onmessage: null, onclose: null, onerror: null};
+        box = s; return s;
+      }, {onCommitted: (text, id) => committed.push([text, id]),
+          onState: s => states.push(s)});
+      t.connect("wss://relay/demo/voice-realtime", "ticket");
+      box.onopen();
+      box.onmessage({data: JSON.stringify({type: "ready"})});
+      box.onmessage({data: JSON.stringify({type: "speechStart", turnId: "t9"})});
+      t.finishAndDrain(5000);
+      const endStream = frames.length ? JSON.parse(frames[frames.length - 1]).type : null;
+      // The final transcript arrives after the user stopped: still commits.
+      box.onmessage({data: JSON.stringify({type: "speechComplete", turnId: "t9", transcript: "エビ2尾"})});
+      // A duplicate during the drain never re-applies.
+      box.onmessage({data: JSON.stringify({type: "speechComplete", turnId: "t9", transcript: "エビ2尾"})});
+      box.onmessage({data: JSON.stringify({type: "ready"})}); // stray ready during drain
+      box.onclose({code: 1000}); // relay answers and closes
+      // A closed socket delivers nothing more by construction.
+      const postCloseDead = box.onmessage === null;
+      return {endStream, committed, states, postCloseDead};
+    `);
+    return run(bundle) as Record<string, unknown>;
+  }, [bundle(), BOOT] as [RealtimeSources, string]);
+  expect(result["endStream"]).toBe("endStream");
+  expect(result["committed"]).toEqual([["エビ2尾", "t9"]]);
+  expect(result["states"]).toEqual(["connecting", "ready", "draining", "closed"]);
+  expect(result["postCloseDead"]).toBe(true);
+});
+
+test("drain timeout closes locally when the relay stays silent", async ({page}) => {
+  await page.goto("/");
+  const result = await page.evaluate(async ([bundle, boot]: [RealtimeSources, string]) => {
+    const run = new Function("bundle", boot + `
+      return (async () => {
+        const states = [];
+        let closed = 0;
+        let box = null;
+        const t = new exports.RealtimeTransport(url => {
+          const s = {send(d) {}, close(c) { closed++; }, onopen: null,
+            onmessage: null, onclose: null, onerror: null};
+          box = s; return s;
+        }, {onState: s => states.push(s)});
+        t.connect("wss://relay/demo/voice-realtime", "ticket");
+        box.onopen();
+        box.onmessage({data: JSON.stringify({type: "ready"})});
+        t.finishAndDrain(30);
+        await new Promise(resolve => setTimeout(resolve, 120));
+        return {closed: closed > 0, states};
+      })();
+    `);
+    return await run(bundle) as Record<string, unknown>;
+  }, [bundle(), BOOT] as [RealtimeSources, string]);
+  expect(result["closed"]).toBe(true);
+  expect(result["states"]).toEqual(["connecting", "ready", "draining", "closed"]);
 });

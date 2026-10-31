@@ -116,10 +116,6 @@ class WsTicketEndpointTests(unittest.TestCase):
                     setattr(app.state, name, value)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class WsAuthTests(unittest.TestCase):
     """Unauthenticated and replayed realtime connections are refused."""
 
@@ -190,6 +186,79 @@ class WsAuthTests(unittest.TestCase):
                 with self.assertRaises(WebSocketDisconnect) as raised:
                     again.receive_text()
             self.assertEqual(raised.exception.code, 4401)
+        finally:
+            self._restore(app, saved)
+
+
+    def test_relay_drains_final_transcript_after_end_stream(self):
+        """endStream -> Meta's final speechComplete is forwarded, then close.
+
+        The Meta upstream is faked (no network); the browser side is the
+        TestClient websocket. Proves the relay does not cut the final turn.
+        """
+        import asyncio
+        import json
+        from unittest import mock
+        from starlette.websockets import WebSocketDisconnect
+        client, app, saved = self._client()
+        try:
+            app.state.model_api_key = "fixture-key"
+            store = app.state.ws_ticket_store
+            ticket = store.issue(app.state.demo_owner_id, "en", [])
+
+            class FakeUpstream:
+                def __init__(self):
+                    self.sent = []
+                    self.incoming = asyncio.Queue()
+
+                async def send(self, data):
+                    self.sent.append(data)
+                    try:
+                        body = json.loads(data) if isinstance(data, str) else None
+                    except Exception:
+                        body = None
+                    if isinstance(body, dict) and body.get("type") == "endStream":
+                        self.incoming.put_nowait(json.dumps(
+                            {"type": "speechComplete", "turnId": "t1",
+                             "transcript": "エビ2尾"}))
+                        self.incoming.put_nowait(None)
+
+                async def recv(self):
+                    return '{"sessionId": "fixture-session"}'
+
+                def __aiter__(self):
+                    return self
+
+                async def __anext__(self):
+                    frame = await self.incoming.get()
+                    if frame is None:
+                        raise StopAsyncIteration
+                    return frame
+
+            upstream = FakeUpstream()
+
+            class FakeConnect:
+                async def __aenter__(self):
+                    return upstream
+
+                async def __aexit__(self, *args):
+                    return False
+
+            with mock.patch("websockets.asyncio.client.connect",
+                            lambda *args, **kwargs: FakeConnect()):
+                with client.websocket_connect("/demo/voice-realtime") as ws:
+                    ws.send_text(json.dumps({"ticket": ticket.token}))
+                    ready = json.loads(ws.receive_text())
+                    self.assertEqual(ready["type"], "ready")
+                    ws.send_text(json.dumps({"type": "endStream"}))
+                    final = json.loads(ws.receive_text())
+                    self.assertEqual(final["type"], "speechComplete")
+                    self.assertEqual(final["transcript"], "エビ2尾")
+                    with self.assertRaises(WebSocketDisconnect):
+                        ws.receive_text()
+            sent_types = [json.loads(m).get("type") for m in upstream.sent
+                          if isinstance(m, str) and m.startswith("{")]
+            self.assertIn("endStream", sent_types)
         finally:
             self._restore(app, saved)
 

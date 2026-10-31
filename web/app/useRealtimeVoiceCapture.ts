@@ -23,6 +23,7 @@ import {takeMicrophone, yieldMicrophone, type VoiceCaptureMeta} from "./useVoice
 
 import {
   REALTIME_BACKLOG_BYTES,
+  REALTIME_DRAIN_TIMEOUT_MS,
   REALTIME_MAX_SEND_SAMPLES,
   REALTIME_REFRESH_MS,
   REALTIME_SAMPLE_RATE,
@@ -32,15 +33,21 @@ import {
 } from "./voice-realtime-audio";
 
 function wrapBrowserSocket(socket: WebSocket): SocketLike {
+  let openHandler: (() => void) | null = null;
   let messageHandler: ((ev: {data: unknown}) => void) | null = null;
   let closeHandler: ((ev: {code: number}) => void) | null = null;
   let errorHandler: (() => void) | null = null;
+  // The ticket leaves only after the socket opens; nothing is sent while
+  // the connection is still being established.
+  socket.onopen = () => openHandler?.();
   socket.onmessage = ev => messageHandler?.({data: ev.data});
   socket.onclose = ev => closeHandler?.({code: ev.code});
   socket.onerror = () => errorHandler?.();
   return {
     send: data => socket.send(data),
     close: code => socket.close(code),
+    set onopen(notify) { openHandler = notify; },
+    get onopen() { return openHandler; },
     set onmessage(notify) { messageHandler = notify; },
     get onmessage() { return messageHandler; },
     set onclose(notify) { closeHandler = notify; },
@@ -94,25 +101,39 @@ export function useRealtimeVoiceCapture(
   function markReview(): number { return ++fallbackEpoch.current; }
   const alive = () => mounted.current && session.current !== null;
 
-  function stopAll(): void { stopSession(false); }
+  // Mic-arbitration release (e.g. REST capture starts): end intake now but
+  // still drain the final transcript like a user stop. Draft is always kept.
+  function stopAll(): void { if (session.current) stop(); }
+  /** Stop microphone and pacer immediately. The transport may outlive this
+      for the endStream drain; finalizeDrain completes the session. */
+  function endAudioIntake(current: Session): void {
+    clearInterval(current.timer);
+    clearTimeout(current.refreshTimer);
+    try { current.stream.getTracks().forEach(track => track.stop()); } catch { /* ignore */ }
+    try { current.node.port.onmessage = null; current.node.disconnect(); } catch { /* ignore */ }
+    if (current.context.state !== "closed") void current.context.close().catch(() => {});
+    yieldMicrophone(stopAll);
+    if (mounted.current) setRecording(false);
+  }
+  function finalizeDrain(current: Session): void {
+    if (session.current !== current) return;
+    session.current = null;
+    try { current.transport.close(); } catch { /* ignore */ }
+    if (mounted.current) { setPartial(""); setState("closed"); }
+  }
   function stopSession(silent: boolean): void {
     const current = session.current;
+    if (!current) {
+      yieldMicrophone(stopAll);
+      if (mounted.current && !silent) setState("closed");
+      return;
+    }
+    current.userStop = current.userStop || silent;
+    endAudioIntake(current);
     session.current = null;
-    if (current) {
-      current.userStop = current.userStop || silent;
-      clearInterval(current.timer);
-      clearTimeout(current.refreshTimer);
-      try { current.transport.finish(); } catch { /* ignore */ }
-      try { current.transport.close(); } catch { /* ignore */ }
-      try { current.stream.getTracks().forEach(track => track.stop()); } catch { /* ignore */ }
-      try { current.node.port.onmessage = null; current.node.disconnect(); } catch { /* ignore */ }
-      if (current.context.state !== "closed") void current.context.close().catch(() => {});
-    }
-    yieldMicrophone(stopAll);
-    if (mounted.current) {
-      setRecording(false);
-      if (!silent) setState("closed");
-    }
+    try { current.transport.finish(); } catch { /* ignore */ }
+    try { current.transport.close(); } catch { /* ignore */ }
+    if (mounted.current && !silent) setState("closed");
   }
 
   function failReason(trace: string, reason: string, message: string): void {
@@ -178,8 +199,17 @@ export function useRealtimeVoiceCapture(
             current.retries = 0;
             setState("ready");
             logVoiceEvent("transcribe.ok", "realtime relay ready", current.trace);
+          } else if (next === "draining") {
+            if (mounted.current) setNotice(locale === "ja"
+              ? "最終の認識結果を待っています。下書きは保持しています。"
+              : "Waiting for the final transcript; the draft is retained.");
+            return;
           } else if (next === "failed" || next === "closed") {
-            if (current.userStop || current.refreshing) return;
+            // After a user stop the relay answers endStream with the final
+            // speechComplete and then closes: finalize only now, so the late
+            // transcript still commits through the shared store exactly once.
+            if (current.userStop) { finalizeDrain(current); return; }
+            if (current.refreshing) return;
             if (current.micGone) {
               failReason(current.trace, "microphone disconnected; draft kept",
                 locale === "ja" ? "マイクが切断されました。下書きは保持しています。" : "Microphone disconnected. The draft is retained.");
@@ -346,9 +376,17 @@ export function useRealtimeVoiceCapture(
 
   function stop(): void {
     const current = session.current;
-    if (current) logVoiceEvent("capture.stop", "user stop realtime; draft kept", current.trace);
-    stopSession(false);
-    if (mounted.current) { setPartial(""); setNotice(""); }
+    if (!current) {
+      if (mounted.current) setState("closed");
+      return;
+    }
+    logVoiceEvent("capture.stop", "user stop realtime; draining final transcript", current.trace);
+    current.userStop = true;
+    endAudioIntake(current);
+    // endStream first; the relay closes after the final speechComplete (or
+    // the finite timeout fires). Either way the draft is kept and the late
+    // transcript commits at most once via the shared store.
+    current.transport.finishAndDrain(REALTIME_DRAIN_TIMEOUT_MS);
   }
 
   return {state, recording, partial, error, notice, start, stop, markReview};

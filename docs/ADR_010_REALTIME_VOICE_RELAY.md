@@ -73,7 +73,11 @@ and approval guards.
 ## Safety (unchanged)
 
 Silence, `speechEnd`, ticket failure, relay errors, and disconnects never
-discard a draft and never confirm a save. `POST /confirm` remains the only
+discard a draft and never confirm a save. The ticket is sent only after the
+WebSocket `open` event (never while CONNECTING). On user stop the browser
+sends `endStream` and waits for Meta's final `speechComplete` with a finite
+4s drain timeout on both the browser and the Python relay; timeout or
+abrupt loss closes locally without touching the draft. `POST /confirm` remains the only
 approval path; transcription cannot write recipes, adopt prices, or bypass
 the Human Gate. Diagnostics carry sequence/kind/trace only — no audio,
 keys, or full utterances.
@@ -97,8 +101,14 @@ keys, or full utterances.
   (200/403, owner-scoped keywords), WS without ticket (4401), WS ticket
   replay (first use ok, replay 4401). The suite neutralizes MODEL_API_KEY
   so no test touches the network.
-- `web/tests/voice-realtime.spec.ts` (3): the real TS modules, transpiled
+- `web/tests/voice-realtime.spec.ts` (6): the real TS modules, transpiled
   in the spec, checked in a real browser — partial/end/dedup, final:true
-  never commits with speechComplete canonical, resampling/silence/endpoint.
+  never commits with speechComplete canonical, resampling/silence/endpoint,
+  ticket waits for open (pre-open close sends nothing), drain commits a
+  late speechComplete exactly once before close, drain timeout closes
+  locally when the relay stays silent.
+- `tests/test_voice_realtime.py` (10): above 9 plus relay drain — after
+  `endStream` the Python relay forwards Meta's final `speechComplete`
+  before closing (Meta faked, no network).
 - Real Meta realtime audio, Render WS behavior, and on-device microphone
   capture are explicitly unverified; REST batch stays the default path.
