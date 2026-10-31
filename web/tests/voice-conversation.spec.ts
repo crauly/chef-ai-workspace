@@ -65,7 +65,8 @@ test("reported typo is a visible interpretation; combined review/save opens revi
  await page.goto("/");
  await input(page,"アリオーオーリオベベロンチーノ。乾燥パスタ100g、ディチェコ500g350円。国産ニンニク10g、1kg4600円。オイル25g、1kg4000円");
  await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("料理の文脈からの解釈案");
- await expect(page.getByText(/認識した発話（1件・新しい順）/)).toBeVisible();
+ await expect(page.locator(".voice-transcript summary")).toContainText("認識した発話（1件）");
+ await page.locator(".voice-transcript summary").click();
  await expect(page.getByLabel("認識した発話の一覧").getByRole("listitem")).toContainText("ベベロンチーノ");
  await expect(page.getByRole("button",{name:"内容を承認して保存",exact:true})).toBeDisabled();
  await input(page,"内容を確認。登録を確定");
