@@ -96,7 +96,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    logVoiceEvent(draftRef.current?"draft.updated":"draft.created", "voice-recipe",traceId);
    draftRef.current=out;setDraft(out);reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
    say(out.missing.length||out.notes.length?(ja?"確認が必要です："+[...out.missing,...out.notes].join("、"):"Needs review: "+[...out.missing,...out.notes].join(", ")):
-    "下書きを更新しました。内容を確認し、「保存してください」と話すか、確認ボタンを押してください。");
+    (ja?"下書きを更新しました。内容を確認し、「保存してください」と話すか、確認ボタンを押してください。":"Draft updated. Review it, then explicitly approve saving."));
   }catch{
    if(alive.current&&epoch.current===current&&revision.current===version&&!aborter.signal.aborted){
     logVoiceEvent("muse.fail","voice-recipe failed; draft kept",traceId);
