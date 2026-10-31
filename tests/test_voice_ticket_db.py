@@ -25,8 +25,21 @@ class FakeBackend:
         self.rows = {}
         self.fail_insert = False
         self.fail_rpc = False
+        self.fail_delete = False
         self.lock = threading.Lock()
+        self.consume_threads = []
         self._now = now or (lambda: datetime.now(timezone.utc))
+
+    def purge_expired(self, cutoff_iso):
+        if self.fail_delete:
+            raise RuntimeError("db down")
+        cutoff = datetime.fromisoformat(cutoff_iso)
+        with self.lock:
+            expired = [k for k, r in self.rows.items()
+                       if datetime.fromisoformat(r["expires_at"]) <= cutoff]
+            for key in expired:
+                del self.rows[key]
+        return [{"token_hash": k} for k in expired]
 
     def insert_row(self, row):
         if self.fail_insert:
@@ -37,6 +50,7 @@ class FakeBackend:
             self.rows[row["token_hash"]] = dict(row)
 
     def consume_rpc(self, token_hash):
+        self.consume_threads.append(threading.current_thread())
         if self.fail_rpc:
             raise RuntimeError("db down")
         with self.lock:
@@ -62,6 +76,21 @@ class FakeTable:
                 backend.insert_row(row)
                 return _Result([row])
         return Exec()
+
+    def delete(self):
+        backend = self._backend
+
+        class Chain:
+            def lte(self, column, value):
+                assert column == "expires_at"
+                backend_holder = {"cutoff": value}
+
+                class Exec:
+                    def execute(self):
+                        return _Result(backend.purge_expired(
+                            backend_holder["cutoff"]))
+                return Exec()
+        return Chain()
 
 
 class FakeRpc:
@@ -179,6 +208,37 @@ class DbTicketStoreTests(unittest.TestCase):
         self.assertIsNone(store.consume(""))
         self.assertIsNone(store.consume("not-a-token"))
 
+    def test_issue_purges_only_expired_rows(self):
+        store, backend, now = make_store()
+        stale = {"token_hash": "0" * 64, "owner_id": "owner-9",
+                 "locale": "en", "keywords": [],
+                 "expires_at": (now[0] - timedelta(seconds=10)).isoformat()}
+        backend.rows[stale["token_hash"]] = dict(stale)
+        fresh = store.issue("owner-1", "en", [])
+        self.assertNotIn(stale["token_hash"], backend.rows)
+        self.assertIn(hash_token(fresh.token), backend.rows)
+        self.assertEqual(len(backend.rows), 1)
+
+    def test_purge_counts_expired_and_keeps_valid(self):
+        store, backend, now = make_store()
+        old_iso = (now[0] - timedelta(seconds=60)).isoformat()
+        for digest in ("a" * 64, "b" * 64):
+            backend.rows[digest] = {"token_hash": digest,
+                                    "owner_id": "owner-9", "locale": "en",
+                                    "keywords": [], "expires_at": old_iso}
+        ticket = store.issue("owner-1", "en", [])
+        # Two stale rows purged; the just-issued row survives.
+        self.assertEqual(len(backend.rows), 1)
+        self.assertIn(hash_token(ticket.token), backend.rows)
+
+    def test_purge_failure_does_not_break_issue(self):
+        store, backend, _ = make_store()
+        backend.fail_delete = True
+        ticket = store.issue("owner-1", "en", [])
+        self.assertIn(hash_token(ticket.token), backend.rows)
+        backend.fail_delete = False
+        self.assertEqual(store.purge_expired(), 0)
+
     def test_db_failure_refuses(self):
         store, backend, _ = make_store()
         backend.fail_insert = True
@@ -267,6 +327,50 @@ class DbTicketEndpointTests(unittest.TestCase):
             headers={"X-Demo-Access": "test-only-backend-token-1234567890"},
             json={"locale": "en"})
         self.assertEqual(response.status_code, 503)
+
+    def test_ws_consume_runs_off_event_loop(self):
+        """Sync Supabase RPC must not execute on the WS event loop thread."""
+        import asyncio
+        import os
+        import threading
+        from unittest import mock
+        from fastapi.testclient import TestClient
+        saved = os.environ.pop("MODEL_API_KEY", None)
+        app, holder = self._app()
+        try:
+            client = TestClient(app)
+            good = {"X-Demo-Access": "test-only-backend-token-1234567890"}
+            body = client.post("/demo/ws-ticket", headers=good,
+                               json={"locale": "en"}).json()
+            ticket = body["ticket"]
+            loop_thread = []
+            calls = []
+            real_to_thread = asyncio.to_thread
+
+            async def spy(func, /, *args, **kwargs):
+                calls.append(getattr(func, "__name__", repr(func)))
+                loop_thread.append(threading.current_thread())
+                return await real_to_thread(func, *args, **kwargs)
+
+            with mock.patch.object(asyncio, "to_thread", spy):
+                with client.websocket_connect("/demo/voice-realtime") as ws:
+                    ws.send_text('{"ticket": "%s"}' % ticket)
+                    # No Meta key in tests: consume succeeds, relay refuses.
+                    self.assertIn("realtime_unavailable",
+                                  ws.receive_text())
+            self.assertEqual(calls, ["consume"])
+            self.assertTrue(loop_thread)
+            # The RPC executed on a worker thread, not the loop thread
+            # that invoked to_thread.
+            backend = holder["backend"]
+            self.assertTrue(backend.consume_threads)
+            for worker in backend.consume_threads:
+                self.assertIsNot(worker, loop_thread[0])
+            # The consume RPC itself stayed synchronous and single-use.
+            self.assertIsNone(backend.rows.get(ticket, None))
+        finally:
+            if saved is not None:
+                os.environ["MODEL_API_KEY"] = saved
 
     def test_db_issue_then_ws_single_use(self):
         import os

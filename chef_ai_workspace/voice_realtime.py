@@ -198,9 +198,32 @@ class DbVoiceTicketStore:
             "keywords": words,
             "expires_at": expires.isoformat(),
         }).execute()
+        # Opportunistic expiry cleanup (memory store parity). Best-effort:
+        # never fails issuance, never touches unexpired rows, and never
+        # alters the atomic single-consume RPC contract below.
+        self.purge_expired()
         return WsTicket(token=token, owner=str(owner),
                         locale=locale if locale == "ja" else "en",
                         keywords=words, expires_at=self._now() + self._ttl)
+
+    def purge_expired(self) -> int:
+        """Delete expired ticket rows only; return the deleted count.
+
+        Scope is strictly limited to rows with expires_at at or before now.
+        Runs only through this server-side service-role client (anon and
+        authenticated hold no table rights). Any DB error yields 0 so
+        callers (issue) never fail because of cleanup.
+        """
+        try:
+            cutoff = _datetime.fromtimestamp(self._now(),
+                                             tz=_timezone.utc).isoformat()
+            response = self._client.table(
+                "voice_ws_tickets").delete().lte(
+                    "expires_at", cutoff).execute()
+        except Exception:
+            return 0
+        data = getattr(response, "data", None)
+        return len(data) if isinstance(data, list) else 0
 
     def consume(self, token: str) -> WsTicket | None:
         try:
@@ -305,7 +328,15 @@ def register_voice_realtime(app, ticket_store=None):
         except Exception:
             token = ""
         live = resolve_ticket_store(websocket.app.state)
-        ticket = live.consume(str(token or "")) if live is not None else None
+        if live is None:
+            await websocket.close(code=4401)
+            return
+        import asyncio as _asyncio
+        try:
+            ticket = await _asyncio.to_thread(live.consume,
+                                              str(token or ""))
+        except Exception:
+            ticket = None
         if ticket is None:
             await websocket.close(code=4401)
             return
