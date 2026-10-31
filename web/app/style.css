@@ -50,3 +50,70 @@ main{padding-bottom:76px}
 .bottom-nav button{flex:1 1 0;background:none;border:0;color:#183b30;font-size:.82rem;font-weight:600;padding:10px 2px;border-radius:8px;cursor:pointer;font-family:inherit}
 .bottom-nav button:disabled{opacity:.45;cursor:default}
 .bottom-nav button[aria-pressed="true"]{background:#183b30;color:#fff}
+
+
+/* Chef AI voice-first dark interface. Visual design is state-backed; no fake waveforms. */
+:root{color-scheme:dark;--chef-bg:#101111;--chef-panel:#171819;--chef-raised:#1d1e20;--chef-edge:#313336;--chef-text:#f2f2f0;--chef-sub:#a6a8ad;--chef-accent:#53a0ff;--chef-positive:#2ed47b}
+html{scroll-behavior:smooth}
+body{background:var(--chef-bg);color:var(--chef-text);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:880px;min-height:100dvh;margin:0 auto;padding:24px 28px 120px;background:var(--chef-panel);border-inline:1px solid #252629}
+header.chef-header{padding:4px 2px 22px}
+.chef-header .toolbar{align-items:center}
+.chef-header .tag{margin:0;color:#a0a1a7;font-size:.75rem;font-weight:600;letter-spacing:.105em}
+.chef-header h1{font-size:clamp(2rem,5vw,2.65rem);font-weight:750;line-height:1.15;letter-spacing:-.045em;margin:4px 0}
+.chef-header .muted{display:none}
+.language-picker{color:var(--chef-sub);font-size:.76rem}
+.language-picker select{background:var(--chef-raised);color:var(--chef-text);border:1px solid var(--chef-edge);padding:7px 10px}
+#voice-controls{background:#121314;border:1px solid #202123;border-radius:26px;padding:24px;margin:0 0 28px;box-shadow:none}
+#voice-controls h2{font-size:1.5rem;letter-spacing:-.025em;margin:0 0 12px}
+#voice-controls p{margin:12px 0;color:var(--chef-sub)}
+#voice-controls p[role="status"]{color:#4bde8d;font-weight:600}
+#voice-controls p[role="alert"]{color:#ffa29d}
+#voice-controls .mic-primary{background:#26282b;border:1px solid #3c3e42;border-radius:16px;font-size:1.05rem;min-height:58px;box-shadow:none}
+#voice-controls .mic-primary[aria-pressed="true"]{background:#10452f;border-color:#196342}
+#voice-controls>button:not(.mic-primary){background:#242629;color:#d7d8db;border:1px solid #34373b;border-radius:12px;margin:4px 8px 4px 0}
+#voice-controls input:not([type="range"]),#voice-controls textarea{background:var(--chef-raised);color:var(--chef-text);border:1px solid var(--chef-edge)}
+#voice-controls form{margin:16px 0}
+#voice-controls form input{flex:1 1 230px}
+#voice-controls label{color:var(--chef-sub)}
+#voice-controls details{padding:12px;border-top:1px solid var(--chef-edge);color:var(--chef-sub)}
+.card,.proposal{background:#1a1b1d;border:1px solid #36383b;border-radius:20px;color:var(--chef-text)}
+.card{padding:22px;margin:14px 0}
+.card h2,.card h3{color:var(--chef-text)}
+.muted,.tag{color:var(--chef-sub)}
+button{background:#2a2c2f;color:#f3f3f3;border:1px solid #393b3f;transition:background .16s ease,border-color .16s ease}
+button:hover:not(:disabled){background:#36393d;border-color:#5b6065}
+button:focus-visible,a:focus-visible{outline:2px solid var(--chef-accent);outline-offset:3px}
+input,textarea,select{background:#232527;color:var(--chef-text);border:1px solid #42454a}
+input::placeholder,textarea::placeholder{color:#9a9ba0}
+a,.link{color:#b3d5ff}
+.ai-workspace{background:#191b1d;border:1px solid #36383b;color:var(--chef-text)}
+.instruction-form textarea,.proposal,.cost-summary{background:#202225;color:var(--chef-text);border-color:#414449}
+.provider-note{color:#c2b79c}
+.secondary{background:#30343a;color:var(--chef-text)}
+.material-form fieldset{border-color:#414449}
+.material-form legend{color:var(--chef-sub)}
+#draft{scroll-margin-top:20px;border:1px solid #383a3e;border-radius:22px;background:#18191a;padding:20px}
+#draft button{margin-right:8px;margin-top:8px}
+#draft ul{padding-left:22px}
+#recipes{scroll-margin-top:24px}
+#assist{padding-top:6px}
+.bottom-nav{display:none}
+@media(max-width:720px){
+ main{max-width:none;margin:0;min-height:100dvh;padding:22px 20px calc(110px + env(safe-area-inset-bottom));border:0}
+ header.chef-header{padding-bottom:14px}
+ .chef-header h1{font-size:2.1rem}
+ .chef-header .toolbar{flex-direction:row;align-items:center}
+ .language-picker{max-width:150px}
+ #voice-controls{padding:22px 18px;border-radius:24px}
+ #voice-controls h2{font-size:1.3rem}
+ .bottom-nav{display:flex;position:fixed;left:12px;right:12px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:50;background:rgba(22,23,24,.97);border:1px solid #343639;border-radius:24px;min-height:84px;padding:8px 12px;align-items:center;justify-content:space-around;gap:4px;box-shadow:0 10px 36px #0009;backdrop-filter:blur(12px)}
+ .bottom-nav a,.bottom-nav button:not(.bottom-nav-mic){flex:1;text-align:center;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:3px;background:transparent;border:0;padding:8px 2px;color:#b8b9bd;font-size:.75rem;font-weight:550;line-height:1.1;min-width:0;text-decoration:none}
+ .bottom-nav a:hover,.bottom-nav button:not(.bottom-nav-mic):hover{color:#fff;background:#26282a}
+ .bottom-nav .bottom-nav-mic{flex:0 0 68px;width:68px;height:68px;border-radius:50%;border:1px solid #3d4045;background:#292b2e;color:#fff;font-size:1.85rem;padding:0;display:grid;place-items:center;box-shadow:0 2px 14px #0005}
+ .bottom-nav .bottom-nav-mic[aria-pressed="true"]{background:#155338;border-color:#238b5a}
+ .bottom-nav .bottom-nav-mic:disabled{opacity:.55}
+ .card{padding:18px}
+}
+@media(min-width:721px){main{border-radius:24px;margin:20px auto;min-height:calc(100dvh - 40px)}#voice-controls{padding:30px}.bottom-nav{display:none}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}button{transition:none}}
