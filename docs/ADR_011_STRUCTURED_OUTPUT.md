@@ -2,6 +2,7 @@
 
 ## Status
 Accepted (Phase C). Chat Completions verified surface; Responses unverified.
+Voice-recipe schema live acceptance recorded 2026-10-31 (opt-in).
 
 ## Context
 Phase C moves Muse Spark 1.3 natural-language understanding to JSON Schema
@@ -28,6 +29,25 @@ changing the voice harness, draft, approval, or save contracts.
   and schema/shape violations return 502 with no partial save and no draft
   destruction; no unbounded retry; no second independent JSON interpretation
   path.
+
+## Live acceptance (2026-10-31, opt-in `CHEF_LIVE_STRUCTURED=1`)
+- Intent schema: accepted, `finish_reason=stop`, conformant `{intent, target}`.
+  A 256-token budget truncated under reasoning load (`length`); 2048
+  (production value) succeeds.
+- `VOICE_RECIPE_SCHEMA` verbatim shape: accepted, `stop`, top-level keys,
+  nested `materials` (6 string fields) and `interpretations` verified.
+  First probe returned unit `"grams"`: the minimal probe prompt lacked the
+  production "Allowed units" constraint, and the app-side value gate
+  (missing[], never silent accept) is the designed backstop. With the
+  production constraint mirrored, units conform and package-vs-use
+  (quantity 100 vs price_quantity 500) is preserved.
+- No DB write, no approval, no persistence in either probe.
+
+## Language policy (voice-recipe prompt)
+English primary, Japanese fully supported, cuisine-agnostic. The prompt
+keeps all material/quantity/price interpretation constraints (package vs
+use, decimal strings, no invented prices, no unit conversion) and no
+longer singles out any cuisine in dish-title normalization examples.
 
 ## Consequences
 - Intent + voice-recipe gain schema-enforced shape with identical downstream

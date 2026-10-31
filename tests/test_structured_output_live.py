@@ -47,3 +47,76 @@ class LiveStructuredOutputTests(unittest.TestCase):
         self.assertEqual(set(parsed), {"intent", "target"})
         self.assertIn(parsed["intent"], ("create", "browse", "edit", "clarify"))
         self.assertIsInstance(parsed["target"], str)
+
+    def test_voice_recipe_schema_accepted_with_nested_structure(self):
+        """VOICE_RECIPE_SCHEMA itself against Muse Spark 1.3. Read-only."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "materials": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "quantity": {"type": "string"},
+                        "unit": {"type": "string"},
+                        "price_jpy": {"type": "string"},
+                        "price_quantity": {"type": "string"},
+                        "price_unit": {"type": "string"}},
+                    "required": ["name", "quantity", "unit", "price_jpy",
+                                 "price_quantity", "price_unit"],
+                    "additionalProperties": False}},
+                "selling_price_jpy": {"type": "string"},
+                "notes": {"type": "array", "items": {"type": "string"}},
+                "interpretations": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {
+                        "source": {"type": "string"},
+                        "suggestion": {"type": "string"},
+                        "reason": {"type": "string"}},
+                    "required": ["source", "suggestion", "reason"],
+                    "additionalProperties": False}}},
+            "required": ["title", "materials", "selling_price_jpy",
+                         "notes", "interpretations"],
+            "additionalProperties": False}
+        raw = self.post({
+            "model": "muse-spark-1.3", "reasoning_effort": "low",
+            "max_completion_tokens": 8192,
+            "response_format": {"type": "json_schema", "json_schema": {
+                "name": "chef_voice_recipe", "strict": True, "schema": schema}},
+            "messages": [
+                {"role": "developer", "content":
+                 "Read the chronological spoken turns as one conversation and "
+                 "return a proposed UNSAVED recipe as JSON only. " "Allowed units: g, kg, ml, L. " "Prices are JPY decimal strings. "
+                 "A package price is not the quantity consumed."},
+                {"role": "user", "content": json.dumps({
+                    "spoken_turns": [
+                        "pasta 100 grams, 500 gram pack costs 350 yen",
+                        "selling price 1800 yen"]})} ]})
+        choice = raw["choices"][0]
+        self.assertEqual(choice.get("finish_reason"), "stop")
+        parsed = json.loads(choice["message"]["content"])
+        # Same shape gate as web/app/api/voice-recipe parse().
+        self.assertEqual(set(parsed),
+                         {"title", "materials", "selling_price_jpy",
+                          "notes", "interpretations"})
+        self.assertIsInstance(parsed["title"], str)
+        self.assertIsInstance(parsed["notes"], list)
+        self.assertTrue(all(isinstance(n, str) for n in parsed["notes"]))
+        self.assertIsInstance(parsed["materials"], list)
+        self.assertGreater(len(parsed["materials"]), 0)
+        for material in parsed["materials"]:
+            self.assertEqual(set(material),
+                             {"name", "quantity", "unit", "price_jpy",
+                              "price_quantity", "price_unit"})
+            self.assertTrue(all(isinstance(v, str)
+                                for v in material.values()))
+        for item in parsed["interpretations"]:
+            self.assertEqual(set(item), {"source", "suggestion", "reason"})
+        # Controlled input carries explicit values: package-vs-use preserved,
+        # so the app-side value checks yield no missing entries.
+        first = parsed["materials"][0]
+        self.assertEqual(first["quantity"], "100")
+        self.assertEqual(first["price_quantity"], "500")
+        self.assertIn(first["unit"], ("g", "kg", "ml", "L"))
+        self.assertIn(first["price_unit"], ("g", "kg", "ml", "L"))

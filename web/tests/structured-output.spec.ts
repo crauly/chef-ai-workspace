@@ -84,6 +84,9 @@ test("voice-recipe route sends strict json_schema; package-vs-use and approval s
       {turns: ["粉100g、500g350円"]}));
     expect(ok.status).toBe(200);
     const sent = JSON.parse(sentBody);
+    expect(sent.messages[0].role).toBe("developer");
+    expect(sent.messages[0].content).toContain("English is the primary language");
+    expect(sent.messages[0].content).not.toContain("carbonara");
     expect(sent.response_format.type).toBe("json_schema");
     expect(sent.response_format.json_schema.strict).toBe(true);
     expect(sent.response_format.json_schema.schema).toEqual(VOICE_RECIPE_SCHEMA);
