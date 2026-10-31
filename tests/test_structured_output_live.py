@@ -22,9 +22,10 @@ VOICE_RECIPE_SCHEMA_PY = {
                 "unit": {"type": "string"},
                 "price_jpy": {"type": "string"},
                 "price_quantity": {"type": "string"},
-                "price_unit": {"type": "string"}},
+                "price_unit": {"type": "string"},
+                "supplier": {"type": "string"}},
             "required": ["name", "quantity", "unit", "price_jpy",
-                         "price_quantity", "price_unit"],
+                         "price_quantity", "price_unit", "supplier"],
             "additionalProperties": False}},
         "selling_price_jpy": {"type": "string"},
         "notes": {"type": "array", "items": {"type": "string"}},
@@ -114,7 +115,7 @@ class LiveStructuredOutputTests(unittest.TestCase):
         for material in parsed["materials"]:
             self.assertEqual(set(material),
                              {"name", "quantity", "unit", "price_jpy",
-                              "price_quantity", "price_unit"})
+                              "price_quantity", "price_unit", "supplier"})
             self.assertTrue(all(isinstance(v, str)
                                 for v in material.values()))
         for item in parsed["interpretations"]:

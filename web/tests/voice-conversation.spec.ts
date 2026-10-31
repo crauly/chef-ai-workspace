@@ -65,7 +65,8 @@ test("reported typo is a visible interpretation; combined review/save opens revi
  await page.goto("/");
  await input(page,"アリオーオーリオベベロンチーノ。乾燥パスタ100g、ディチェコ500g350円。国産ニンニク10g、1kg4600円。オイル25g、1kg4000円");
  await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("料理の文脈からの解釈案");
- await expect(page.getByText(/認識した発話：.*ベベロンチーノ/)).toBeVisible();
+ await expect(page.getByText(/認識した発話（1件・新しい順）/)).toBeVisible();
+ await expect(page.getByLabel("認識した発話の一覧").getByRole("listitem")).toContainText("ベベロンチーノ");
  await expect(page.getByRole("button",{name:"内容を承認して保存",exact:true})).toBeDisabled();
  await input(page,"内容を確認。登録を確定");
  await expect(page.getByRole("button",{name:"内容を承認して保存",exact:true})).toBeEnabled();
@@ -78,9 +79,9 @@ test("reported typo is a visible interpretation; combined review/save opens revi
 test("queued fragments coalesce and approval spoken before review cannot commit a later draft",async({page})=>{
  let release!:()=>void;const blocked=new Promise<void>(resolve=>{release=resolve;});
  let parses=0,saves=0;
- const submitted:string[][]=[];
+ const submitted:{turns:string[];previous?:{title:string}}[]=[];
  await page.route("**/api/voice-recipe",async route=>{
-  parses++;submitted.push(route.request().postDataJSON().turns);
+  parses++;submitted.push(route.request().postDataJSON());
   if(parses===1)await blocked;
   await route.fulfill({json:draft});
  });
@@ -96,8 +97,13 @@ test("queued fragments coalesce and approval spoken before review cannot commit 
  await input(page,"内容を確認");await input(page,"保存してください");await input(page,"登録を確定");
  release();
  await expect(page.getByRole("button",{name:"内容を承認して保存",exact:true})).toBeEnabled();
- expect(parses).toBe(2);expect(submitted[1]).toHaveLength(5);
- expect(submitted[1]).not.toContain("保存してください");expect(saves).toBe(0);
+ expect(parses).toBe(2);
+ // Incremental revision: only the 4 unparsed turns travel, with the last
+ // draft as context, instead of reprocessing the whole history.
+ expect(submitted[1].turns).toHaveLength(4);
+ expect(submitted[1].turns).not.toContain("保存してください");
+ expect(submitted[1].previous?.title).toContain("ペペロンチーノ");
+ expect(saves).toBe(0);
  await input(page,"保存しないでください");
  await expect(page.getByRole("button",{name:"内容を承認して保存",exact:true})).toBeDisabled();
  expect(saves).toBe(0);expect(parses).toBe(2);

@@ -6,7 +6,7 @@ import {useVoiceCapture,type VoiceCaptureMeta} from "./useVoiceCapture";
 import {voiceCommand,type VoiceCommand} from "./voice-commands";
 import {logVoiceEvent} from "./voice-diagnostics";
 
-type Ingredient={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string};
+type Ingredient={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string;supplier:string};
 type Interpretation={source:string;suggestion:string;reason:string};
 type Draft={title:string;materials:Ingredient[];selling_price_jpy:string;notes:string[];missing:string[];interpretations?:Interpretation[]};
 type Input={text:string;command:VoiceCommand;revision:number;approval:Draft|null;traceId:string};
@@ -32,10 +32,13 @@ export function priceMissingNames(draft:Draft):string[]{
  });
  return [...names];
 }
-// Unconfirmed saves omit unknown prices so the backend stores unpriced lines
-// (partial cost, explicit unresolved IDs) instead of zero-filled guesses.
-// Empty quantity/unit also becomes null; the eligibility recheck in save()
-// keeps such drafts blocked, so this never silently widens the gate.
+// Save boundary: recipe lines carry no supplier column and
+// CompleteRecipeMaterial forbids extras, so every save mode projects drafts
+// through toSaveMaterials (prices nulled when unknown, supplier omitted).
+// The spoken purchase source stays visible in review and is handed to the
+// chef as a memo; formal supplier linkage uses the existing ledger path
+// (ingredient-assist -> offer observations -> observations/confirm, all
+// Human-Gate approved), never an automatic write.
 export function toSaveMaterials(draft:Draft){
  return draft.materials.map(m=>({name:m.name,
   quantity:m.quantity||null,unit:m.unit||null,
@@ -44,7 +47,7 @@ export function toSaveMaterials(draft:Draft){
 }
 
 export type RegistrationHandle={submit:(text:string,meta?:VoiceCaptureMeta)=>void;hasPending:()=>boolean;isSaving:()=>boolean;suspend:()=>void;requestReview:()=>void};
-export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,control,sharedVoice}:{locale:Locale;onCreated:(recipe:Recipe,mode:SaveMode)=>void;onDiscarded?:()=>void;control?:Ref<RegistrationHandle>;sharedVoice?:{markReview:()=>number;cancel:()=>void;captureMessage:string}}){
+export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,control,sharedVoice}:{locale:Locale;onCreated:(recipe:Recipe,mode:SaveMode,suppliers:string[])=>void;onDiscarded?:()=>void;control?:Ref<RegistrationHandle>;sharedVoice?:{markReview:()=>number;cancel:()=>void;captureMessage:string}}){
  const ja=locale==="ja";
  const [busy,setBusy]=useState(false),[turns,setTurns]=useState<string[]>([]),[draft,setDraft]=useState<Draft|null>(null);
  const [phase,setPhase]=useState<"dictating"|"review"|"saving">("dictating");
@@ -68,14 +71,26 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  function clear(){
   if(phaseRef.current==="saving")return;
   epoch.current++;revision.current++;semanticAbort.current?.abort();voice.cancel();inbox.current=[];
-  dataTurns.current=[];setTurns([]);draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);requestId.current=null;
+  dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);requestId.current=null;
   setStage("dictating");logVoiceEvent("draft.discarded.explicit","explicit cancel",clearTrace.current);clearTrace.current="";onDiscarded?.();say("下書きを破棄しました。新しいレシピを話してください。");
  }
+ const parsedTurns=useRef(0);
+ // Last successfully parsed draft. enqueue() clears the live draftRef on new
+ // dictation (approval can never commit it), but parseBase survives as Muse
+ // revision context so follow-ups resend only unparsed turns, not history.
+ const parseBase=useRef<Draft|null>(null);
  async function parse(next:string[],version:number,traceId=""){
   const current=epoch.current,aborter=new AbortController();semanticAbort.current=aborter;
-  logVoiceEvent("muse.start",`${next.length} turns`,traceId);say("Museが料理の文脈・数量・価格を解釈しています…");
+  // Incremental revision: resend only turns not yet parsed, with the last
+  // successfully parsed draft as context, instead of reprocessing history.
+  const previous=parseBase.current;
+  const fresh=next.slice(parsedTurns.current);
+  const turnsToSend=fresh.length?fresh:next.slice(-30);
+  const usePrevious=previous&&fresh.length?previous:null;
+  logVoiceEvent("muse.start",`${turnsToSend.length} new turns${usePrevious?"+draft":""}`,traceId);say("Museが料理の文脈・数量・価格を解釈しています…");
   try{
-   const out=await request<Draft>("/api/voice-recipe",{method:"POST",body:JSON.stringify({turns:next}),signal:aborter.signal});
+   const out=await request<Draft>("/api/voice-recipe",{method:"POST",body:JSON.stringify(usePrevious?{turns:turnsToSend,previous:usePrevious}:{turns:next}),signal:aborter.signal});
+   parsedTurns.current=next.length;parseBase.current=out;
    if(!alive.current||epoch.current!==current||revision.current!==version){logVoiceEvent("muse.ok","stale result ignored",traceId);return;}
    logVoiceEvent(draftRef.current?"draft.updated":"draft.created", "voice-recipe",traceId);
    draftRef.current=out;setDraft(out);reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
@@ -108,11 +123,14 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   voice.cancel();setStage("saving");if(!draining.current)setBusy(true);say("承認された内容を保存しています…");
   if(!requestId.current)requestId.current=crypto.randomUUID();
   try{
-   const recipe=await request<Recipe>("/api/recipes/full",{method:"POST",body:JSON.stringify({request_id:requestId.current,title:d.title,materials:mode==="confirmed"?d.materials:toSaveMaterials(d),selling_price_jpy:d.selling_price_jpy||null})});
+   const recipe=await request<Recipe>("/api/recipes/full",{method:"POST",body:JSON.stringify({request_id:requestId.current,title:d.title,materials:toSaveMaterials(d),selling_price_jpy:d.selling_price_jpy||null})});
    if(!alive.current)return;
    epoch.current++;revision.current++;inbox.current=[];
-   dataTurns.current=[];setTurns([]);draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);requestId.current=null;setStage("dictating");
-   say(mode==="confirmed"?(sharedVoice?"保存済みです。":"レシピを保存しました。"):"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。");onCreated(recipe,mode);
+   dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);requestId.current=null;setStage("dictating");
+   // Spoken purchase sources travel with the save callback: the workspace
+   // announces them after its browse transition (this panel hides then).
+   const suppliers=[...new Set(d.materials.map(m=>(m.supplier||"").trim()).filter(Boolean))];
+   say(mode==="confirmed"?(sharedVoice?"保存済みです。":"レシピを保存しました。"):"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。");onCreated(recipe,mode,suppliers);
   }catch{setStage("review");say("保存結果を確認できませんでした。再送時も同じ登録IDを使います。一覧を確認してから再試行してください。");}
   finally{if(alive.current&&!draining.current)setBusy(false);}
  }
@@ -123,7 +141,10 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     const input=inbox.current.shift()!;
     if(input.command==="data"){
      const batch=[input];while(inbox.current[0]?.command==="data")batch.push(inbox.current.shift()!);
-     dataTurns.current=[...dataTurns.current,...batch.map(item=>item.text)].slice(-30);
+     // Parse history is absolute: parsedTurns indexes this uncapped array,
+     // so turns past #30 keep their context and incremental parsing resumes.
+     // Only the on-screen transcript is capped (see enqueue).
+     dataTurns.current=[...dataTurns.current,...batch.map(item=>item.text)];
      await parse(dataTurns.current,batch[batch.length-1].revision,batch[batch.length-1].traceId);
     }else if(input.revision===revision.current){
      if(input.command==="review")showReview(input.traceId);
@@ -144,6 +165,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   if(command==="cancel"){clearTrace.current=meta?.traceId??"";clear();return;}
   setTurns(previous=>[...previous,text].slice(-30));
   if(command==="data"){
+   if(draftRef.current)parseBase.current=draftRef.current;
    revision.current++;reviewed.current=null;reviewMode.current=null;draftRef.current=null;requestId.current=null;setStage("dictating");
   }
   const afterReview=!meta||meta.reviewEpoch===approvalEpoch.current;
@@ -174,12 +196,12 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    <button type="submit" disabled={!manual.trim()||phase==="saving"}>反映</button>
   </form>}
   <button type="button" disabled={busy||!dataTurns.current.length||phase==="saving"} onClick={retry}>解析を再試行</button>
-  <p>認識した発話：{turns.length?turns.join(" ／ "):"なし"}</p>
+  <div><p>認識した発話（{turns.length}件・新しい順）：{turns.length?"":"なし"}</p>{turns.length>0&&<ol aria-label="認識した発話の一覧">{[...turns].reverse().map((turn,index)=><li key={`${turns.length-index}`}>{turn}</li>)}</ol>}</div>
   {draft&&<div id="draft" aria-label="未保存のレシピ下書き">
    <h3>未保存の下書き：{draft.title||"料理名未設定"}</h3>
    {draft.interpretations?.map((item,index)=><p key={index}>料理の文脈からの解釈案：{item.source} → {item.suggestion}（{item.reason}）</p>)}
    <p>売価：{draft.selling_price_jpy?("¥"+draft.selling_price_jpy):"未設定（売価なしでも保存できます）"}</p>
-   <ul>{draft.materials.map((material,index)=>{const priced=Boolean(material.price_jpy&&material.price_quantity&&material.price_unit);return <li key={index}>{material.name||"食材名不明"}：{material.quantity||"?"}{material.unit} ／ {priced?`仕入単価 ¥${material.price_jpy} / ${material.price_quantity}${material.price_unit}`:"仕入単価 未確定（推測しません）"}</li>;})}</ul>
+   <ul>{draft.materials.map((material,index)=>{const priced=Boolean(material.price_jpy&&material.price_quantity&&material.price_unit);return <li key={index}>{material.name||"食材名不明"}：{material.quantity||"?"}{material.unit} ／ {priced?`仕入単価 ¥${material.price_jpy} / ${material.price_quantity}${material.price_unit}`:"仕入単価 未確定（推測しません）"}{material.supplier?` ／ 仕入先：${material.supplier}`:""}</li>;})}</ul>
    {draft.missing.length>0&&<p role="alert">不足情報：{draft.missing.join("、")}</p>}
    {draft.notes.length>0&&<p role="alert">要確認：{draft.notes.join("、")}</p>}
    <p>{phase==="review"?(reviewMode.current==="unconfirmed"?"確認待ち（価格未確定）：数量は確定、価格は未確定として保存します。よければ明示承認してください。":"確認待ち：内容が正しければ、保存を明示承認してください。"):"まだ保存されていません。"}</p>
