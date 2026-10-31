@@ -10,6 +10,7 @@ import {voiceCommand} from "./voice-commands";
 import {useVoiceCapture,type VoiceCaptureMeta} from "./useVoiceCapture";
 import {useRealtimeVoiceCapture} from "./useRealtimeVoiceCapture";
 import {logVoiceEvent,getVoiceEvents,subscribeVoiceEvents,type VoiceDiagEvent} from "./voice-diagnostics";
+import {resolveTransport,isTerminalRealtimeFailure} from "./voice-transport";
 
 function MicrophoneGlyph(){return <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg>;}
 function ListeningWave({active}:{active:boolean}){return <div className={"listening-wave"+(active?" is-active":"")} aria-hidden="true">{[.32,.65,1,.55,.88,.42,.7,.96,.6,.35,.72,.4].map((v,i)=><span key={i} style={{"--bar-scale":v,"--bar-delay":`${i*65}ms`} as React.CSSProperties}/>)}</div>;}
@@ -34,17 +35,31 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;queue.current=[];reviewBoundary.current=null;};},[reviewBoundary]);
  const voice=useVoiceCapture(locale,receive,true);
  const realtime=useRealtimeVoiceCapture(locale,receive,{getEpoch:()=>boundary.current});
- const realtimeMode=Boolean(process.env.NEXT_PUBLIC_DEMO_WS_URL); // One mic UI; realtime when configured, legacy REST transport otherwise.
- const micRecording=realtimeMode?realtime.recording:voice.recording;
- const micBusy=!realtimeMode&&voice.busy;
- const micError=realtimeMode?realtime.error:voice.error;
- const micNotice=realtimeMode?realtime.notice:voice.notice;
+ const realtimeConfigured=Boolean(process.env.NEXT_PUBLIC_DEMO_WS_URL); // One mic UI; realtime when configured, legacy REST transport otherwise.
+ // A realtime failure falls back to REST for the rest of the session (no
+ // flapping). The realtime hook already stopped its own microphone on failure,
+ // so starting REST next cannot double-open the mic or double-send audio.
+ const [realtimeFailed,setRealtimeFailed]=useState(false);
+ const realtimeActive=resolveTransport(realtimeConfigured,realtimeFailed)==="realtime";
+ const micRecording=realtimeActive?realtime.recording:voice.recording;
+ const micBusy=!realtimeActive&&voice.busy;
+ const micError=realtimeActive?realtime.error:voice.error;
+ const micNotice=realtimeActive?realtime.notice:voice.notice;
+ useEffect(()=>{
+  if(realtimeConfigured&&!realtimeFailed&&isTerminalRealtimeFailure(realtime.state)){
+   setRealtimeFailed(true);
+   logVoiceEvent("capture.error","realtime failed; REST transport",realtime.error);
+   feedback(locale==="ja"
+    ?`リアルタイム音声に接続できませんでした。通常の音声入力に切り替えました。下書きは保持しています。${realtime.error}`
+    :`Realtime voice failed. Switched to standard voice input; the draft is retained. ${realtime.error}`);
+  }
+ },[realtimeConfigured,realtimeFailed,realtime.state,realtime.error,locale]);
  const wasRecording=useRef(false);
  // Keyed by failure event (hook tick), not message text: repeated failures
  // with identical wording each raise their own audible cue while the mic
  // stays open. The stop cue below skips a repeat of the announced failure.
  const announcedFailure=useRef("");
- const failureKey=micError?`${realtimeMode?"realtime":"rest"}#${realtimeMode?realtime.errorTick:voice.errorTick}#${micError}`:"";
+ const failureKey=micError?`${realtimeActive?"realtime":"rest"}#${realtimeActive?realtime.errorTick:voice.errorTick}#${micError}`:"";
  useEffect(()=>{
   // A transcription failure while the mic stays open is audible at once;
   // the stop cue below skips a repeat of the same announced failure.
@@ -97,10 +112,10 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  }
  // One mic state drives both the panel button and the fixed bottom control,
  // so recording/stop/processing can never disagree between the two.
- const micDisabled=!realtimeMode&&!voice.recording&&(voice.supported===false||voice.busy);
+ const micDisabled=!realtimeActive&&!voice.recording&&(voice.supported===false||voice.busy);
  function toggleMic(){
-  if(micRecording){if(realtimeMode)realtime.stop();else voice.stop();}
-  else void (realtimeMode?realtime.start():voice.start());
+  if(micRecording){if(realtimeActive)realtime.stop();else voice.stop();}
+  else void (realtimeActive?realtime.start():voice.start());
  }
  // Draft stays reachable from any mode: route through the guarded create
  // transition first (never a bare anchor jump), then scroll to the draft.
@@ -191,7 +206,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    <ListeningWave active={micRecording}/>
    <p role="status">{micRecording?"音声受付中":micBusy?"音声受付は一時停止・受信済みの音声を処理中":micError||micNotice?"音声受付は停止中・再開できます":"音声受付は停止中"}</p>
    {micNotice&&<p role="status">{micNotice}</p>}
-   {realtimeMode&&realtime.partial&&<p role="status">認識中：{realtime.partial}</p>}
+   {realtimeActive&&realtime.partial&&<p role="status">認識中：{realtime.partial}</p>}
    <p>音声はMetaへ送信して文字起こしします。録音は保存しません。切り替え音の後に話してください。</p>
    <p aria-live="polite">{micRecording?"聞き取り中… ":""}{micBusy?"音声を文字にしています… ":""}{routing?"操作を処理中… ":""}{message}</p>
    {micError&&<p role="alert">{micError}</p>}
