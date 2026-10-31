@@ -11,6 +11,8 @@ import {useVoiceCapture,type VoiceCaptureMeta} from "./useVoiceCapture";
 import {useRealtimeVoiceCapture} from "./useRealtimeVoiceCapture";
 import {logVoiceEvent,getVoiceEvents,subscribeVoiceEvents,type VoiceDiagEvent} from "./voice-diagnostics";
 
+function MicrophoneGlyph(){return <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></svg>;}
+function ListeningWave({active}:{active:boolean}){return <div className={"listening-wave"+(active?" is-active":"")} aria-hidden="true">{[.32,.65,1,.55,.88,.42,.7,.96,.6,.35,.72,.4].map((v,i)=><span key={i} style={{"--bar-scale":v,"--bar-delay":`${i*65}ms`} as React.CSSProperties}/>)}</div>;}
 export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreated,reviewBoundary}:{
  locale:Locale;selected:Recipe|null;editor:RefObject<EditorHandle|null>;onBrowse:(target:string)=>Promise<Recipe|null>;
  onCreated:(recipe:Recipe)=>void;reviewBoundary:RefObject<(()=>number)|null>;
@@ -32,7 +34,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;queue.current=[];reviewBoundary.current=null;};},[reviewBoundary]);
  const voice=useVoiceCapture(locale,receive,true);
  const realtime=useRealtimeVoiceCapture(locale,receive,{getEpoch:()=>boundary.current});
- const [realtimeMode,setRealtimeMode]=useState(false);
+ const realtimeMode=Boolean(process.env.NEXT_PUBLIC_DEMO_WS_URL); // One mic UI; realtime when configured, legacy REST transport otherwise.
  const micRecording=realtimeMode?realtime.recording:voice.recording;
  const micBusy=!realtimeMode&&voice.busy;
  const micError=realtimeMode?realtime.error:voice.error;
@@ -95,7 +97,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  }
  // One mic state drives both the panel button and the fixed bottom control,
  // so recording/stop/processing can never disagree between the two.
- const micDisabled=!voice.recording&&(voice.supported===false||voice.busy);
+ const micDisabled=!realtimeMode&&!voice.recording&&(voice.supported===false||voice.busy);
  function toggleMic(){
   if(micRecording){if(realtimeMode)realtime.stop();else voice.stop();}
   else void (realtimeMode?realtime.start():voice.start());
@@ -186,8 +188,8 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    {draftPending&&mode!=="create"&&<p role="status">登録途中の下書きを保持しています。<button type="button" onClick={()=>void (async()=>{await navigate({mode:"create",target:""});if(currentMode.current!=="create")return;registration.current?.requestReview();feedback("保持していた下書きを確認します。");})()}>下書きに戻る</button></p>}
    <p>「レシピを登録します」「〇〇を見せて」「パスタを150gに変更」のように続けて話してください。</p>
    <button type="button" className="mic-primary" disabled={micDisabled} onClick={toggleMic} aria-pressed={micRecording}>{micRecording?"■ マイクを停止":micError||micNotice?"🎙 音声操作を再開":"🎙 音声操作を開始"}</button>
-   <button type="button" disabled={micRecording} onClick={()=>setRealtimeMode(value=>!value)}>{realtimeMode?"通常音声に切替":"リアルタイム音声に切替"}</button>
-   <p role="status">{micRecording?(realtimeMode?"リアルタイム音声受付中":"音声受付中"):micBusy?"音声受付は一時停止・受信済みの音声を処理中":micError||micNotice?"音声受付は停止中・再開できます":"音声受付は停止中"}</p>
+   <ListeningWave active={micRecording}/>
+   <p role="status">{micRecording?"音声受付中":micBusy?"音声受付は一時停止・受信済みの音声を処理中":micError||micNotice?"音声受付は停止中・再開できます":"音声受付は停止中"}</p>
    {micNotice&&<p role="status">{micNotice}</p>}
    {realtimeMode&&realtime.partial&&<p role="status">認識中：{realtime.partial}</p>}
    <p>音声はMetaへ送信して文字起こしします。録音は保存しません。切り替え音の後に話してください。</p>
@@ -217,7 +219,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
   <nav aria-label={locale==="ja"?"主要":"Primary"} className="bottom-nav">
    <a href="#top">{locale==="ja"?"ホーム":"Home"}</a>
    <a href="#recipes">{locale==="ja"?"レシピ":"Recipes"}</a>
-   <button type="button" aria-label={locale==="ja"?"下部の音声操作":"Bottom voice control"} aria-pressed={micRecording} disabled={micDisabled} onClick={toggleMic}>{micRecording?"■":"🎙"}</button>
+   <button type="button" className="bottom-nav-mic" aria-label={locale==="ja"?"下部の音声操作":"Bottom voice control"} aria-pressed={micRecording} disabled={micDisabled} onClick={toggleMic}>{micRecording?<span aria-hidden="true" className="stop-glyph"/>:<MicrophoneGlyph/>}</button>
    <button type="button" onClick={()=>void revealDraft()}>{locale==="ja"?"下書き":"Draft"}</button>
    <a href="#assist">{locale==="ja"?"その他":"More"}</a>
   </nav>

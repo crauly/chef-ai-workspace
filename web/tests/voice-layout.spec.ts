@@ -16,7 +16,13 @@ test("mobile width keeps mic reachable without horizontal overflow", async ({ pa
   await expect(page.locator("nav.bottom-nav")).toBeVisible();
   await expect(page.locator(".mic-primary")).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  expect(overflow).toBeLessThanOrEqual(1);
+  const overflowing = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>("body *")]
+    .map(el => ({tag: el.tagName, cls: String(el.className).slice(0, 100),
+      right: Math.round(el.getBoundingClientRect().right),
+      left: Math.round(el.getBoundingClientRect().left)}))
+    .filter(el => el.right > innerWidth + 1 || el.left < -1)
+    .slice(0, 12));
+  expect(overflow, JSON.stringify(overflowing)).toBeLessThanOrEqual(1);
 });
 
 test("desktop width shows voice panel without scrolling past header", async ({ page }) => {
