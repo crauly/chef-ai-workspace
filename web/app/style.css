@@ -129,3 +129,15 @@ a,.link{color:#b3d5ff}
  .card,.proposal,#draft,#voice-controls{overflow-wrap:anywhere}
  .bottom-nav{max-width:calc(100vw - 24px)}
 }
+
+
+/* State-driven voice affordances: a clear mic glyph and a live listening indicator. */
+.bottom-nav .bottom-nav-mic svg{width:36px;height:36px;display:block;flex:none}
+.bottom-nav .bottom-nav-mic .stop-glyph{width:23px;height:23px;border-radius:5px;background:currentColor;display:block}
+.listening-wave{height:66px;display:flex;gap:7px;justify-content:center;align-items:center;padding:4px 0;margin:12px auto 18px}
+.listening-wave span{display:block;width:6px;height:calc(48px * var(--bar-scale));min-height:7px;border-radius:99px;background:#75777b;transform-origin:center;transition:background .15s}
+.listening-wave span:nth-child(3n + 1){background:#4d9fff}
+.listening-wave.is-active span{background:#a2a4a7;animation:chef-wave 820ms ease-in-out infinite alternate;animation-delay:var(--bar-delay)}
+.listening-wave.is-active span:nth-child(3n + 1){background:#4d9fff}
+@keyframes chef-wave{from{transform:scaleY(.35)}to{transform:scaleY(1.25)}}
+@media(prefers-reduced-motion:reduce){.listening-wave.is-active span{animation:none}}
