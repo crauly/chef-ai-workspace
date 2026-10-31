@@ -75,7 +75,7 @@ test("explicit cancel clears the draft while plain transitions keep it",async({p
  await expect(page.getByLabel("未保存のレシピ下書き")).toBeVisible();
  await page.locator(".voice-quick-modes").getByRole("button",{name:"参照",exact:true}).click();
  await expect(page.getByText("登録途中の下書きを保持しています。")).toBeVisible();
- await page.getByRole("button",{name:"新規登録・下書きを再開",exact:true}).click();
+ await page.locator(".voice-quick-modes").getByRole("button",{name:"登録",exact:true}).click();
  await expect(page.getByLabel("未保存のレシピ下書き")).toBeVisible();
  expect(parses).toBe(1);
  await input(page,"キャンセル");
