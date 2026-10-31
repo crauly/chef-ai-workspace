@@ -306,15 +306,49 @@ class TicketMigrationTests(unittest.TestCase):
         return (pathlib.Path(__file__).resolve().parents[1] / self.PATH
                 ).read_text()
 
-    def test_objects_and_lockdown_present(self):
+    def test_function_matches_applied_definition(self):
+        import re
         sql = self._sql()
-        for token in ("public.voice_ws_tickets", "token_hash",
-                      "owner_id uuid", "keywords jsonb", "expires_at",
-                      "consume_voice_ws_ticket", "p_token_hash",
-                      "security definer", "revoke all",
+        low = sql.lower()
+        # Applied DB uses SECURITY INVOKER, never DEFINER.
+        self.assertIn("security invoker", low)
+        self.assertNotIn("security definer", low)
+        # Applied DB pins an empty search_path.
+        self.assertRegex(low, r"set\s+search_path\s+to\s+''")
+        # Applied DB deletes via the aliased table and returns qualified cols.
+        self.assertRegex(
+            low, r"delete\s+from\s+public\.voice_ws_tickets\s+as\s+t\b")
+        for frag in ("t.token_hash", "t.expires_at",
+                     "t.owner_id", "t.locale", "t.keywords"):
+            with self.subTest(frag=frag):
+                self.assertIn(frag, low)
+        self.assertNotIn("set search_path = public", low)
+        self.assertEqual(len(re.findall(
+            r"create\s+or\s+replace\s+function\s+"
+            r"public\.consume_voice_ws_ticket", low)), 1)
+
+    def test_checks_and_lockdown_present(self):
+        sql = self._sql()
+        low = sql.lower()
+        for token in ("voice_ws_tickets_token_hash_check",
+                      "voice_ws_tickets_locale_check",
+                      "voice_ws_tickets_keywords_check",
+                      "jsonb_typeof(keywords) = 'array'",
                       "service_role"):
             with self.subTest(token=token):
-                self.assertIn(token, sql)
+                self.assertIn(token, low)
+        # CHECK intent mirrors the applied DB: 64-hex hash, en/ja, array.
+        self.assertIn("^[0-9a-f]{64}$", sql)
+        self.assertIn("locale in ('en', 'ja')", low)
+        # CREATE OR REPLACE preserves grants, so explicit revokes including
+        # PUBLIC are the enforcement point on both table and function.
+        norm = " ".join(sql.lower().split())
+        self.assertIn(
+            "revoke all on table public.voice_ws_tickets"
+            " from public, anon, authenticated", norm)
+        self.assertIn(
+            "revoke all on function public.consume_voice_ws_ticket(text)"
+            " from public, anon, authenticated", norm)
 
     def test_record_only_replay_safe(self):
         import re
