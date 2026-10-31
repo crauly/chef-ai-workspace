@@ -16,3 +16,13 @@ textarea{font:inherit;color:inherit}
 .proposal ol{margin:10px 0;padding-left:22px}
 .cost-summary strong{font-size:1.05rem}
 @media(max-width:520px){.material-form{grid-template-columns:1fr}.material-form button{justify-self:stretch}}
+
+#voice-controls,#draft,#recipes,#assist,#top{scroll-margin-top:12px;scroll-margin-bottom:76px}
+.mic-primary{font-size:1.15rem;font-weight:700;padding:16px 22px;min-height:56px}
+.bottom-nav{display:none}
+@media(max-width:720px){
+.bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:30;background:rgba(255,255,255,.97);border-top:1px solid #dde5dc;padding:8px 6px calc(8px + env(safe-area-inset-bottom));gap:2px;justify-content:space-around}
+.bottom-nav a{flex:1 1 0;text-align:center;text-decoration:none;color:#183b30;font-size:.82rem;font-weight:600;padding:10px 2px;border-radius:8px}
+main{padding-bottom:76px}
+.mic-primary{width:100%}
+}

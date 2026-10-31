@@ -157,7 +157,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    <p>現在のモード: <strong>{labels[mode]}</strong>{mode==="edit"&&selected?` — ${selected.title.value}`:""}</p>
    {draftPending&&mode!=="create"&&<p role="status">登録途中の下書きを保持しています。<button type="button" onClick={()=>void (async()=>{await navigate({mode:"create",target:""});if(currentMode.current!=="create")return;registration.current?.requestReview();feedback("保持していた下書きを確認します。");})()}>下書きに戻る</button></p>}
    <p>「レシピを登録します」「〇〇を見せて」「パスタを150gに変更」のように続けて話してください。</p>
-   <button type="button" disabled={!voice.recording&&(voice.supported===false||voice.busy)} onClick={micRecording?(realtimeMode?realtime.stop:voice.stop):()=>void (realtimeMode?realtime.start():voice.start())} aria-pressed={micRecording}>{micRecording?"■ マイクを停止":micError||micNotice?"🎙 音声操作を再開":"🎙 音声操作を開始"}</button>
+   <button type="button" className="mic-primary" disabled={!voice.recording&&(voice.supported===false||voice.busy)} onClick={micRecording?(realtimeMode?realtime.stop:voice.stop):()=>void (realtimeMode?realtime.start():voice.start())} aria-pressed={micRecording}>{micRecording?"■ マイクを停止":micError||micNotice?"🎙 音声操作を再開":"🎙 音声操作を開始"}</button>
    <button type="button" disabled={micRecording} onClick={()=>setRealtimeMode(value=>!value)}>{realtimeMode?"通常音声に切替":"リアルタイム音声に切替"}</button>
    <p role="status">{micRecording?(realtimeMode?"リアルタイム音声受付中":"音声受付中"):micBusy?"音声受付は一時停止・受信済みの音声を処理中":micError||micNotice?"音声受付は停止中・再開できます":"音声受付は停止中"}</p>
    {micNotice&&<p role="status">{micNotice}</p>}
