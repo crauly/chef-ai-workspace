@@ -77,7 +77,7 @@ test("voice-recipe route sends strict json_schema; package-vs-use and approval s
       sentBody = String(init?.body);
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
         title: "テスト", materials: [{name: "粉", quantity: "100", unit: "g",
-          price_jpy: "350", price_quantity: "500", price_unit: "g"}],
+          price_jpy: "350", price_quantity: "500", price_unit: "g", supplier: ""}],
         selling_price_jpy: "", notes: [], interpretations: []})}}]});
     }) as typeof fetch;
     const ok = await parseRecipe(authed("http://localhost/api/voice-recipe",
@@ -95,7 +95,7 @@ test("voice-recipe route sends strict json_schema; package-vs-use and approval s
     // Bad unit rejected app-side even though shape matches schema.
     global.fetch = (async () => Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
       title: "テスト", materials: [{name: "粉", quantity: "100", unit: "カップ",
-        price_jpy: "350", price_quantity: "500", price_unit: "g"}],
+        price_jpy: "350", price_quantity: "500", price_unit: "g", supplier: ""}],
       selling_price_jpy: "", notes: [], interpretations: []})}}]})) as typeof fetch;
     const bad = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["粉100g、500g350円"]}));
@@ -124,7 +124,7 @@ test("english structuring and self-correction merge through the same schema gate
       expect(sent.response_format.json_schema.name).toBe("chef_voice_recipe");
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
         title: "Pasta", materials: [{name: "pasta", quantity: "100", unit: "g",
-          price_jpy: "350", price_quantity: "500", price_unit: "g"}],
+          price_jpy: "350", price_quantity: "500", price_unit: "g", supplier: ""}],
         selling_price_jpy: "", notes: [], interpretations: []})}}]});
     }) as typeof fetch;
     const en = await parseRecipe(authed("http://localhost/api/voice-recipe",
@@ -134,7 +134,7 @@ test("english structuring and self-correction merge through the same schema gate
     // Self-correction in Japanese merges to the corrected value, single material.
     global.fetch = (async () => Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
       title: "テスト", materials: [{name: "片栗粉", quantity: "15", unit: "g",
-        price_jpy: "", price_quantity: "", price_unit: ""}],
+        price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
       selling_price_jpy: "", notes: [], interpretations: []})}}]})) as typeof fetch;
     const fixed = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["片栗粉10g、いや15g"]}));
@@ -145,12 +145,68 @@ test("english structuring and self-correction merge through the same schema gate
     // Review request is never structured as an ingredient.
     global.fetch = (async () => Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
       title: "", materials: [{name: "内容を確認", quantity: "1", unit: "g",
-        price_jpy: "", price_quantity: "", price_unit: ""}],
+        price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
       selling_price_jpy: "", notes: [], interpretations: []})}}]})) as typeof fetch;
     const sneaky = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["内容を確認"]}));
     expect(sneaky.status).toBe(200);
     expect((await sneaky.json()).materials[0].name).not.toBe("");
+  } finally {
+    global.fetch = previousFetch;
+    if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
+    if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
+  }
+});
+
+test("supplier is extracted without guessing; revision reuses the previous draft", async () => {
+  const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
+  process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
+  const previousFetch = global.fetch;
+  try {
+    let sentBody = "";
+    global.fetch = (async (_: unknown, init?: {body?: unknown}) => {
+      sentBody = String(init?.body);
+      return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
+        title: "テスト", materials: [{name: "ディチェコ パスタ", quantity: "100", unit: "g",
+          price_jpy: "350", price_quantity: "500", price_unit: "g", supplier: "築地場外"}],
+        selling_price_jpy: "", notes: [], interpretations: []})}}]});
+    }) as typeof fetch;
+    const ok = await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["ディチェコのパスタ100g、築地場外で500g350円"]}));
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).materials[0]).toMatchObject({name: "ディチェコ パスタ", supplier: "築地場外"});
+    // Revision: only the new turn plus the previous draft travel upstream.
+    global.fetch = (async (_: unknown, init?: {body?: unknown}) => {
+      sentBody = String(init?.body);
+      return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
+        title: "テスト", materials: [
+          {name: "ディチェコ パスタ", quantity: "100", unit: "g", price_jpy: "350",
+            price_quantity: "500", price_unit: "g", supplier: "築地場外"},
+          {name: "卵", quantity: "50", unit: "g", price_jpy: "", price_quantity: "",
+            price_unit: "", supplier: ""}],
+        selling_price_jpy: "", notes: [], interpretations: []})}}]});
+    }) as typeof fetch;
+    const previous = {title: "テスト", materials: [{name: "ディチェコ パスタ", quantity: "100",
+      unit: "g", price_jpy: "350", price_quantity: "500", price_unit: "g", supplier: "築地場外"}],
+      selling_price_jpy: "", notes: [], interpretations: []};
+    const revised = await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["あと卵50g"], previous}));
+    expect(revised.status).toBe(200);
+    const sent = JSON.parse(sentBody).messages[1];
+    expect(Object.keys(JSON.parse(sent.content)).sort()).toEqual(["new_turns", "previous_draft"]);
+    expect(JSON.parse(sent.content).new_turns).toEqual(["あと卵50g"]);
+    expect((await revised.json()).materials).toHaveLength(2);
+    // Malformed previous draft fails closed without calling the provider.
+    global.fetch = (async () => Response.json({choices: []})) as typeof fetch;
+    expect((await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["卵"], previous: {title: "x"}}))).status).toBe(400);
+    // Material shape without supplier is rejected app-side.
+    global.fetch = (async () => Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
+      title: "テスト", materials: [{name: "粉", quantity: "100", unit: "g",
+        price_jpy: "350", price_quantity: "500", price_unit: "g"}],
+      selling_price_jpy: "", notes: [], interpretations: []})}}]})) as typeof fetch;
+    expect((await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["粉"]})) ).status).toBe(502);
   } finally {
     global.fetch = previousFetch;
     if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;

@@ -60,7 +60,7 @@ test("live-observed Spark notes-string response is rejected; typed notes array y
         expect(sent.messages[0].role).toBe("developer");
         expect(sent.reasoning_effort).toBe("low");
         return Response.json({choices: [{message: {content: JSON.stringify({
-          title: "音声テスト", materials: [{name: "乾燥パスタ", quantity: "150", unit: "g", price_jpy: "350", price_quantity: "500", price_unit: "g"}],
+          title: "音声テスト", materials: [{name: "乾燥パスタ", quantity: "150", unit: "g", price_jpy: "350", price_quantity: "500", price_unit: "g", supplier: ""}],
           selling_price_jpy: "1800", notes,
         })}}]});
       };
@@ -125,7 +125,7 @@ test("real Web Audio capture sends WAV through transcription, review and explici
     await route.fulfill({json: {transcript: texts[transcribed++], provider: "meta_voice", model: VOICE_MODEL}});
   });
   await page.route("**/api/voice-recipe", route => route.fulfill({json: {
-    title: "カルボナーラ", materials: [{name: "卵", quantity: "100", unit: "g", price_jpy: "60", price_quantity: "50", price_unit: "g"}],
+    title: "カルボナーラ", materials: [{name: "卵", quantity: "100", unit: "g", price_jpy: "60", price_quantity: "50", price_unit: "g", supplier: ""}],
     selling_price_jpy: "1800", notes: [], missing: [],
   }}));
   await page.route("**/api/recipes/full", async route => {
@@ -152,18 +152,32 @@ test("real Web Audio capture sends WAV through transcription, review and explici
   expect(saved).toBe(1); expect(transcribed).toBe(4);
 });
 
-test("transcription failure stops capture, reports recovery and never sends a draft or save", async ({page}) => {
-  await installMicrophone(page);
+test("transcription failure keeps capture running, reports recovery and never sends a draft or save", async ({page}) => {
+  // Tone for 400ms then silence: the 1s silence split submits mid-recording,
+  // so the mocked 502 fails while the microphone is still open.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {value: async () => {
+      const c = new AudioContext(), oscillator = c.createOscillator(), gain = c.createGain();
+      const destination = c.createMediaStreamDestination();
+      oscillator.connect(gain); gain.connect(destination);
+      const t = c.currentTime;
+      gain.gain.setValueAtTime(0.1, t); gain.gain.setValueAtTime(0.0001, t + 0.4);
+      oscillator.start();
+      await c.resume();
+      return destination.stream;
+    }});
+  });
   let mutations = 0;
   await page.route("**/api/voice-recipe", route => {mutations++; return route.fulfill({status: 500});});
   await page.route("**/api/recipes/full", route => {mutations++; return route.fulfill({status: 500});});
   await page.route("**/api/voice/transcribe", route => route.fulfill({status: 502, json: {error: "failed"}}));
   await page.goto("/");
   await page.getByRole("button", {name: "🎙 音声操作を開始", exact: true}).click();
-  await page.waitForTimeout(700);
+  // Capture continues despite the failed fragment: the stop control stays,
+  // the failure is announced, and no draft or save is produced from it.
+  await expect(page.getByRole("button", {name: "■ マイクを停止", exact: true})).toBeEnabled();
+  await expect(page.getByRole("region", {name: "音声操作モード"}).getByRole("alert")).toContainText("受付は続けています");
   await page.getByRole("button", {name: "■ マイクを停止", exact: true}).click();
-  await expect(page.getByRole("region", {name: "音声操作モード"}).getByRole("alert")).toContainText("音声を文字にできませんでした");
-  await expect(page.getByRole("button", {name: "🎙 音声操作を再開", exact: true})).toBeEnabled();
   expect(mutations).toBe(0);
 });
 
@@ -190,4 +204,50 @@ test("leaving the shared microphone discards an in-flight transcript", async ({p
   expect(parsed).toBe(0);
   await expect(page.getByLabel("未保存のレシピ下書き")).toHaveCount(0);
   await page.reload();
+});
+
+test("transcription failures are classified: timeout vs upstream vs invalid", async () => {
+  const {TranscriptionError} = await import("../app/voice-transcription");
+  type TranscriptionErrorType = InstanceType<typeof TranscriptionError>;
+  try {
+    await transcribeWav(wav(), "ja", "fixture", async () => {
+      throw Object.assign(new Error("timeout"), {name: "TimeoutError"});
+    });
+    throw new Error("should have thrown");
+  } catch (error) {
+    expect(error).toBeInstanceOf(TranscriptionError);
+    expect((error as TranscriptionErrorType).kind).toBe("timeout");
+  }
+  try {
+    await transcribeWav(wav(), "ja", "fixture", async () => new Response("down", {status: 503}));
+    throw new Error("should have thrown");
+  } catch (error) {
+    expect((error as TranscriptionErrorType).kind).toBe("upstream");
+  }
+  try {
+    await transcribeWav(wav(), "ja", "fixture", async () => Response.json({text: "no transcript"}));
+    throw new Error("should have thrown");
+  } catch (error) {
+    expect((error as TranscriptionErrorType).kind).toBe("invalid");
+  }
+});
+
+test("a stalled response body stays a timeout; a broken body stays upstream", async () => {
+  const {TranscriptionError} = await import("../app/voice-transcription");
+  type TranscriptionErrorType = InstanceType<typeof TranscriptionError>;
+  const stall = () => new Response(new ReadableStream({}), {status: 200});
+  try {
+    await transcribeWav(wav(), "ja", "fixture", async () => stall(), 50);
+    throw new Error("should have thrown");
+  } catch (error) {
+    expect(error).toBeInstanceOf(TranscriptionError);
+    expect((error as TranscriptionErrorType).kind).toBe("timeout");
+  }
+  const broken = () => new Response(new ReadableStream({start(c) {c.error(new TypeError("network"));}}), {status: 200});
+  try {
+    await transcribeWav(wav(), "ja", "fixture", async () => broken());
+    throw new Error("should have thrown");
+  } catch (error) {
+    expect((error as TranscriptionErrorType).kind).toBe("upstream");
+  }
 });

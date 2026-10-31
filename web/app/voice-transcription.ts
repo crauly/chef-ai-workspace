@@ -18,38 +18,91 @@ export function validWav(audio: Uint8Array): boolean {
     v.getUint32(40, true) === size && size % 2 === 0 && size <= rate * 2 * 30;
 }
 
+// Error taxonomy for the transcribe route: timeouts (retryable downstream)
+// stay distinct from upstream 5xx/429 and malformed provider payloads so a
+// real-device 502 is never masked as a generic failure.
+export type TranscriptionFailure = "timeout" | "upstream" | "invalid";
+export class TranscriptionError extends Error {
+  readonly kind: TranscriptionFailure;
+  constructor(kind: TranscriptionFailure) {
+    super(kind === "timeout" ? "Transcription timed out"
+      : kind === "upstream" ? "Transcription unavailable" : "Invalid transcription");
+    this.kind = kind;
+  }
+}
+
+async function readBody(reader: ReadableStreamDefaultReader<Uint8Array>, budgetMs: number): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const pending = reader.read();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const verdict = await Promise.race([
+        pending.then(value => ({ready: true as const, value})),
+        new Promise<{ready: false}>(resolve => {
+          timer = setTimeout(() => resolve({ready: false}), budgetMs);
+        }),
+      ]);
+      if (!verdict.ready) {
+        const timeout = new Error("transcription body timeout");
+        timeout.name = "TimeoutError";
+        throw timeout;
+      }
+      const {done, value} = verdict.value;
+      if (done) break;
+      size += value.length;
+      if (size > 65_536) {await reader.cancel(); throw new TranscriptionError("invalid");}
+      chunks.push(value);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {bytes.set(chunk, offset); offset += chunk.length;}
+  return bytes;
+}
+
 export async function transcribeWav(audio: Uint8Array, language: "ja" | "en-US", key: string,
-  transport: typeof fetch = fetch) {
-  if (!validWav(audio)) throw new Error("Invalid audio");
+  transport: typeof fetch = fetch, bodyBudgetMs = 25_000) {
+  if (!validWav(audio)) throw new TranscriptionError("invalid");
   const form = new FormData();
   form.append("request", new Blob([JSON.stringify({model: VOICE_MODEL, mode: "PUSH_TO_TALK",
     audioEncoding: "WAV", languageBias: [language === "ja" ? "Japanese" : "English"],
     ...(language === "ja" ? {keywords: JAPANESE_VOICE_KEYWORDS} : {})})],
     {type: "application/json"}));
   form.append("audio", new Blob([new Uint8Array(audio)], {type: "audio/wav"}), "utterance.wav");
-  const response = await transport("https://api.meta.ai/v1/asr/transcribe", {
-    method: "POST", headers: {Authorization: "Bearer " + key, Accept: "application/json"},
-    body: form, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(25_000),
-  });
-  if (!response.ok) throw new Error("Transcription unavailable");
-  // Bound the response too. Provider error bodies and session identifiers are not reflected.
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error("Invalid transcription");
-  let size = 0;
-  const chunks: Uint8Array[] = [];
-  while (true) {
-    const {done, value} = await reader.read();
-    if (done) break;
-    size += value.length;
-    if (size > 65_536) {await reader.cancel(); throw new Error("Invalid transcription");}
-    chunks.push(value);
+  let response: Response;
+  try {
+    response = await transport("https://api.meta.ai/v1/asr/transcribe", {
+      method: "POST", headers: {Authorization: "Bearer " + key, Accept: "application/json"},
+      body: form, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(25_000),
+    });
+  } catch (error) {
+    // Network failure or the 25s provider timeout: signalled distinctly so
+    // the UI keeps listening instead of reporting a generic failure.
+    if (error instanceof Error && error.name === "TimeoutError") throw new TranscriptionError("timeout");
+    throw new TranscriptionError("upstream");
   }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {bytes.set(chunk, offset); offset += chunk.length;}
-  const out: unknown = JSON.parse(new TextDecoder().decode(bytes));
-  const transcript = out && typeof out === "object" ? (out as {transcript?: unknown}).transcript : null;
-  if (typeof transcript !== "string" || !transcript.trim() || transcript.length > 1000)
-    throw new Error("Invalid transcription");
-  return {transcript, provider: "meta_voice", model: VOICE_MODEL};
+  if (!response.ok) throw new TranscriptionError("upstream");
+  // Bound the response too. Provider error bodies and session identifiers are not reflected.
+  // Body reads keep their own timeout: transport() only covers headers, so a
+  // stall mid-body must stay a "timeout", and a mid-body network break stays
+  // "upstream" instead of collapsing into "invalid".
+  const reader = response.body?.getReader();
+  if (!reader) throw new TranscriptionError("invalid");
+  try {
+    const bytes = await readBody(reader, bodyBudgetMs);
+    const out: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    const transcript = out && typeof out === "object" ? (out as {transcript?: unknown}).transcript : null;
+    if (typeof transcript !== "string" || !transcript.trim() || transcript.length > 1000)
+      throw new TranscriptionError("invalid");
+    return {transcript, provider: "meta_voice", model: VOICE_MODEL};
+  } catch (error) {
+    if (error instanceof TranscriptionError) throw error;
+    if (error instanceof Error && error.name === "TimeoutError") throw new TranscriptionError("timeout");
+    if (error instanceof TypeError) throw new TranscriptionError("upstream");
+    throw new TranscriptionError("invalid");
+  }
 }

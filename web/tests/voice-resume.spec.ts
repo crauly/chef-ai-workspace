@@ -61,39 +61,42 @@ test("slow transcription coalesces short fragments instead of aborting the micro
  for(let i=0;i<5;i++){await feed(page,.5);await feed(page,1.1,false);}
  await expect.poll(()=>transcribes).toBe(1);await expect(page.getByRole("button",{name:"■ マイクを停止",exact:true})).toBeVisible();
  expect(await page.evaluate(()=>(window as unknown as {resumeMic:{stops:number}}).resumeMic.stops)).toBe(0);
- release();await expect.poll(()=>sources.some(turns=>turns.length===3)).toBe(true);
+ release();await expect.poll(()=>sources.flat()).toEqual(["材料1を100g","材料2を100g","材料3を100g"]);
  await expect(page.getByRole("button",{name:"■ マイクを停止",exact:true})).toBeVisible();
  expect(transcribes).toBe(3);await page.reload();
 });
 
-test("a bounded backlog pauses with one audible stop and drains every accepted batch before resuming",async({page})=>{
+test("a bounded backlog keeps the microphone open and drains every accepted batch automatically",async({page})=>{
  await controlledMicrophone(page);let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});
  let transcribes=0;const sources:string[][]=[];
  await page.route("**/api/voice/transcribe",async route=>{const number=++transcribes;expect(validWav(route.request().postDataBuffer()!)).toBe(true);if(number===1)await held;await route.fulfill({json:{transcript:`食材${number}を100g`}});});
  await page.route("**/api/voice-recipe",route=>{sources.push(route.request().postDataJSON().turns);return route.fulfill({json:draft});});
- await start(page);for(let i=0;i<3;i++)await feed(page,29);
- await expect(page.getByRole("region",{name:"音声操作モード"})).toContainText("受信済みの音声は破棄せず処理します");
- await expect(page.getByRole("button",{name:"🎙 音声操作を再開",exact:true})).toBeDisabled();
- expect(await page.evaluate(()=>(window as unknown as {resumeMic:{cues:number[]}}).resumeMic.cues)).toEqual([330,262,196]);
- release();await expect(page.getByRole("button",{name:"🎙 音声操作を再開",exact:true})).toBeEnabled();
- await expect.poll(()=>sources.some(turns=>turns.join("/")==="食材1を100g/食材2を100g/食材3を100g")).toBe(true);
- expect(transcribes).toBe(3);await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("パスタ");
-  await page.getByRole("button",{name:"🎙 音声操作を再開",exact:true}).click();
+ await start(page);for(let i=0;i<4;i++)await feed(page,29);
+ // No pause, no stop cue, no manual resume: buffered utterances wait visibly.
  await expect(page.getByRole("button",{name:"■ マイクを停止",exact:true})).toBeVisible();
- expect(await page.evaluate(()=>(window as unknown as {resumeMic:{opens:number}}).resumeMic.opens)).toBe(2);
+ await expect(page.getByRole("region",{name:"音声操作モード"})).toContainText("順に文字にしています");
+ expect(await page.evaluate(()=>(window as unknown as {resumeMic:{stops:number}}).resumeMic.stops)).toBe(0);
+ release();
+ await expect.poll(()=>sources.flat()).toEqual(["食材1を100g","食材2を100g","食材3を100g","食材4を100g"]);
+ expect(transcribes).toBe(4);await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("パスタ");
+ await expect(page.getByRole("region",{name:"音声操作モード"})).not.toContainText("順に文字にしています");
+ expect(await page.evaluate(()=>(window as unknown as {resumeMic:{opens:number}}).resumeMic.opens)).toBe(1);
  await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("パスタ");await page.reload();
 });
 
-test("one failed transcription stops audibly but preserves later accepted and partial audio",async({page})=>{
+test("one failed transcription stays audible but keeps later accepted and partial audio flowing",async({page})=>{
  await controlledMicrophone(page);let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});
  let transcribes=0;const sources:string[][]=[];
  await page.route("**/api/voice/transcribe",async route=>{const number=++transcribes;if(number===1){await held;await route.fulfill({status:502});}else await route.fulfill({json:{transcript:`材料${number}を100g`}});});
  await page.route("**/api/voice-recipe",route=>{sources.push(route.request().postDataJSON().turns);return route.fulfill({json:draft});});
  await start(page);for(let i=0;i<2;i++){await feed(page,.5);await feed(page,1.1,false);}await feed(page,.5);
  await expect.poll(()=>transcribes).toBe(1);release();
- await expect(page.getByRole("region",{name:"音声操作モード"}).getByRole("alert")).toContainText("一部の音声を文字にできませんでした");
- await expect(page.getByRole("button",{name:"🎙 音声操作を再開",exact:true})).toBeEnabled();
- await expect.poll(()=>sources.some(turns=>turns.join("/")==="材料2を100g/材料3を100g")).toBe(true);expect(transcribes).toBe(3);
+ // Failure is announced with one error cue, yet the microphone stays open
+ // and accepted audio keeps flowing without a manual resume.
+ await expect(page.getByRole("region",{name:"音声操作モード"}).getByRole("alert")).toContainText("受付は続けています");
+ await expect(page.getByRole("button",{name:"■ マイクを停止",exact:true})).toBeVisible();
+ await feed(page,1.1,false);
+ await expect.poll(()=>sources.flat()).toEqual(["材料2を100g","材料3を100g"]);expect(transcribes).toBe(3);
  const cues=await page.evaluate(()=>(window as unknown as {resumeMic:{cues:number[]}}).resumeMic.cues);
  expect(cues.filter(frequency=>frequency===220)).toHaveLength(1);await page.reload();
 });

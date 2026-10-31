@@ -38,10 +38,24 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  const micError=realtimeMode?realtime.error:voice.error;
  const micNotice=realtimeMode?realtime.notice:voice.notice;
  const wasRecording=useRef(false);
+ // Keyed by failure event (hook tick), not message text: repeated failures
+ // with identical wording each raise their own audible cue while the mic
+ // stays open. The stop cue below skips a repeat of the announced failure.
+ const announcedFailure=useRef("");
+ const failureKey=micError?`${realtimeMode?"realtime":"rest"}#${realtimeMode?realtime.errorTick:voice.errorTick}#${micError}`:"";
  useEffect(()=>{
-  if(wasRecording.current&&!micRecording)playVoiceCue(micError?"error":"stop",volume);
+  // A transcription failure while the mic stays open is audible at once;
+  // the stop cue below skips a repeat of the same announced failure.
+  if(micRecording&&failureKey&&failureKey!==announcedFailure.current&&volume>0){
+   announcedFailure.current=failureKey;playVoiceCue("error",volume);
+  }
+  if(!micError)announcedFailure.current="";
+ },[micRecording,failureKey,micError,volume]);
+ useEffect(()=>{
+  if(wasRecording.current&&!micRecording&&
+   !(failureKey&&failureKey===announcedFailure.current))playVoiceCue(micError?"error":"stop",volume);
   wasRecording.current=micRecording;
- },[micRecording,micError,volume]);
+ },[micRecording,failureKey,micError,volume]);
  useEffect(()=>{
   if(selected?.id&&selected.id!==previousTarget.current&&currentMode.current==="idle"){
    transition("browse");feedback("参照モードです。表示中のレシピの変更内容を話すと編集へ進みます。");
@@ -179,8 +193,12 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
     <ul>{diag.slice(-10).map(event=><li key={event.seq}>{new Date(event.at).toLocaleTimeString()} {event.kind}{event.trace?` [${event.trace}]`:""}{event.detail?`：${event.detail}`:""}</li>)}</ul>
    </details>
   </section>
-  <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} onDiscarded={()=>setDraftPending(false)} sharedVoice={{markReview:mark,cancel:()=>{},captureMessage:micRecording?"音声受付中です。確認後は「登録」「登録してください」でも保存できます。":micBusy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${micError||micNotice||""}`}} onCreated={(recipe,mode)=>{
-   setDraftPending(false);transition("browse");feedback(mode==="unconfirmed"?"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"レシピを保存しました。");onCreated(recipe);
+  <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} onDiscarded={()=>setDraftPending(false)} sharedVoice={{markReview:mark,cancel:()=>{},captureMessage:micRecording?"音声受付中です。確認後は「登録」「登録してください」でも保存できます。":micBusy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${micError||micNotice||""}`}} onCreated={(recipe,mode,suppliers)=>{
+   // The spoken purchase source survives as a memo in this always-visible
+  // region (the registration panel hides in browse mode). Formal linkage
+  // reuses the ledger path behind the Human Gate; nothing auto-registers.
+  const supplierNote=suppliers.length?`（仕入先メモ：${suppliers.join("／")} — 台帳の仕入先連携で登録できます）`:"";
+  setDraftPending(false);transition("browse");feedback((mode==="unconfirmed"?"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"レシピを保存しました。")+supplierNote);onCreated(recipe);
   }}/></div>
  </>;
 }

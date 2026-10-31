@@ -5,6 +5,7 @@
 // updates, and mode transitions that belong to the same utterance.
 export type VoiceDiagKind =
   | "capture.start" | "capture.stop" | "capture.pause" | "capture.resume"
+  | "capture.backlog" | "capture.backlog.drop"
   | "capture.disconnect" | "capture.error"
   | "transcribe.ok" | "transcribe.fail"
   | "muse.start" | "muse.ok" | "muse.fail"

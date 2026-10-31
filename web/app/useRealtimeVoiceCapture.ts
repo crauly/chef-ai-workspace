@@ -85,6 +85,8 @@ export function useRealtimeVoiceCapture(
   const [recording, setRecording] = useState(false);
   const [partial, setPartial] = useState("");
   const [error, setError] = useState("");
+  const [errorTick, setErrorTick] = useState(0);
+  function fail(message: string) { if (mounted.current) { setError(message); setErrorTick(tick => tick + 1); } }
   const [notice, setNotice] = useState("");
   const callback = useRef(onTranscript); callback.current = onTranscript;
   const epochOf = useRef(opts.getEpoch); epochOf.current = opts.getEpoch;
@@ -144,7 +146,7 @@ export function useRealtimeVoiceCapture(
     logVoiceEvent("capture.error", reason, trace);
     stopSession(true);
     if (mounted.current) {
-      setError(message);
+      fail(message);
       setNotice(locale === "ja"
         ? "下書きは保持しています。通常の音声入力も利用できます。"
         : "The draft is retained. Standard voice input remains available.");
@@ -311,7 +313,7 @@ export function useRealtimeVoiceCapture(
     const endpoint = realtimeWsEndpoint();
     if (!endpoint) {
       logVoiceEvent("capture.error", "relay origin unconfigured; draft kept", trace);
-      setError(locale === "ja"
+      fail(locale === "ja"
         ? "リアルタイム音声は未設定です。通常の音声入力を利用してください。下書きは保持しています。"
         : "Realtime voice is not configured. Use standard voice input; the draft is retained.");
       setState("failed");
@@ -422,5 +424,5 @@ export function useRealtimeVoiceCapture(
     current.transport.finishAndDrain(REALTIME_DRAIN_TIMEOUT_MS);
   }
 
-  return {state, recording, partial, error, notice, start, stop, markReview};
+  return {state, recording, partial, error, errorTick, notice, start, stop, markReview};
 }
