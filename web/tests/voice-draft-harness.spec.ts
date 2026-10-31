@@ -21,7 +21,7 @@ test("draft survives browse transition and review routes back to the draft",asyn
  await page.goto("/");
  await input(page,"アマトリチャーナ。乾燥パスタ100g、500g350円。トマト200g、1kg300円");
  await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("アマトリチャーナ");
- await page.getByRole("button",{name:"レシピを参照",exact:true}).click();
+ await page.locator(".voice-quick-modes").getByRole("button",{name:"参照",exact:true}).click();
  await expect(page.getByText("登録途中の下書きを保持しています。")).toBeVisible();
  // Review from browse must return to the pending draft, not start a new search.
  await input(page,"内容を確認");
@@ -55,7 +55,7 @@ test("return-to-draft respects a pending edit proposal instead of discarding it"
  await page.goto("/");
  await input(page,"片栗粉10g、1kg1000円");
  await expect(page.getByLabel("未保存のレシピ下書き")).toBeVisible();
- await page.getByRole("button",{name:"レシピを参照",exact:true}).click();
+ await page.locator(".voice-quick-modes").getByRole("button",{name:"参照",exact:true}).click();
  await expect(page.getByText("登録途中の下書きを保持しています。")).toBeVisible();
  await input(page,"片栗粉のレシピを見せて");
  await expect(page.getByRole("region",{name:"Recipe cost summary"})).toBeVisible();
@@ -73,14 +73,14 @@ test("explicit cancel clears the draft while plain transitions keep it",async({p
  await page.goto("/");
  await input(page,"アマトリチャーナ。乾燥パスタ100g、500g350円");
  await expect(page.getByLabel("未保存のレシピ下書き")).toBeVisible();
- await page.getByRole("button",{name:"レシピを参照",exact:true}).click();
+ await page.locator(".voice-quick-modes").getByRole("button",{name:"参照",exact:true}).click();
  await expect(page.getByText("登録途中の下書きを保持しています。")).toBeVisible();
  await page.getByRole("button",{name:"新規登録・下書きを再開",exact:true}).click();
  await expect(page.getByLabel("未保存のレシピ下書き")).toBeVisible();
  expect(parses).toBe(1);
  await input(page,"キャンセル");
  await expect(page.getByLabel("未保存のレシピ下書き")).toHaveCount(0);
- await page.getByRole("button",{name:"レシピを参照",exact:true}).click();
+ await page.locator(".voice-quick-modes").getByRole("button",{name:"参照",exact:true}).click();
  await expect(page.getByText("登録途中の下書きを保持しています。")).toHaveCount(0);
 });
 
