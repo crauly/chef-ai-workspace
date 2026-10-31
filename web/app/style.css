@@ -117,3 +117,15 @@ a,.link{color:#b3d5ff}
 }
 @media(min-width:721px){main{border-radius:24px;margin:20px auto;min-height:calc(100dvh - 40px)}#voice-controls{padding:30px}.bottom-nav{display:none}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}button{transition:none}}
+
+/* Mobile containment: nested flex/grid controls must shrink inside the viewport. */
+@media(max-width:720px){
+ html,body{width:100%;max-width:100%}
+ main,main>*,#voice-controls,#draft,#assist,#recipes{min-width:0;max-width:100%}
+ .chef-header .toolbar,.chef-header .toolbar>*{min-width:0}
+ #voice-controls form,#voice-controls form>*,#voice-controls details,#voice-controls p,
+ .card,.proposal,.ai-workspace,.material-form,.material-form>*{min-width:0;max-width:100%}
+ #voice-controls input:not([type="range"]),textarea{min-width:0;max-width:100%;width:auto}
+ .card,.proposal,#draft,#voice-controls{overflow-wrap:anywhere}
+ .bottom-nav{max-width:calc(100vw - 24px)}
+}
