@@ -90,3 +90,27 @@ test("voice settings and recognized turns remain collapsed until requested", asy
   await transcript.locator("summary").click();
   await expect(transcript).toHaveAttribute("open", "");
 });
+
+test("header price bell keeps notification list collapsed until opened", async ({page}) => {
+  await page.route("**/api/notifications", route => route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({items:[{id:"n1",observation_id:"o1",ingredient_id:"i1",change_jpy:"50",unit_basis:"kg",currency:"JPY",status:"unread",created_at:"2026-11-01T00:00:00Z"}]})}));
+  await page.goto("/");
+  const bell=page.getByRole("button",{name:"価格通知を開く"});
+  await expect(bell).toBeVisible();
+  await expect(bell).toHaveAttribute("aria-expanded","false");
+  await expect(page.getByRole("region",{name:"価格通知"})).toHaveCount(0);
+  await expect(bell.locator(".price-bell-count")).toHaveText("1");
+  await bell.click();
+  await expect(bell).toHaveAttribute("aria-expanded","true");
+  await expect(page.getByRole("region",{name:"価格通知"})).toBeVisible();
+  await page.getByRole("button",{name:"通知を閉じる"}).click();
+  await expect(bell).toHaveAttribute("aria-expanded","false");
+});
+
+test("header notification failure remains distinguishable from zero unread", async ({page}) => {
+  await page.route("**/api/notifications", route => route.fulfill({status:503,contentType:"application/json",body:JSON.stringify({error:"notifications_unavailable"})}));
+  await page.goto("/");
+  const bell=page.getByRole("button",{name:"価格通知を開く"});
+  await expect(bell.locator(".price-bell-error")).toBeVisible();
+  await bell.click();
+  await expect(page.getByText("通知を取得できませんでした。")).toBeVisible();
+});
