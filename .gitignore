@@ -152,6 +152,7 @@ activemq-data/
 # Environments
 .env
 .env.*
+!.env.local.example
 node_modules/
 .next/
 playwright-report/

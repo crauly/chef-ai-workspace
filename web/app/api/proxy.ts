@@ -1,5 +1,5 @@
 import {NextRequest, NextResponse} from "next/server";
-import {previewAuthorized} from "../../preview-access";
+import {previewAuthorized, sameOrigin} from "../../preview-access";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Action = "" | "/cost" | "/confirm" | "/propose" | "/corrections" | "/full";
 function failure(status: number) {
@@ -9,7 +9,7 @@ function failure(status: number) {
 export async function forward(req: NextRequest, id?: string, action: Action = "") {
   if (!await previewAuthorized(req)) return failure(403);
   if (id !== undefined && !uuid.test(id)) return failure(400);
-  if (req.method === "POST" && req.headers.get("origin") !== req.nextUrl.origin) return failure(403);
+  if (req.method === "POST" && !sameOrigin(req)) return failure(403);
   // Browser tests use only the loopback mock; production never falls back to Render.
   const localMock = process.env.FASTAPI_BASE_URL;
   const api = process.env.CHEF_FASTAPI_INTERNAL_URL ||
