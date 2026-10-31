@@ -34,7 +34,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;queue.current=[];reviewBoundary.current=null;};},[reviewBoundary]);
  const voice=useVoiceCapture(locale,receive,true);
  const realtime=useRealtimeVoiceCapture(locale,receive,{getEpoch:()=>boundary.current});
- const realtimeMode=true; // Single voice input: realtime path. REST hook retained pending backend consolidation.
+ const realtimeMode=Boolean(process.env.NEXT_PUBLIC_DEMO_WS_URL); // One mic UI; realtime when configured, legacy REST transport otherwise.
  const micRecording=realtimeMode?realtime.recording:voice.recording;
  const micBusy=!realtimeMode&&voice.busy;
  const micError=realtimeMode?realtime.error:voice.error;
@@ -97,7 +97,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  }
  // One mic state drives both the panel button and the fixed bottom control,
  // so recording/stop/processing can never disagree between the two.
- const micDisabled=false; // Realtime transport validates microphone support on start.
+ const micDisabled=!realtimeMode&&!voice.recording&&(voice.supported===false||voice.busy);
  function toggleMic(){
   if(micRecording){if(realtimeMode)realtime.stop();else voice.stop();}
   else void (realtimeMode?realtime.start():voice.start());
@@ -187,7 +187,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    <p>現在のモード: <strong>{labels[mode]}</strong>{mode==="edit"&&selected?` — ${selected.title.value}`:""}</p>
    {draftPending&&mode!=="create"&&<p role="status">登録途中の下書きを保持しています。<button type="button" onClick={()=>void (async()=>{await navigate({mode:"create",target:""});if(currentMode.current!=="create")return;registration.current?.requestReview();feedback("保持していた下書きを確認します。");})()}>下書きに戻る</button></p>}
    <p>「レシピを登録します」「〇〇を見せて」「パスタを150gに変更」のように続けて話してください。</p>
-   <button type="button" className="mic-primary" disabled={micDisabled} onClick={toggleMic} aria-pressed={micRecording}>{micRecording?"■ マイクを停止":micError||micNotice?"音声操作を再開":"音声操作を開始"}</button>
+   <button type="button" className="mic-primary" disabled={micDisabled} onClick={toggleMic} aria-pressed={micRecording}>{micRecording?"■ マイクを停止":micError||micNotice?"🎙 音声操作を再開":"🎙 音声操作を開始"}</button>
    <ListeningWave active={micRecording}/>
    <p role="status">{micRecording?"音声受付中":micBusy?"音声受付は一時停止・受信済みの音声を処理中":micError||micNotice?"音声受付は停止中・再開できます":"音声受付は停止中"}</p>
    {micNotice&&<p role="status">{micNotice}</p>}
