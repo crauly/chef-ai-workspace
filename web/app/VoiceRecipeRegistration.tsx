@@ -8,7 +8,8 @@ import {logVoiceEvent} from "./voice-diagnostics";
 
 type Ingredient={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string;supplier:string};
 type Interpretation={source:string;suggestion:string;reason:string};
-type Draft={title:string;materials:Ingredient[];selling_price_jpy:string;notes:string[];missing:string[];interpretations?:Interpretation[]};
+type PriceReference={material_name:string;status:string;ingredient_name?:string;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null;text:string};
+type Draft={title:string;materials:Ingredient[];selling_price_jpy:string;notes:string[];missing:string[];interpretations?:Interpretation[];price_references?:PriceReference[]};
 type Input={text:string;command:VoiceCommand;revision:number;approval:Draft|null;traceId:string};
 export type SaveMode="confirmed"|"unconfirmed";
 // Missing-entry kinds mirror web/app/api/voice-recipe/route.ts. Only a draft
@@ -205,6 +206,14 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    {draft.interpretations?.map((item,index)=><p key={index}>料理の文脈からの解釈案：{item.source} → {item.suggestion}（{item.reason}）</p>)}
    <p>{ja?"売価：":"Selling price: "}{draft.selling_price_jpy?("¥"+draft.selling_price_jpy):(ja?"未設定（売価なしでも保存できます）":"Not set (optional)")}</p>
    <ul>{draft.materials.map((material,index)=>{const priced=Boolean(material.price_jpy&&material.price_quantity&&material.price_unit);return <li key={index}>{material.name||(ja?"食材名不明":"Unnamed ingredient")}: {material.quantity||"?"}{material.unit} ／ {priced?`${ja?"仕入単価":"Purchase price"} ¥${material.price_jpy} / ${material.price_quantity}${material.price_unit}`:(ja?"仕入単価 未確定（推測しません）":"Purchase price unconfirmed (not estimated)")}{material.supplier?` / ${ja?"仕入先":"Supplier"}: ${material.supplier}`:""}</li>;})}</ul>
+   {Boolean(draft.price_references?.length)&&<section className="rounded-xl border border-current/20 p-3" aria-label={ja?"参考価格の調査結果":"Reference price research"}>
+    <h4>{ja?"参考価格（未確定）":"Reference prices (unconfirmed)"}</h4>
+    <ul>{draft.price_references?.map((ref,index)=><li key={`${ref.material_name}-${index}`}>
+     <strong>{ref.material_name}</strong>{ref.ingredient_name&&ref.ingredient_name!==ref.material_name?` — ${ref.ingredient_name}`:""}
+     <p>{ref.text}</p>
+    </li>)}</ul>
+    <p className="muted">{ja?"参考情報です。正式な仕入価格には自動反映しません。実際の価格を確認できた場合は音声で価格・数量・単位を伝えてください。不明な場合は価格未確定として確認できます。":"For reference only; not applied as a confirmed purchase price. To set a known price, dictate its amount, quantity and unit. Otherwise review and save with unconfirmed prices."}</p>
+   </section>}
    {draft.missing.length>0&&<p role="alert">不足情報：{draft.missing.join("、")}</p>}
    {draft.notes.length>0&&<p role="alert">要確認：{draft.notes.join("、")}</p>}
    <p>{phase==="review"?(reviewMode.current==="unconfirmed"?(ja?"確認待ち（価格未確定）：数量は確定、価格は未確定として保存します。よければ明示承認してください。":"Pending review: quantities are confirmed, but purchase prices are unconfirmed. Explicitly approve to save."):(ja?"確認待ち：内容が正しければ、保存を明示承認してください。":"Pending review: explicitly approve saving if the details are correct.")):(ja?"まだ保存されていません。":"Not saved yet.")}</p>
