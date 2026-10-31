@@ -231,3 +231,23 @@ test("transcription failures are classified: timeout vs upstream vs invalid", as
     expect((error as TranscriptionErrorType).kind).toBe("invalid");
   }
 });
+
+test("a stalled response body stays a timeout; a broken body stays upstream", async () => {
+  const {TranscriptionError} = await import("../app/voice-transcription");
+  type TranscriptionErrorType = InstanceType<typeof TranscriptionError>;
+  const stall = () => new Response(new ReadableStream({}), {status: 200});
+  try {
+    await transcribeWav(wav(), "ja", "fixture", async () => stall(), 50);
+    throw new Error("should have thrown");
+  } catch (error) {
+    expect(error).toBeInstanceOf(TranscriptionError);
+    expect((error as TranscriptionErrorType).kind).toBe("timeout");
+  }
+  const broken = () => new Response(new ReadableStream({start(c) {c.error(new TypeError("network"));}}), {status: 200});
+  try {
+    await transcribeWav(wav(), "ja", "fixture", async () => broken());
+    throw new Error("should have thrown");
+  } catch (error) {
+    expect((error as TranscriptionErrorType).kind).toBe("upstream");
+  }
+});

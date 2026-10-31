@@ -2,6 +2,7 @@
 import {useEffect, useRef, useState} from "react";
 import type {Locale} from "./i18n";
 import {logVoiceEvent} from "./voice-diagnostics";
+import {VoiceBacklog, audioSeconds} from "./voice-backlog";
 
 // One microphone across all entry points. Never run overlapping voice sessions.
 // Both the REST batch hook and the realtime hook arbitrate through these
@@ -41,6 +42,10 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
   const [recording, setRecording] = useState(false), [busy, setBusy] = useState(false);
   const [supported, setSupported] = useState<boolean | null>(null), [error, setError] = useState("");
   const [notice,setNotice]=useState("");
+  // Monotonic failure counter: identical messages from distinct fragments must
+  // each raise an audible cue, so the UI keys announcements on tick, not text.
+  const [errorTick,setErrorTick]=useState(0);
+  function fail(message:string){if(mounted.current){setError(message);setErrorTick(tick=>tick+1);}}
   const callback = useRef(onTranscript); callback.current = onTranscript;
   const controls = useRef<{stop: () => void; abort: () => void; markReview: (epoch:number) => void} | null>(null);
   const reviewEpoch = useRef(0);
@@ -64,11 +69,15 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
     let frames: Float32Array[] = [], samples = 0, silent = 0, voiced = false;
     let speechReviewEpoch = 0;
     let pending = Promise.resolve(), requests = 0, closed = false;
-    // Accepted audio waiting for a free transcription slot. Bounded so a
-    // slow network cannot grow memory without bound; oldest spills first.
-    let backlog: {frames: Float32Array[]; rate: number; review: number}[] = [];
-    let backlogSamples = 0;
-    const BACKLOG_MAX_SAMPLES = 24_000 * 60;
+    // Accepted audio waiting for a free transcription slot. Ordered FIFO and
+    // bounded to 60 buffered seconds at the captured sample rate, so a slow
+    // network cannot grow memory without bound; oldest spills first.
+    // Unit-tested in tests/voice-backlog.spec.ts.
+    const backlog = new VoiceBacklog<{frames: Float32Array[]; rate: number; review: number}>(
+      60, 3,
+      entry => runBatch(entry.frames, entry.rate, entry.review),
+      () => logVoiceEvent("capture.backlog.drop", "oldest buffered utterance spilled"));
+    let flushing = false;
     const aborter = new AbortController();
     const cleanup = () => {
       if(closed)return;
@@ -83,11 +92,10 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
       yieldMicrophone(abort);
       if (mounted.current) {setRecording(false); setBusy(false);}
     };
-    const batchSamples = (batch: Float32Array[]) => batch.reduce((n, frame) => n + frame.length, 0);
     const refreshBacklogNotice = () => {
       if (!mounted.current) return;
-      if (backlog.length)
-        setNotice(locale === "ja" ? `受信済みの音声${backlog.length}件を順に文字にしています。話し続けられます。下書きは保持しています。` : `Transcribing ${backlog.length} buffered utterance(s). Keep talking; the draft is retained.`);
+      if (backlog.depth)
+        setNotice(locale === "ja" ? `受信済みの音声${backlog.depth}件を順に文字にしています。話し続けられます。下書きは保持しています。` : `Transcribing ${backlog.depth} buffered utterance(s). Keep talking; the draft is retained.`);
       else setNotice("");
     };
     const runBatch = (batch: Float32Array[], rate: number, capturedReview: number) => {
@@ -120,7 +128,7 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
           // microphone already closed. Otherwise recording continues and
           // only the failed fragment needs repeating.
           const stopped = closed;
-          setError(locale === "ja"
+          fail(locale === "ja"
             ? (stopped ? "一部の音声を文字にできませんでした。受信済みの音声の処理は続けます。下書きは保持しています。"
               : timedOut ? "文字起こしが時間切れになりましたが、受付は続けています。最後の部分をもう一度話してください。下書きは保持しています。"
               : "一部の音声を文字にできませんでしたが、受付は続けています。話し続けられます。下書きは保持しています。")
@@ -135,35 +143,30 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
         pumpBacklog();
       });
     };
+    // Strict FIFO: new batches queue behind buffered audio and slots are
+    // refilled in capture order, so corrections never overtake their context.
+    // After a user stop (flushing), accepted audio keeps draining in order.
     const pumpBacklog = () => {
-      if (!valid() || closed || requests >= 2) return;
-      const next = backlog.shift();
-      if (!next) {refreshBacklogNotice(); return;}
-      backlogSamples -= batchSamples(next.frames);
-      runBatch(next.frames, next.rate, next.review);
+      if (!valid() || (closed && !flushing)) return;
+      backlog.pump(requests);
       refreshBacklogNotice();
     };
     const submit = () => {
       if (!voiced || !frames.length || !context) {frames = []; samples = 0; silent = 0; voiced = false; return;}
       const batch = frames, rate = context.sampleRate, capturedReview = speechReviewEpoch;
       frames = []; samples = 0; silent = 0; voiced = false;
-      if (requests >= 3) {
-        // Buffer instead of pausing capture: the mic stays open and buffered
-        // utterances transcribe automatically as slots free up.
-        backlog.push({frames: batch, rate, review: capturedReview});
-        backlogSamples += batchSamples(batch);
-        while (backlogSamples > BACKLOG_MAX_SAMPLES && backlog.length) {
-          const dropped = backlog.shift()!;
-          backlogSamples -= batchSamples(dropped.frames);
-          logVoiceEvent("capture.backlog.drop", "oldest buffered utterance spilled");
-        }
-        logVoiceEvent("capture.backlog", `${backlog.length} buffered`);
+      // Buffer instead of pausing capture: the mic stays open and buffered
+      // utterances transcribe in capture order as slots free up.
+      if (backlog.depth || requests >= 3) {
+        backlog.submit({frames: batch, rate, review: capturedReview}, audioSeconds(batch, rate));
+        logVoiceEvent("capture.backlog", `${backlog.depth} buffered`);
         refreshBacklogNotice();
+        pumpBacklog();
         return;
       }
       runBatch(batch, rate, capturedReview);
     };
-    controls.current = {abort: () => { logVoiceEvent("capture.stop", "cancel"); abort(); }, markReview:epoch=>node?.port.postMessage({type:"review",epoch}), stop: () => { if (!closed && valid()) logVoiceEvent("capture.stop", requests || backlog.length ? "user stop; accepted audio continues" : "user stop"); if (!closed) {submit(); while (backlog.length && valid()) {const next = backlog.shift()!; backlogSamples -= batchSamples(next.frames); runBatch(next.frames, next.rate, next.review);} refreshBacklogNotice(); cleanup();} if (!requests) controls.current = null; }};
+    controls.current = {abort: () => { logVoiceEvent("capture.stop", "cancel"); abort(); }, markReview:epoch=>node?.port.postMessage({type:"review",epoch}), stop: () => { if (!closed && valid()) logVoiceEvent("capture.stop", requests || backlog.depth ? "user stop; accepted audio continues" : "user stop"); if (!closed) {submit(); flushing = true; pumpBacklog(); refreshBacklogNotice(); cleanup();} if (!requests) controls.current = null; }};
     takeMicrophone(abort);
     setError("");setNotice(""); setRecording(true);
     logVoiceEvent("capture.start", continuous ? "shared microphone" : "local microphone");
@@ -190,11 +193,11 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
         }
       };
       stream.getTracks().forEach(track => {track.onended = () => {if (!closed && valid()) {logVoiceEvent("capture.disconnect", "microphone track ended");
-          controls.current?.stop();setError(locale === "ja" ? "マイクが切断されました。受信済みの音声の処理後に再開してください。" : "Microphone disconnected. Resume after accepted audio finishes.");}};});
+          controls.current?.stop();fail(locale === "ja" ? "マイクが切断されました。受信済みの音声の処理後に再開してください。" : "Microphone disconnected. Resume after accepted audio finishes.");}};});
     } catch {
       logVoiceEvent("capture.error", "getUserMedia failed");
-      if (valid()) {abort(); setError(locale === "ja" ? "マイクを開始できません。権限と対応ブラウザを確認してください。" : "Could not start microphone. Check permission and browser support.");}
+      if (valid()) {abort(); fail(locale === "ja" ? "マイクを開始できません。権限と対応ブラウザを確認してください。" : "Could not start microphone. Check permission and browser support.");}
     }
   }
-  return {recording, busy, supported, error,notice, start, stop, cancel, markReview};
+  return {recording, busy, supported, error,errorTick,notice, start, stop, cancel, markReview};
 }

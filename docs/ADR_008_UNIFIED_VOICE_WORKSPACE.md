@@ -143,3 +143,32 @@ The opt-in complaint test now plays six Japanese synthetic WAV fixtures (`dish`,
 `recipe`, `review`, `save`, `browse`, `edit`) through a single microphone session
 and actual Voice/Spark APIs, with a fresh dedicated database owner and verified
 cleanup. Test results and their limits are recorded in the acceptance document.
+
+## Addendum (PR #69 review): save boundary, FIFO backlog, absolute turns
+
+- Spoken purchase sources (`supplier`) are draft/review-only facts. Recipe
+  lines have no supplier column and `CompleteRecipeMaterial` forbids extras,
+  so every save mode projects materials through the save boundary (unknown
+  prices nulled, supplier omitted) instead of failing 422. The review still
+  shows the supplier and the save message hands it back as a memo.
+- Formal supplier linkage reuses the existing ledger path, never an automatic
+  write: `POST /recipes/{id}/ingredient-assist` links a material to an
+  ingredient, `POST /offers/{id}/observations` records a purchase price, and
+  `POST /observations/{id}/confirm` adopts it behind the Human Gate
+  (owner-scoped, CAS, idempotent). Persisting supplier text onto recipe lines
+  would need a new migration plus a `CompleteRecipeMaterial` field and is
+  recorded as follow-up, not implemented here.
+- Accepted-audio ordering is strict FIFO (`web/app/voice-backlog.ts`, the
+  single queue implementation): new batches queue behind buffered audio, slots
+  refill in capture order, and a user stop flushes accepted audio in order
+  without an unbounded synchronous burst. Capacity is 60 buffered seconds
+  measured at each batch's own sample rate. Unit tests live in
+  `web/tests/voice-backlog.spec.ts`.
+- Parse history is absolute: the turn cursor indexes the uncapped history so
+  incremental parsing (`{turns: fresh, previous: draft}`) stays active past
+  30 turns; only the on-screen transcript is capped. Covered by the
+  thirty-turn test in `web/tests/voice-unconfirmed.spec.ts`.
+- Body-read stalls keep the `timeout` classification and mid-body network
+  breaks stay `upstream` (`readBody` budget in `voice-transcription.ts`).
+- Audible failure cues are keyed by failure event (per-hook tick), so repeated
+  identical messages each announce once, with no double cue on stop.

@@ -32,10 +32,13 @@ export function priceMissingNames(draft:Draft):string[]{
  });
  return [...names];
 }
-// Unconfirmed saves omit unknown prices so the backend stores unpriced lines
-// (partial cost, explicit unresolved IDs) instead of zero-filled guesses.
-// Empty quantity/unit also becomes null; the eligibility recheck in save()
-// keeps such drafts blocked, so this never silently widens the gate.
+// Save boundary: recipe lines carry no supplier column and
+// CompleteRecipeMaterial forbids extras, so every save mode projects drafts
+// through toSaveMaterials (prices nulled when unknown, supplier omitted).
+// The spoken purchase source stays visible in review and is handed to the
+// chef as a memo; formal supplier linkage uses the existing ledger path
+// (ingredient-assist -> offer observations -> observations/confirm, all
+// Human-Gate approved), never an automatic write.
 export function toSaveMaterials(draft:Draft){
  return draft.materials.map(m=>({name:m.name,
   quantity:m.quantity||null,unit:m.unit||null,
@@ -44,7 +47,7 @@ export function toSaveMaterials(draft:Draft){
 }
 
 export type RegistrationHandle={submit:(text:string,meta?:VoiceCaptureMeta)=>void;hasPending:()=>boolean;isSaving:()=>boolean;suspend:()=>void;requestReview:()=>void};
-export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,control,sharedVoice}:{locale:Locale;onCreated:(recipe:Recipe,mode:SaveMode)=>void;onDiscarded?:()=>void;control?:Ref<RegistrationHandle>;sharedVoice?:{markReview:()=>number;cancel:()=>void;captureMessage:string}}){
+export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,control,sharedVoice}:{locale:Locale;onCreated:(recipe:Recipe,mode:SaveMode,suppliers:string[])=>void;onDiscarded?:()=>void;control?:Ref<RegistrationHandle>;sharedVoice?:{markReview:()=>number;cancel:()=>void;captureMessage:string}}){
  const ja=locale==="ja";
  const [busy,setBusy]=useState(false),[turns,setTurns]=useState<string[]>([]),[draft,setDraft]=useState<Draft|null>(null);
  const [phase,setPhase]=useState<"dictating"|"review"|"saving">("dictating");
@@ -120,11 +123,14 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   voice.cancel();setStage("saving");if(!draining.current)setBusy(true);say("承認された内容を保存しています…");
   if(!requestId.current)requestId.current=crypto.randomUUID();
   try{
-   const recipe=await request<Recipe>("/api/recipes/full",{method:"POST",body:JSON.stringify({request_id:requestId.current,title:d.title,materials:mode==="confirmed"?d.materials:toSaveMaterials(d),selling_price_jpy:d.selling_price_jpy||null})});
+   const recipe=await request<Recipe>("/api/recipes/full",{method:"POST",body:JSON.stringify({request_id:requestId.current,title:d.title,materials:toSaveMaterials(d),selling_price_jpy:d.selling_price_jpy||null})});
    if(!alive.current)return;
    epoch.current++;revision.current++;inbox.current=[];
    dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);requestId.current=null;setStage("dictating");
-   say(mode==="confirmed"?(sharedVoice?"保存済みです。":"レシピを保存しました。"):"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。");onCreated(recipe,mode);
+   // Spoken purchase sources travel with the save callback: the workspace
+   // announces them after its browse transition (this panel hides then).
+   const suppliers=[...new Set(d.materials.map(m=>(m.supplier||"").trim()).filter(Boolean))];
+   say(mode==="confirmed"?(sharedVoice?"保存済みです。":"レシピを保存しました。"):"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。");onCreated(recipe,mode,suppliers);
   }catch{setStage("review");say("保存結果を確認できませんでした。再送時も同じ登録IDを使います。一覧を確認してから再試行してください。");}
   finally{if(alive.current&&!draining.current)setBusy(false);}
  }
@@ -135,7 +141,10 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     const input=inbox.current.shift()!;
     if(input.command==="data"){
      const batch=[input];while(inbox.current[0]?.command==="data")batch.push(inbox.current.shift()!);
-     dataTurns.current=[...dataTurns.current,...batch.map(item=>item.text)].slice(-30);
+     // Parse history is absolute: parsedTurns indexes this uncapped array,
+     // so turns past #30 keep their context and incremental parsing resumes.
+     // Only the on-screen transcript is capped (see enqueue).
+     dataTurns.current=[...dataTurns.current,...batch.map(item=>item.text)];
      await parse(dataTurns.current,batch[batch.length-1].revision,batch[batch.length-1].traceId);
     }else if(input.revision===revision.current){
      if(input.command==="review")showReview(input.traceId);
