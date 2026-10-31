@@ -10,7 +10,7 @@ Structured Output for intent classification and recipe structuring, without
 changing the voice harness, draft, approval, or save contracts.
 
 ## Decision
-- SSOT: `web/muse-schemas.ts` (`INTENT_SCHEMA`, `VOICE_RECIPE_SCHEMA`,
+- SSOT: `web/muse-schemas.ts` (`INTENT_SCHEMA`, `VOICE_RECIPE_SCHEMA` incl. optional-on-the-wire `price_research` for explicit ledger-grounded price research),
   `chatResponseFormat()`). Schemas mirror the app-side validators in
   `web/app/api/intent/route.ts` and `web/app/api/voice-recipe/route.ts`.
 - Chat Completions (`/v1/chat/completions`) sends
@@ -68,5 +68,6 @@ longer singles out any cuisine in dish-title normalization examples.
   Human Gate behavior (reviewEpoch/approvalEpoch, explicit confirm).
 - Responses propose/axis paths unchanged until a live `text.format`
   acceptance is recorded; that acceptance must update this ADR first.
+- Price research signal: `price_research: [{material_name, request}]` records the chef's explicit request only; the route resolves it against the owned ledger (`GET /demo/price-reference`, read-only) and reports back in `notes`. Prices stay empty (missing path); enrichment failure never fails the draft. No web retrieval exists, so model-knowledge prices stay forbidden.
 - Tests: `web/tests/structured-output.spec.ts` (fixture, no key),
   `tests/test_structured_output_contract.py` (contract pin).

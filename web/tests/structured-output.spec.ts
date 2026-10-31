@@ -20,7 +20,7 @@ test("SSOT schemas mirror app-side validators and use strict JSON Schema", () =>
   expect([...INTENT_SCHEMA.required].sort()).toEqual(["intent", "target"]);
   expect(INTENT_SCHEMA.properties.intent.enum).toEqual(["create", "browse", "edit", "clarify"]);
   expect([...VOICE_RECIPE_SCHEMA.required].sort()).toEqual(
-    ["interpretations", "materials", "notes", "selling_price_jpy", "title"]);
+    ["interpretations", "materials", "notes", "price_research", "selling_price_jpy", "title"]);
   const fmt = chatResponseFormat("chef_intent", INTENT_SCHEMA) as {
     type: string; json_schema: {name: string; strict: boolean; schema: unknown}};
   expect(fmt.type).toBe("json_schema");
@@ -211,5 +211,64 @@ test("supplier is extracted without guessing; revision reuses the previous draft
     global.fetch = previousFetch;
     if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
     if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
+  }
+});
+
+test("explicit price research resolves against the owned ledger, never model knowledge", async () => {
+  const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
+  const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
+  process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
+  process.env.FASTAPI_BASE_URL = "http://127.0.0.1:8100"; process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
+  const previousFetch = global.fetch;
+  try {
+    const recipe = {title: "テスト", materials: [{name: "豚バラ肉", quantity: "100", unit: "g",
+      price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+      selling_price_jpy: "", notes: [], interpretations: [],
+      price_research: [{material_name: "豚バラ肉", request: "だいたいの相場で入れて"}]};
+    global.fetch = (async (url: unknown) => {
+      if (String(url).includes("/demo/price-reference"))
+        return Response.json({query: "豚バラ肉", candidates: [{ingredient_id: "ing-1",
+          ingredient_name: "豚バラ肉", reference: {available: true, currency: "JPY",
+            unit_basis: "g", average_unit_price: "0.7700", observation_count: 2,
+            observed_to: "2026-10-28", method: "average of 2 comparable observations"},
+          observations: []}]});
+      return Response.json({choices: [{finish_reason: "stop",
+        message: {content: JSON.stringify(recipe)}}]});
+    }) as typeof fetch;
+    const ok = await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["豚バラ肉100g、だいたいの相場で入れて"]}));
+    expect(ok.status).toBe(200);
+    const body = await ok.json();
+    // Reference reported in notes with provenance; price fields stay empty.
+    expect(body.notes.join("")).toContain("参考価格");
+    expect(body.notes.join("")).toContain("平均");
+    expect(body.materials[0].price_jpy).toBe("");
+    expect(body.missing.join("")).toContain("仕入単価");
+    // Backend failure still returns the draft with a no-reference note.
+    global.fetch = (async (url: unknown) => {
+      if (String(url).includes("/demo/price-reference"))
+        return Response.json({}, {status: 503});
+      return Response.json({choices: [{finish_reason: "stop",
+        message: {content: JSON.stringify(recipe)}}]});
+    }) as typeof fetch;
+    const degraded = await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["豚バラ肉100g、だいたいの相場で入れて"]}));
+    expect(degraded.status).toBe(200);
+    expect((await degraded.json()).notes.join("")).toContain("参考価格なし");
+    // Malformed research entry (extra key) fails closed.
+    global.fetch = (async (url: unknown) => {
+      if (String(url).includes("/demo/price-reference"))
+        return Response.json({query: "x", candidates: []});
+      return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
+        ...recipe, price_research: [{material_name: "豚バラ肉", request: "相場", approved: true}]})}}]});
+    }) as typeof fetch;
+    expect((await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["豚バラ肉100g、相場で"]})) ).status).toBe(502);
+  } finally {
+    global.fetch = previousFetch;
+    if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
+    if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
+    if (base === undefined) delete process.env.FASTAPI_BASE_URL; else process.env.FASTAPI_BASE_URL = base;
+    if (token === undefined) delete process.env.DEMO_ACCESS_TOKEN; else process.env.DEMO_ACCESS_TOKEN = token;
   }
 });
