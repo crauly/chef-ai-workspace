@@ -35,12 +35,21 @@ changing the voice harness, draft, approval, or save contracts.
   A 256-token budget truncated under reasoning load (`length`); 2048
   (production value) succeeds.
 - `VOICE_RECIPE_SCHEMA` verbatim shape: accepted, `stop`, top-level keys,
-  nested `materials` (6 string fields) and `interpretations` verified.
+  nested `materials` (6 string fields), `interpretations`, and key values
+  (quantity 100 vs price_quantity 500) verified against the live response.
+  Scope note: the live probe asserts structure and key values only; it does
+  NOT execute the real app-side `parse()` (TypeScript). `parse()` equivalence
+  rests on the shared shape gate, covered by the fixture spec
+  (`web/tests/structured-output.spec.ts`) which runs `parse()` directly, plus
+  the offline parity test below that pins the probe schema to the SSOT.
   First probe returned unit `"grams"`: the minimal probe prompt lacked the
   production "Allowed units" constraint, and the app-side value gate
   (missing[], never silent accept) is the designed backstop. With the
-  production constraint mirrored, units conform and package-vs-use
-  (quantity 100 vs price_quantity 500) is preserved.
+  production constraint mirrored, units conform.
+- `tests/test_structured_output_contract.py::SchemaParityTests` (offline,
+  always runs) pins the probe's Python mirror to `web/muse-schemas.ts`
+  (required-sets, property names, `additionalProperties: false` count,
+  intent enum), so the live test cannot pass against a stale schema.
 - No DB write, no approval, no persistence in either probe.
 
 ## Language policy (voice-recipe prompt)

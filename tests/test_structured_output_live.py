@@ -10,6 +10,37 @@ import unittest
 import urllib.request
 
 
+VOICE_RECIPE_SCHEMA_PY = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "materials": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "quantity": {"type": "string"},
+                "unit": {"type": "string"},
+                "price_jpy": {"type": "string"},
+                "price_quantity": {"type": "string"},
+                "price_unit": {"type": "string"}},
+            "required": ["name", "quantity", "unit", "price_jpy",
+                         "price_quantity", "price_unit"],
+            "additionalProperties": False}},
+        "selling_price_jpy": {"type": "string"},
+        "notes": {"type": "array", "items": {"type": "string"}},
+        "interpretations": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string"},
+                "suggestion": {"type": "string"},
+                "reason": {"type": "string"}},
+            "required": ["source", "suggestion", "reason"],
+            "additionalProperties": False}}},
+    "required": ["title", "materials", "selling_price_jpy",
+                 "notes", "interpretations"],
+    "additionalProperties": False}
+
+
 @unittest.skipUnless(os.environ.get("CHEF_LIVE_STRUCTURED") == "1",
                      "Opt-in live Structured Output acceptance")
 class LiveStructuredOutputTests(unittest.TestCase):
@@ -50,35 +81,8 @@ class LiveStructuredOutputTests(unittest.TestCase):
 
     def test_voice_recipe_schema_accepted_with_nested_structure(self):
         """VOICE_RECIPE_SCHEMA itself against Muse Spark 1.3. Read-only."""
-        schema = {
-            "type": "object",
-            "properties": {
-                "title": {"type": "string"},
-                "materials": {"type": "array", "items": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string"},
-                        "quantity": {"type": "string"},
-                        "unit": {"type": "string"},
-                        "price_jpy": {"type": "string"},
-                        "price_quantity": {"type": "string"},
-                        "price_unit": {"type": "string"}},
-                    "required": ["name", "quantity", "unit", "price_jpy",
-                                 "price_quantity", "price_unit"],
-                    "additionalProperties": False}},
-                "selling_price_jpy": {"type": "string"},
-                "notes": {"type": "array", "items": {"type": "string"}},
-                "interpretations": {"type": "array", "items": {
-                    "type": "object",
-                    "properties": {
-                        "source": {"type": "string"},
-                        "suggestion": {"type": "string"},
-                        "reason": {"type": "string"}},
-                    "required": ["source", "suggestion", "reason"],
-                    "additionalProperties": False}}},
-            "required": ["title", "materials", "selling_price_jpy",
-                         "notes", "interpretations"],
-            "additionalProperties": False}
+        schema = VOICE_RECIPE_SCHEMA_PY
+
         raw = self.post({
             "model": "muse-spark-1.3", "reasoning_effort": "low",
             "max_completion_tokens": 8192,
@@ -96,7 +100,9 @@ class LiveStructuredOutputTests(unittest.TestCase):
         choice = raw["choices"][0]
         self.assertEqual(choice.get("finish_reason"), "stop")
         parsed = json.loads(choice["message"]["content"])
-        # Same shape gate as web/app/api/voice-recipe parse().
+        # Structural assertions mirror the key-set gate of
+        # web/app/api/voice-recipe parse(); parse() itself runs in the
+        # fixture spec, not in this live probe.
         self.assertEqual(set(parsed),
                          {"title", "materials", "selling_price_jpy",
                           "notes", "interpretations"})

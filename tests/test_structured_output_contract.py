@@ -10,6 +10,7 @@ adapter must not send unconfirmed structured-output parameters. Instructions
 plus strict local parse_response remain the contract there.
 """
 import json
+import os
 import unittest
 
 from chef_ai_workspace import meta_responses
@@ -60,3 +61,46 @@ class StructuredOutputContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SchemaParityTests(unittest.TestCase):
+    """Offline guard: the live probe's Python mirror must equal the SSOT.
+
+    Prevents the live test from passing against a stale, diverging schema.
+    No network, no key, always runs.
+    """
+    TS_PATH = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "web", "muse-schemas.ts")
+
+    def _object_schemas(self, schema):
+        found = [schema]
+        for prop in schema.get("properties", {}).values():
+            items = prop.get("items")
+            if isinstance(items, dict) and items.get("type") == "object":
+                found.append(items)
+        return found
+
+    def test_python_mirror_matches_ts_ssot(self):
+        import re
+        try:
+            import test_structured_output_live as live
+        except ModuleNotFoundError:  # package-style invocation
+            from tests import test_structured_output_live as live
+        mirror = live.VOICE_RECIPE_SCHEMA_PY
+        # The live probe sends exactly this object as JSON.
+        json.dumps(mirror)
+        text = open(self.TS_PATH, encoding="utf-8").read()
+        ts_required = [set(re.findall(r'"([^"]+)"', m)) for m in
+                       re.findall(r"required:\s*\[([^\]]*)\]", text)]
+        py_required = [set(s["required"]) for s in
+                       self._object_schemas(mirror)]
+        self.assertEqual(sorted(map(sorted, ts_required)),
+                         sorted([["intent", "target"]] +
+                                list(map(sorted, py_required))))
+        for obj in self._object_schemas(mirror):
+            for key in obj["properties"]:
+                self.assertIn('"%s"' % key, text)
+            self.assertFalse(obj.get("additionalProperties", True))
+        self.assertEqual(text.count("additionalProperties: false"), 4)
+        for value in ("create", "browse", "edit", "clarify"):
+            self.assertIn('"%s"' % value, text)
