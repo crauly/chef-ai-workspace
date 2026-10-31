@@ -180,35 +180,35 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   });
  }
  const eligible=draftRef.current?saveModeFor(draftRef.current):null;
- return <section className="card" aria-label="音声レシピ一括登録">
+ return <section className="card" aria-label={ja?"音声レシピ一括登録":"Voice recipe registration"}>
   <h2>{ja?"音声でレシピを一括登録":"Full recipe by voice"}</h2>
-  <p>料理名、食材、分量、仕入単価、売価を自然な言葉で伝えてください。料理の文脈を解釈し、変更案を下書きで確認できます。</p>
-  <p>「内容を確認」「保存してください」などで確認へ進みます。確認後、もう一度の明示承認で保存します。キャンセルは下書きを破棄します。</p>
-  <p>仕入単価だけが不明でも、確認後に価格未確定として保存できます（推測・ゼロ埋めしません）。確定保存と未確定保存は確認画面で区別されます。</p>
+  <p>{ja?"料理名、食材、分量、仕入単価、売価を自然な言葉で伝えてください。料理の文脈を解釈し、変更案を下書きで確認できます。":"Describe the dish, ingredients, quantities, purchase prices and selling price naturally. Review the interpreted recipe as a draft."}</p>
+  <p>{ja?"「内容を確認」「保存してください」などで確認へ進みます。確認後、もう一度の明示承認で保存します。キャンセルは下書きを破棄します。":"Ask to review the draft before saving. An explicit approval is required to save; discarding removes the draft."}</p>
+  <p>{ja?"仕入単価だけが不明でも、確認後に価格未確定として保存できます（推測・ゼロ埋めしません）。確定保存と未確定保存は確認画面で区別されます。":"If only purchase prices are missing, you may approve saving with unconfirmed prices. Missing prices are never guessed or set to zero."}</p>
   <p>{ja?"音声はMetaへ送信して文字起こしします。録音は保存しません。発話の間を約1秒空けると解釈します。":"Audio is sent to Meta and not stored. Pause for about one second between turns."}</p>
-  {!sharedVoice&&<><button type="button" disabled={!voice.recording&&(voice.supported===false||voice.busy||phase==="saving")} onClick={voice.recording?voice.stop:()=>void voice.start()} aria-pressed={voice.recording}>{voice.recording?"■ マイクを停止":"🎙 音声操作を開始"}</button>
+  {!sharedVoice&&<><button type="button" disabled={!voice.recording&&(voice.supported===false||voice.busy||phase==="saving")} onClick={voice.recording?voice.stop:()=>void voice.start()} aria-pressed={voice.recording}>{voice.recording?(ja?"■ マイクを停止":"■ Stop microphone"):(ja?"🎙 音声操作を開始":"🎙 Start voice control")}</button>
   <p aria-live="polite">{voice.recording?"聞き取り中… ":""}{voice.busy?"音声を文字にしています…":""}</p>
   {voice.error&&<p role="alert">{voice.error}</p>}
-  {voice.supported===false&&<p>音声入力を利用できません。補助入力を使用してください。</p>}</>}
+  {voice.supported===false&&<p>{ja?"音声入力を利用できません。補助入力を使用してください。":"Voice input is unavailable. Use manual input."}</p>}</>}
   <p aria-live="polite">{busy?"処理中：":""}{message}</p>
   {!sharedVoice&&<form onSubmit={event=>{event.preventDefault();if(manual.trim()){enqueue(manual);setManual("");}}}>
-   <input aria-label="音声認識できない場合の入力" value={manual} onChange={event=>setManual(event.target.value)} placeholder="音声認識できないときの補助入力" disabled={phase==="saving"}/>
-   <button type="submit" disabled={!manual.trim()||phase==="saving"}>反映</button>
+   <input aria-label={ja?"音声認識できない場合の入力":"Manual input when voice recognition is unavailable"} value={manual} onChange={event=>setManual(event.target.value)} placeholder={ja?"音声認識できないときの補助入力":"Type when voice recognition is unavailable"} disabled={phase==="saving"}/>
+   <button type="submit" disabled={!manual.trim()||phase==="saving"}>{ja?"反映":"Apply"}</button>
   </form>}
-  <button type="button" disabled={busy||!dataTurns.current.length||phase==="saving"} onClick={retry}>解析を再試行</button>
-  <div><p>認識した発話（{turns.length}件・新しい順）：{turns.length?"":"なし"}</p>{turns.length>0&&<ol aria-label="認識した発話の一覧">{[...turns].reverse().map((turn,index)=><li key={`${turns.length-index}`}>{turn}</li>)}</ol>}</div>
+  <button type="button" disabled={busy||!dataTurns.current.length||phase==="saving"} onClick={retry}>{ja?"解析を再試行":"Retry analysis"}</button>
+  <div><p>{ja?"認識した発話（":"Recognized turns ("}{turns.length}{ja?"件・新しい順）：":"; newest first): "}{turns.length?"":ja?"なし":"None"}</p>{turns.length>0&&<ol aria-label={ja?"認識した発話の一覧":"Recognized utterances"}>{[...turns].reverse().map((turn,index)=><li key={`${turns.length-index}`}>{turn}</li>)}</ol>}</div>
   {draft&&<div id="draft" aria-label="未保存のレシピ下書き">
-   <h3>未保存の下書き：{draft.title||"料理名未設定"}</h3>
+   <h3>{ja?"未保存の下書き：":"Unsaved draft: "}{draft.title||(ja?"料理名未設定":"Untitled recipe")}</h3>
    {draft.interpretations?.map((item,index)=><p key={index}>料理の文脈からの解釈案：{item.source} → {item.suggestion}（{item.reason}）</p>)}
-   <p>売価：{draft.selling_price_jpy?("¥"+draft.selling_price_jpy):"未設定（売価なしでも保存できます）"}</p>
-   <ul>{draft.materials.map((material,index)=>{const priced=Boolean(material.price_jpy&&material.price_quantity&&material.price_unit);return <li key={index}>{material.name||"食材名不明"}：{material.quantity||"?"}{material.unit} ／ {priced?`仕入単価 ¥${material.price_jpy} / ${material.price_quantity}${material.price_unit}`:"仕入単価 未確定（推測しません）"}{material.supplier?` ／ 仕入先：${material.supplier}`:""}</li>;})}</ul>
+   <p>{ja?"売価：":"Selling price: "}{draft.selling_price_jpy?("¥"+draft.selling_price_jpy):(ja?"未設定（売価なしでも保存できます）":"Not set (optional)")}</p>
+   <ul>{draft.materials.map((material,index)=>{const priced=Boolean(material.price_jpy&&material.price_quantity&&material.price_unit);return <li key={index}>{material.name||(ja?"食材名不明":"Unnamed ingredient")}: {material.quantity||"?"}{material.unit} ／ {priced?`${ja?"仕入単価":"Purchase price"} ¥${material.price_jpy} / ${material.price_quantity}${material.price_unit}`:(ja?"仕入単価 未確定（推測しません）":"Purchase price unconfirmed (not estimated)")}{material.supplier?` / ${ja?"仕入先":"Supplier"}: ${material.supplier}`:""}</li>;})}</ul>
    {draft.missing.length>0&&<p role="alert">不足情報：{draft.missing.join("、")}</p>}
    {draft.notes.length>0&&<p role="alert">要確認：{draft.notes.join("、")}</p>}
-   <p>{phase==="review"?(reviewMode.current==="unconfirmed"?"確認待ち（価格未確定）：数量は確定、価格は未確定として保存します。よければ明示承認してください。":"確認待ち：内容が正しければ、保存を明示承認してください。"):"まだ保存されていません。"}</p>
+   <p>{phase==="review"?(reviewMode.current==="unconfirmed"?(ja?"確認待ち（価格未確定）：数量は確定、価格は未確定として保存します。よければ明示承認してください。":"Pending review: quantities are confirmed, but purchase prices are unconfirmed. Explicitly approve to save."):(ja?"確認待ち：内容が正しければ、保存を明示承認してください。":"Pending review: explicitly approve saving if the details are correct.")):(ja?"まだ保存されていません。":"Not saved yet.")}</p>
    {sharedVoice&&<><p role="status">{sharedVoice.captureMessage}</p><a href="#voice-controls">音声操作・再開へ戻る</a></>}
-   <button type="button" disabled={busy||!eligible||phase==="saving"} onClick={()=>showReview()}>内容を確認</button>
-   <button type="button" disabled={busy||phase!=="review"||!eligible} onClick={()=>void save()}>{phase==="review"&&reviewMode.current==="unconfirmed"?"価格未確定として承認して保存":"内容を承認して保存"}</button>
-   <button type="button" disabled={phase==="saving"} onClick={clear}>下書きを破棄</button>
+   <button type="button" disabled={busy||!eligible||phase==="saving"} onClick={()=>showReview()}>{ja?"内容を確認":"Review draft"}</button>
+   <button type="button" disabled={busy||phase!=="review"||!eligible} onClick={()=>void save()}>{phase==="review"&&reviewMode.current==="unconfirmed"?(ja?"価格未確定として承認して保存":"Approve & save with unconfirmed prices"):(ja?"内容を承認して保存":"Approve & save")}</button>
+   <button type="button" disabled={phase==="saving"} onClick={clear}>{ja?"下書きを破棄":"Discard draft"}</button>
   </div>}
  </section>;
 }
