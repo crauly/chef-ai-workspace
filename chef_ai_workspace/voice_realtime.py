@@ -12,10 +12,13 @@ approval path.
 """
 from __future__ import annotations
 
+import hashlib as _hashlib
 import json
 import secrets
 import time
 from dataclasses import dataclass, field
+from datetime import datetime as _datetime
+from datetime import timezone as _timezone
 
 REALTIME_URL = "wss://api.meta.ai/v1/asr/realtime"
 HANDSHAKE_TIMEOUT_S = 10.0
@@ -158,14 +161,124 @@ class WsTicketStore:
             del self._tickets[token]
 
 
-def register_voice_realtime(app, ticket_store: WsTicketStore | None = None):
+def hash_token(token: str) -> str:
+    """SHA-256 hex of a presented ticket token. Plaintext never reaches the DB."""
+    return _hashlib.sha256((token or "").encode("utf-8")).hexdigest()
+
+
+class DbVoiceTicketStore:
+    """Supabase-backed single-use tickets (migration 202610310001).
+
+    The plaintext token exists only in the issue response; the table holds
+    only its SHA-256 hash. Consume goes through the atomic
+    consume_voice_ws_ticket RPC: exactly one caller wins, expiry and replay
+    are enforced server-side. Any DB error refuses (raise on issue, None on
+    consume); Meta is never dialled before a successful consume.
+    The injected client must carry the server service role; anon and
+    authenticated roles hold no table or RPC rights.
+    """
+
+    def __init__(self, client, ttl_s: int = TICKET_TTL_S, now=None) -> None:
+        self._client = client
+        self._ttl = ttl_s
+        self._now = now or time.time
+
+    def issue(self, owner: str, locale: str = "en",
+              keywords: list[str] | tuple[str, ...] = ()) -> WsTicket:
+        if not owner:
+            raise ValueError("Ticket owner required")
+        token = secrets.token_urlsafe(32)
+        expires = _datetime.fromtimestamp(self._now() + self._ttl,
+                                          tz=_timezone.utc)
+        words = list(keywords or [])[:MAX_KEYWORDS]
+        self._client.table("voice_ws_tickets").insert({
+            "token_hash": hash_token(token),
+            "owner_id": str(owner),
+            "locale": locale if locale == "ja" else "en",
+            "keywords": words,
+            "expires_at": expires.isoformat(),
+        }).execute()
+        # Opportunistic expiry cleanup (memory store parity). Best-effort:
+        # never fails issuance, never touches unexpired rows, and never
+        # alters the atomic single-consume RPC contract below.
+        self.purge_expired()
+        return WsTicket(token=token, owner=str(owner),
+                        locale=locale if locale == "ja" else "en",
+                        keywords=words, expires_at=self._now() + self._ttl)
+
+    def purge_expired(self) -> int:
+        """Delete expired ticket rows only; return the deleted count.
+
+        Scope is strictly limited to rows with expires_at at or before now.
+        Runs only through this server-side service-role client (anon and
+        authenticated hold no table rights). Any DB error yields 0 so
+        callers (issue) never fail because of cleanup.
+        """
+        try:
+            cutoff = _datetime.fromtimestamp(self._now(),
+                                             tz=_timezone.utc).isoformat()
+            response = self._client.table(
+                "voice_ws_tickets").delete().lte(
+                    "expires_at", cutoff).execute()
+        except Exception:
+            return 0
+        data = getattr(response, "data", None)
+        return len(data) if isinstance(data, list) else 0
+
+    def consume(self, token: str) -> WsTicket | None:
+        try:
+            response = self._client.rpc(
+                "consume_voice_ws_ticket",
+                {"p_token_hash": hash_token(token or "")}).execute()
+        except Exception:
+            return None
+        data = getattr(response, "data", None)
+        if isinstance(data, list):
+            if len(data) != 1:
+                return None
+            row = data[0]
+        elif isinstance(data, dict):
+            row = data
+        else:
+            return None
+        if not isinstance(row, dict) or not row.get("owner_id"):
+            return None
+        locale = row.get("locale")
+        words = row.get("keywords") or []
+        return WsTicket(token="", owner=str(row["owner_id"]),
+                        locale=locale if locale == "ja" else "en",
+                        keywords=list(words) if isinstance(words, list) else [])
+
+
+def resolve_ticket_store(app_state):
+    """Explicitly injected store (tests) wins; otherwise the Supabase store.
+
+    Returns None when no authoritative store is available; callers fail
+    closed. Process memory is never the production ticket store.
+    """
+    explicit = getattr(app_state, "ws_ticket_store", None)
+    if explicit is not None:
+        return explicit
+    factory = getattr(app_state, "repository_factory", None)
+    if factory is None:
+        return None
+    try:
+        client = factory().client
+    except Exception:
+        return None
+    if client is None:
+        return None
+    return DbVoiceTicketStore(client)
+
+
+def register_voice_realtime(app, ticket_store=None):
     """Attach POST /demo/ws-ticket + WS /demo/voice-realtime to a FastAPI app."""
     import hmac as _hmac
     from fastapi import HTTPException as _HTTPException
     from fastapi import Request as _Request
 
-    store = ticket_store or WsTicketStore()
-    app.state.ws_ticket_store = store
+    if ticket_store is not None:
+        app.state.ws_ticket_store = ticket_store
 
     @app.post("/demo/ws-ticket")
     def issue_ws_ticket(body: TicketBody, request: _Request):
@@ -188,8 +301,15 @@ def register_voice_realtime(app, ticket_store: WsTicketStore | None = None):
         except Exception:
             rows = []
         keywords = build_keywords(rows, body.context_terms)
-        live = getattr(request.app.state, "ws_ticket_store", None) or store
-        ticket = live.issue(owner, locale, keywords)
+        live = resolve_ticket_store(request.app.state)
+        if live is None:
+            raise _HTTPException(503, "Ticket store unavailable")
+        try:
+            ticket = live.issue(owner, locale, keywords)
+        except _HTTPException:
+            raise
+        except Exception:
+            raise _HTTPException(503, "Ticket issue failed")
         return {"ticket": ticket.token, "expires_in_s": TICKET_TTL_S,
                 "locale": ticket.locale, "keywords": ticket.keywords,
                 "path": "/demo/voice-realtime"}
@@ -207,8 +327,16 @@ def register_voice_realtime(app, ticket_store: WsTicketStore | None = None):
             token = hello.get("ticket", "") if isinstance(hello, dict) else ""
         except Exception:
             token = ""
-        live = getattr(websocket.app.state, "ws_ticket_store", None) or store
-        ticket = live.consume(str(token or ""))
+        live = resolve_ticket_store(websocket.app.state)
+        if live is None:
+            await websocket.close(code=4401)
+            return
+        import asyncio as _asyncio
+        try:
+            ticket = await _asyncio.to_thread(live.consume,
+                                              str(token or ""))
+        except Exception:
+            ticket = None
         if ticket is None:
             await websocket.close(code=4401)
             return
@@ -222,7 +350,7 @@ def register_voice_realtime(app, ticket_store: WsTicketStore | None = None):
             return
         await _relay(websocket, key, ticket)
 
-    return store
+    return ticket_store
 
 
 async def _relay(websocket, model_key: str, ticket: WsTicket) -> None:
