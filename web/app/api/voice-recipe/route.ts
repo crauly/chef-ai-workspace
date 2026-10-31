@@ -9,8 +9,10 @@ function backendBase():string|undefined{
  if(fallback&&(fallback.startsWith("http://127.0.0.1:")||fallback.startsWith("http://localhost:")))return fallback;
  return undefined;
 }
-type ReferenceCandidate={ingredient_id:string;ingredient_name:string;reference:{available:boolean;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null};observations?:unknown[]};
-async function lookupReference(name:string):Promise<ReferenceCandidate|null>{
+type ReferenceSummary={available:boolean;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null};
+type ReferenceCandidate={ingredient_id:string;ingredient_name:string;reference:ReferenceSummary;observations?:unknown[]};
+type PriceReferenceEntry={material_name:string;status:"available"|"none";ingredient_name:string|null;currency:string|null;unit_basis:string|null;average_unit_price:string|null;observation_count:number|null;observed_to:string|null;text:string};
+async function lookupCandidates(name:string):Promise<ReferenceCandidate[]|null>{
  const base=backendBase(),token=process.env.DEMO_ACCESS_TOKEN;
  if(!base||!token)return null;
  let url:URL;
@@ -24,9 +26,40 @@ async function lookupReference(name:string):Promise<ReferenceCandidate|null>{
   if(!response.ok)return null;
   const data:unknown=await response.json();
   if(!data||typeof data!=="object"||!Array.isArray((data as {candidates?:unknown}).candidates))return null;
-  const list=(data as {candidates:ReferenceCandidate[]}).candidates;
-  return list.length?list[0]:null;
+  const list=(data as {candidates:unknown}).candidates as ReferenceCandidate[];
+  if(!list.every(c=>c&&typeof c==="object"&&typeof (c as ReferenceCandidate).ingredient_name==="string"&&
+    (c as ReferenceCandidate).reference&&typeof (c as ReferenceCandidate).reference==="object"&&
+    typeof (c as ReferenceCandidate).reference.available==="boolean"))return null;
+  return list;
  }catch{return null;}
+}
+function formatAmount(average:string,basis:string,currency:string):string{
+ // JPY contract only for yen; other currencies shown verbatim, never converted.
+ return currency==="JPY"?`${basis}あたり平均${average}円`:`${basis}あたり平均${average} ${currency}`;
+}
+function selectReference(materialName:string,candidates:ReferenceCandidate[]|null):PriceReferenceEntry{
+ const wanted=materialName.trim();
+ const available=(candidates||[]).filter(c=>c.reference.available);
+ const exact=available.find(c=>c.ingredient_name.trim()===wanted);
+ const chosen=exact||available[0];
+ if(!chosen||typeof chosen.reference.average_unit_price!=="string"||
+    typeof chosen.reference.unit_basis!=="string"||typeof chosen.reference.currency!=="string"){
+  return {material_name:wanted,status:"none",ingredient_name:null,currency:null,unit_basis:null,
+   average_unit_price:null,observation_count:null,observed_to:null,
+   text:`参考価格なし：${wanted}の仕入履歴がありません（価格未確定のまま保存できます）`};
+ }
+ const ref=chosen.reference;
+ const currency=ref.currency as string,basis=ref.unit_basis as string,average=ref.average_unit_price as string;
+ const count=typeof ref.observation_count==="number"?ref.observation_count:0;
+ const when=typeof ref.observed_to==="string"&&ref.observed_to?`・${ref.observed_to}時点`:"";
+ // A non-exact candidate is only ever a named suggestion for the chef to
+ // judge; its ingredient is stated explicitly, never merged silently.
+ const prefix=chosen.ingredient_name.trim()===wanted?`参考価格：${chosen.ingredient_name}は`:
+  `参考価格（完全一致なし・${chosen.ingredient_name}の履歴を参考）：`;
+ return {material_name:wanted,status:"available",ingredient_name:chosen.ingredient_name,
+  currency,unit_basis:basis,average_unit_price:average,
+  observation_count:count,observed_to:typeof ref.observed_to==="string"?ref.observed_to:null,
+  text:`${prefix}${formatAmount(average,basis,currency)}（あなたの仕入履歴${count}件${when}・推定・要確認）`};
 }
 const units=new Set(["g","kg","ml","L"]);
 const decimal=/^(?:0|[1-9]\d*)(?:\.\d+)?$/;
@@ -118,21 +151,17 @@ notes is ONLY for unresolved ambiguous/unsupported facts, not ordinary packaging
   if(typeof text!=="string")return error(502);
   const output=parse(JSON.parse(text));if(!output)return error(502);
   // Ledger-grounded price research: resolve each explicit request against the
-  // owned ledger and report back in notes. Prices stay empty (missing path);
-  // enrichment never invents, confirms, or saves anything, and its failure
-  // never fails the draft.
+  // owned ledger and report back in price_references. Prices stay empty
+  // (missing path); enrichment never invents, confirms, or saves anything,
+  // and its failure never fails the draft.
+  // Informational only: reported in price_references, never in notes, so the
+  // existing saveModeFor gate (notes non-empty blocks approval) is untouched
+  // and the unconfirmed-price save path stays available for research requests.
+  const priceReferences:PriceReferenceEntry[]=[];
   for(const entry of output.priceResearch.slice(0,3)){
-   const candidate=await lookupReference(entry.material_name);
-   if(output.notes.length>=30)break;
-   if(!candidate||!candidate.reference.available){
-    output.notes.push(`参考価格なし：${entry.material_name}の仕入履歴がありません（価格未確定のまま保存できます）`);
-    continue;
-   }
-   const ref=candidate.reference;
-   const count=typeof ref.observation_count==="number"?ref.observation_count:0;
-   const when=typeof ref.observed_to==="string"&&ref.observed_to?`・${ref.observed_to}時点`:"";
-   output.notes.push(`参考価格：${candidate.ingredient_name}は${ref.unit_basis}あたり平均${ref.average_unit_price}円（あなたの仕入履歴${count}件${when}・推定・要確認）`);
+   const candidates=await lookupCandidates(entry.material_name);
+   priceReferences.push(selectReference(entry.material_name,candidates));
   }
-  return NextResponse.json(output,{headers:{"Cache-Control":"no-store","Server-Timing":`muse;dur=${Math.round(performance.now()-started)}`}});
+  return NextResponse.json({...output,price_references:priceReferences},{headers:{"Cache-Control":"no-store","Server-Timing":`muse;dur=${Math.round(performance.now()-started)}`}});
  }catch{return error(502);}
 }

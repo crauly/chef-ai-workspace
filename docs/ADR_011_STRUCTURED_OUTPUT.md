@@ -68,6 +68,6 @@ longer singles out any cuisine in dish-title normalization examples.
   Human Gate behavior (reviewEpoch/approvalEpoch, explicit confirm).
 - Responses propose/axis paths unchanged until a live `text.format`
   acceptance is recorded; that acceptance must update this ADR first.
-- Price research signal: `price_research: [{material_name, request}]` records the chef's explicit request only; the route resolves it against the owned ledger (`GET /demo/price-reference`, read-only) and reports back in `notes`. Prices stay empty (missing path); enrichment failure never fails the draft. No web retrieval exists, so model-knowledge prices stay forbidden.
+- Price research signal: `price_research: [{material_name, request}]` records the chef's explicit request only; the route resolves it against the owned ledger (`GET /demo/price-reference`, read-only) and reports back in the non-blocking `price_references` response field (never `notes`, so the save gate is untouched). Non-JPY references keep their currency verbatim; candidate selection prefers exact-name available history and names any non-exact fallback explicitly. Prices stay empty (missing path); enrichment failure never fails the draft. No web retrieval exists, so model-knowledge prices stay forbidden.
 - Tests: `web/tests/structured-output.spec.ts` (fixture, no key),
   `tests/test_structured_output_contract.py` (contract pin).

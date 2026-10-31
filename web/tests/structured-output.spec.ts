@@ -225,13 +225,13 @@ test("explicit price research resolves against the owned ledger, never model kno
       price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
       selling_price_jpy: "", notes: [], interpretations: [],
       price_research: [{material_name: "豚バラ肉", request: "だいたいの相場で入れて"}]};
+    const ledger = {query: "豚バラ肉", candidates: [{ingredient_id: "ing-1",
+      ingredient_name: "豚バラ肉", reference: {available: true, currency: "JPY",
+        unit_basis: "g", average_unit_price: "0.7700", observation_count: 2,
+        observed_to: "2026-10-28", method: "average of 2 comparable observations"},
+      observations: []}]};
     global.fetch = (async (url: unknown) => {
-      if (String(url).includes("/demo/price-reference"))
-        return Response.json({query: "豚バラ肉", candidates: [{ingredient_id: "ing-1",
-          ingredient_name: "豚バラ肉", reference: {available: true, currency: "JPY",
-            unit_basis: "g", average_unit_price: "0.7700", observation_count: 2,
-            observed_to: "2026-10-28", method: "average of 2 comparable observations"},
-          observations: []}]});
+      if (String(url).includes("/demo/price-reference")) return Response.json(ledger);
       return Response.json({choices: [{finish_reason: "stop",
         message: {content: JSON.stringify(recipe)}}]});
     }) as typeof fetch;
@@ -239,12 +239,16 @@ test("explicit price research resolves against the owned ledger, never model kno
       {turns: ["豚バラ肉100g、だいたいの相場で入れて"]}));
     expect(ok.status).toBe(200);
     const body = await ok.json();
-    // Reference reported in notes with provenance; price fields stay empty.
-    expect(body.notes.join("")).toContain("参考価格");
-    expect(body.notes.join("")).toContain("平均");
+    // Informational only: notes stay empty so the save gate is untouched.
+    expect(body.notes).toEqual([]);
+    expect(body.price_references).toHaveLength(1);
+    expect(body.price_references[0].status).toBe("available");
+    expect(body.price_references[0].text).toContain("平均");
+    expect(body.price_references[0].currency).toBe("JPY");
+    // Prices stay empty: the missing path (unconfirmed save) is preserved.
     expect(body.materials[0].price_jpy).toBe("");
     expect(body.missing.join("")).toContain("仕入単価");
-    // Backend failure still returns the draft with a no-reference note.
+    // Backend failure still returns the draft; the entry reports none.
     global.fetch = (async (url: unknown) => {
       if (String(url).includes("/demo/price-reference"))
         return Response.json({}, {status: 503});
@@ -254,7 +258,66 @@ test("explicit price research resolves against the owned ledger, never model kno
     const degraded = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["豚バラ肉100g、だいたいの相場で入れて"]}));
     expect(degraded.status).toBe(200);
-    expect((await degraded.json()).notes.join("")).toContain("参考価格なし");
+    const degradedBody = await degraded.json();
+    expect(degradedBody.notes).toEqual([]);
+    expect(degradedBody.price_references[0].status).toBe("none");
+    expect(degradedBody.price_references[0].text).toContain("参考価格なし");
+    // Non-JPY history is shown verbatim, never labeled yen, never converted.
+    global.fetch = (async (url: unknown) => {
+      if (String(url).includes("/demo/price-reference"))
+        return Response.json({query: "beef", candidates: [{ingredient_id: "ing-2",
+          ingredient_name: "beef", reference: {available: true, currency: "USD",
+            unit_basis: "g", average_unit_price: "0.0123", observation_count: 1,
+            observed_to: "2026-10-28", method: "single observation"},
+          observations: []}]});
+      return Response.json({choices: [{finish_reason: "stop",
+        message: {content: JSON.stringify({...recipe,
+          materials: [{...recipe.materials[0], name: "beef"}],
+          price_research: [{material_name: "beef", request: "market quote"}]})}}]});
+    }) as typeof fetch;
+    const foreign = await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["beef 100 grams, market quote"]}));
+    expect(foreign.status).toBe(200);
+    const foreignText = (await foreign.json()).price_references[0].text;
+    expect(foreignText).toContain("USD");
+    expect(foreignText).not.toContain("円");
+    // First candidate without history does not hide a later exact match.
+    global.fetch = (async (url: unknown) => {
+      if (String(url).includes("/demo/price-reference"))
+        return Response.json({query: "豚バラ", candidates: [
+          {ingredient_id: "ing-9", ingredient_name: "豚バラ先輩",
+            reference: {available: false, observation_count: 0, excluded_count: 0}, observations: []},
+          ledger.candidates[0]]});
+      return Response.json({choices: [{finish_reason: "stop",
+        message: {content: JSON.stringify(recipe)}}]});
+    }) as typeof fetch;
+    const multi = await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["豚バラ肉100g、相場で"]}));
+    expect(multi.status).toBe(200);
+    const multiRef = (await multi.json()).price_references[0];
+    expect(multiRef.status).toBe("available");
+    expect(multiRef.ingredient_name).toBe("豚バラ肉");
+    // Non-exact fallback names the actual ingredient instead of merging silently.
+    global.fetch = (async (url: unknown) => {
+      if (String(url).includes("/demo/price-reference"))
+        return Response.json({query: "豚", candidates: [
+          {ingredient_id: "ing-9", ingredient_name: "豚バラ先輩",
+            reference: {available: false, observation_count: 0, excluded_count: 0}, observations: []},
+          {ingredient_id: "ing-3", ingredient_name: "豚ロース",
+            reference: {available: true, currency: "JPY", unit_basis: "g",
+              average_unit_price: "1.1000", observation_count: 1,
+              observed_to: "2026-10-27", method: "single observation"}, observations: []}]});
+      return Response.json({choices: [{finish_reason: "stop",
+        message: {content: JSON.stringify({...recipe,
+          price_research: [{material_name: "豚", request: "相場で"}]})}}]});
+    }) as typeof fetch;
+    const fuzzy = await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["豚100g、相場で"]}));
+    expect(fuzzy.status).toBe(200);
+    const fuzzyRef = (await fuzzy.json()).price_references[0];
+    expect(fuzzyRef.status).toBe("available");
+    expect(fuzzyRef.ingredient_name).toBe("豚ロース");
+    expect(fuzzyRef.text).toContain("豚ロース");
     // Malformed research entry (extra key) fails closed.
     global.fetch = (async (url: unknown) => {
       if (String(url).includes("/demo/price-reference"))
