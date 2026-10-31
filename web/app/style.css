@@ -26,3 +26,6 @@ textarea{font:inherit;color:inherit}
 main{padding-bottom:76px}
 .mic-primary{width:100%}
 }
+.bottom-nav button{flex:1 1 0;background:none;border:0;color:#183b30;font-size:.82rem;font-weight:600;padding:10px 2px;border-radius:8px;cursor:pointer;font-family:inherit}
+.bottom-nav button:disabled{opacity:.45;cursor:default}
+.bottom-nav button[aria-pressed="true"]{background:#183b30;color:#fff}

@@ -88,13 +88,6 @@ export default function Library(){
  }
  return <main id="top"><header><div className="toolbar"><p className="tag">Chef AI</p><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">日本語</option><option value="en-US">English (US)</option></select></label></div><h1>{t("library")}</h1><p className="muted">{t("intro")}</p></header>
  <VoiceWorkspace locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} onCreated={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");setError("");void reload();}}/>
- <nav aria-label={locale==="ja"?"主要":"Primary"} className="bottom-nav">
-  <a href="#top">{locale==="ja"?"ホーム":"Home"}</a>
-  <a href="#recipes">{locale==="ja"?"レシピ":"Recipes"}</a>
-  <a href="#voice-controls">{locale==="ja"?"音声":"Voice"}</a>
-  <a href="#draft">{locale==="ja"?"下書き":"Draft"}</a>
-  <a href="#assist">{locale==="ja"?"その他":"More"}</a>
- </nav>
  <div id="assist"><PriceBell locale={locale}/>
  <SourcingSuggestions locale={locale}/></div>
  <form onSubmit={create}><input aria-label={t("newName")} placeholder={t("newName")} value={draft} onChange={e=>setDraft(e.target.value)}/><button disabled={busy||!draft.trim()}>{t("create")}</button></form>
