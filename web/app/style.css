@@ -159,3 +159,21 @@ a,.link{color:#b3d5ff}
 .mic-primary{display:flex;align-items:center;justify-content:center;gap:10px}
 .mic-primary svg{width:23px;height:23px;flex:none;display:block}
 .mic-primary .stop-glyph{width:17px;height:17px;border-radius:3px;display:block;background:currentColor;flex:none}
+
+/* Compact voice workspace: prioritize the draft over optional controls. */
+.voice-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.voice-heading h2{margin:0}
+.voice-settings-button{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;padding:9px;border-radius:50%;background:transparent;color:inherit;border:1px solid currentColor}
+.voice-settings-button:hover,.voice-settings-button[aria-expanded="true"]{background:rgba(130,151,151,.14)}
+.voice-quick-modes{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.voice-quick-modes button{flex:1 1 80px;max-width:160px;padding:9px 14px;border-radius:999px;background:rgba(125,144,146,.13);color:inherit;border:1px solid rgba(170,183,181,.35)}
+.voice-quick-modes button[aria-pressed="true"]{border-color:currentColor;background:rgba(125,144,146,.25)}
+.voice-settings-panel{padding:16px;margin-top:14px;border:1px solid rgba(170,183,181,.3);border-radius:12px}
+.voice-settings-panel h3{margin:0 0 12px}
+.voice-settings-panel label{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.voice-settings-panel input[type="range"]{width:min(240px,100%)}
+.voice-transcript,.voice-help{margin:12px 0;border:1px solid rgba(170,183,181,.28);border-radius:10px;padding:10px 14px}
+.voice-transcript summary,.voice-help summary,.voice-settings-panel summary{cursor:pointer}
+.voice-transcript ol{max-height:220px;overflow-y:auto;overflow-x:hidden;overflow-wrap:anywhere;padding-left:24px;margin-bottom:0}
+.voice-transcript li{margin-bottom:6px}
+@media(max-width:560px){.voice-quick-modes button{flex:1;min-width:0}.voice-heading{gap:8px}.voice-settings-panel{padding:12px}}
