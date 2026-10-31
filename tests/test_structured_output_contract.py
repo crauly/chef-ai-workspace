@@ -69,7 +69,8 @@ class SchemaParityTests(unittest.TestCase):
     the whole VOICE_RECIPE_SCHEMA structure: field types, required, array
     items, nesting and additionalProperties. Prevents the live test from
     passing against a stale, diverging schema. No network, no key.
-    If Node is unavailable the deep check is skipped with a reason.
+    If Node is unavailable the deep check is skipped with a reason; if Node
+    exists but the TS import, execution or JSON parsing fails, the test fails.
     """
     TS_PATH = os.path.join(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))), "web", "muse-schemas.ts")
@@ -87,8 +88,11 @@ class SchemaParityTests(unittest.TestCase):
                 [node, "--input-type=module", "-e", script, self.TS_PATH],
                 capture_output=True, timeout=60, check=True)
         except (subprocess.SubprocessError, OSError) as exc:
-            self.skipTest("SSOT serialization unavailable: %r" % (exc,))
-        return json.loads(out.stdout.decode("utf-8"))
+            self.fail("SSOT serialization failed: %r" % (exc,))
+        try:
+            return json.loads(out.stdout.decode("utf-8"))
+        except ValueError as exc:
+            self.fail("SSOT output is not JSON: %r" % (exc,))
 
     def test_python_mirror_deep_equals_ts_ssot(self):
         try:
