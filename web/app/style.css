@@ -1,4 +1,8 @@
-@import "tailwindcss";
+/* Foundation-only: Theme + Utilities without Preflight, so the retained
+   legacy styles keep their UA defaults (list markers, heading sizes).
+   Re-enable full "@import \"tailwindcss\"" once legacy rules are migrated. */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
 
 @theme {
   --color-chef-900: #183b30;
