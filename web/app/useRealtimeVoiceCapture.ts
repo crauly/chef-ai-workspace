@@ -93,9 +93,13 @@ export function useRealtimeVoiceCapture(
   const fallbackEpoch = useRef(0);
   const traceCounter = useRef(0);
   const mounted = useRef(true);
+  // Invalidates a start() that is still awaiting microphone/audio/ticket.
+  // Bumped by stop() and on unmount so a late async step tears down instead
+  // of opening a connection nobody owns. Draft is never touched here.
+  const startEpoch = useRef(0);
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; stopSession(true); };
+    return () => { startEpoch.current++; mounted.current = false; stopSession(true); };
   }, []);
 
   function markReview(): number { return ++fallbackEpoch.current; }
@@ -298,6 +302,8 @@ export function useRealtimeVoiceCapture(
 
   async function start(contextTerms: string[] = []): Promise<void> {
     if (session.current) return;
+    const myStart = ++startEpoch.current;
+    const stale = () => !mounted.current || myStart !== startEpoch.current;
     const trace = `${Date.now().toString(36)}-${++traceCounter.current}`;
     const endpoint = realtimeWsEndpoint();
     if (!endpoint) {
@@ -321,6 +327,13 @@ export function useRealtimeVoiceCapture(
         locale === "ja" ? "マイクを開始できません。権限と対応ブラウザを確認してください。" : "Could not start microphone. Check permission and browser support.");
       return;
     }
+    if (stale()) {
+      // Stopped or unmounted while the microphone prompt was pending: never
+      // proceed to audio setup or ticket fetch; keep the draft as-is.
+      stream.getTracks().forEach(track => track.stop());
+      yieldMicrophone(stopAll);
+      return;
+    }
     let context: AudioContext;
     let node: AudioWorkletNode;
     try {
@@ -337,7 +350,21 @@ export function useRealtimeVoiceCapture(
         locale === "ja" ? "音声処理を開始できませんでした。通常の音声入力を利用してください。" : "Could not start audio processing. Use standard voice input.");
       return;
     }
+    if (stale()) {
+      try { node.port.onmessage = null; node.disconnect(); } catch { /* ignore */ }
+      if (context.state !== "closed") void context.close().catch(() => {});
+      stream.getTracks().forEach(track => track.stop());
+      yieldMicrophone(stopAll);
+      return;
+    }
     const ticket = await fetchTicket(trace, contextTerms);
+    if (stale()) {
+      try { node.port.onmessage = null; node.disconnect(); } catch { /* ignore */ }
+      if (context.state !== "closed") void context.close().catch(() => {});
+      stream.getTracks().forEach(track => track.stop());
+      yieldMicrophone(stopAll);
+      return;
+    }
     if (!ticket) {
       try { node.port.onmessage = null; node.disconnect(); } catch { /* ignore */ }
       if (context.state !== "closed") void context.close().catch(() => {});
@@ -375,6 +402,9 @@ export function useRealtimeVoiceCapture(
   }
 
   function stop(): void {
+    // Invalidate a start() that is still awaiting microphone/audio/ticket so
+    // its late continuation tears down instead of connecting.
+    startEpoch.current++;
     const current = session.current;
     if (!current) {
       if (mounted.current) setState("closed");
