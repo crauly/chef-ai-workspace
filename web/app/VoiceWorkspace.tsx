@@ -23,6 +23,8 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  const [mode,setMode]=useState<VoiceMode>("idle"),[volume,setVolume]=useState(.5),[manual,setManual]=useState("");
  const [message,setMessage]=useState(locale==="ja"?"登録・呼び出し・修正を一つのマイクで続けられます。":"Create, browse and edit with one microphone."),[heard,setHeard]=useState("");
  const [routing,setRouting]=useState(false);
+ // The initial guidance is state, so changing locale must update it explicitly.
+ useEffect(()=>{setMessage(previous=>previous==="登録・呼び出し・修正を一つのマイクで続けられます。"||previous==="Create, browse and edit with one microphone."?(locale==="ja"?"登録・呼び出し・修正を一つのマイクで続けられます。":"Create, browse and edit with one microphone."):previous);},[locale]);
  const [draftPending,setDraftPending]=useState(false);
  const [diag,setDiag]=useState<VoiceDiagEvent[]>([]);
  useEffect(()=>subscribeVoiceEvents(()=>setDiag(getVoiceEvents())),[]);
