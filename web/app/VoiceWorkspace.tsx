@@ -38,8 +38,18 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  const micError=realtimeMode?realtime.error:voice.error;
  const micNotice=realtimeMode?realtime.notice:voice.notice;
  const wasRecording=useRef(false);
+ const announcedError=useRef("");
  useEffect(()=>{
-  if(wasRecording.current&&!micRecording)playVoiceCue(micError?"error":"stop",volume);
+  // A transcription failure while the mic stays open is audible at once;
+  // the stop cue below skips a repeat of the same announced error.
+  if(micRecording&&micError&&micError!==announcedError.current&&volume>0){
+   announcedError.current=micError;playVoiceCue("error",volume);
+  }
+  if(!micError)announcedError.current="";
+ },[micRecording,micError,volume]);
+ useEffect(()=>{
+  if(wasRecording.current&&!micRecording&&
+   !(micError&&micError===announcedError.current))playVoiceCue(micError?"error":"stop",volume);
   wasRecording.current=micRecording;
  },[micRecording,micError,volume]);
  useEffect(()=>{

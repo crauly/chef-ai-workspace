@@ -64,6 +64,11 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
     let frames: Float32Array[] = [], samples = 0, silent = 0, voiced = false;
     let speechReviewEpoch = 0;
     let pending = Promise.resolve(), requests = 0, closed = false;
+    // Accepted audio waiting for a free transcription slot. Bounded so a
+    // slow network cannot grow memory without bound; oldest spills first.
+    let backlog: {frames: Float32Array[]; rate: number; review: number}[] = [];
+    let backlogSamples = 0;
+    const BACKLOG_MAX_SAMPLES = 24_000 * 60;
     const aborter = new AbortController();
     const cleanup = () => {
       if(closed)return;
@@ -78,12 +83,16 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
       yieldMicrophone(abort);
       if (mounted.current) {setRecording(false); setBusy(false);}
     };
-    const submit = () => {
-      if (!voiced || !frames.length || !context) {frames = []; samples = 0; silent = 0; voiced = false; return;}
-      const batch = frames, rate = context.sampleRate, capturedReview = speechReviewEpoch;
-      frames = []; samples = 0; silent = 0; voiced = false;
-      // Keep accepted audio. Short fragments are coalesced while two requests
-      // are pending; a third full batch pauses capture instead of aborting them.
+    const batchSamples = (batch: Float32Array[]) => batch.reduce((n, frame) => n + frame.length, 0);
+    const refreshBacklogNotice = () => {
+      if (!mounted.current) return;
+      if (backlog.length)
+        setNotice(locale === "ja" ? `受信済みの音声${backlog.length}件を順に文字にしています。話し続けられます。下書きは保持しています。` : `Transcribing ${backlog.length} buffered utterance(s). Keep talking; the draft is retained.`);
+      else setNotice("");
+    };
+    const runBatch = (batch: Float32Array[], rate: number, capturedReview: number) => {
+      // Keep accepted audio. Capture never stops for a transcription failure:
+      // the microphone stays open, the draft stays, and the failure is shown.
       requests++; setBusy(true);
       pending = pending.then(async () => {
         if (!valid()) return;
@@ -92,30 +101,69 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
         const response = await fetch("/api/voice/transcribe", {method: "POST",
           headers: {"Content-Type": "audio/wav", "X-Audio-Language": locale}, body: wav,
           signal: AbortSignal.any([aborter.signal, AbortSignal.timeout(35_000)])});
-        if (!response.ok) throw new Error("transcription");
+        if (!response.ok) {
+          let code = "";
+          try {code = String((await response.json() as {code?: unknown}).code ?? "");} catch {code = "";}
+          throw new Error("transcription:" + (code || response.status));
+        }
         const result: unknown = await response.json();
         const text = result && typeof result === "object" ? (result as {transcript?: unknown}).transcript : null;
-        if (typeof text !== "string" || !text.trim() || text.length > 1000) throw new Error("transcription");
+        if (typeof text !== "string" || !text.trim() || text.length > 1000) throw new Error("transcription:invalid");
         logVoiceEvent("transcribe.ok", "");
         if (valid()) callback.current(text, {reviewEpoch:capturedReview});
-      }).catch(() => {
-        logVoiceEvent("transcribe.fail", "transcription request failed");
+      }).catch((error: unknown) => {
+        const code = error instanceof Error ? error.message : "";
+        const timedOut = code.includes("provider_timeout") || code.includes("504");
+        logVoiceEvent("transcribe.fail", code || "transcription request failed");
         if (valid()) {
-          setError(locale === "ja" ? "一部の音声を文字にできませんでした。ほかの受信済み音声は処理を続けます。下書きを確認し、不足分を再開して話してください。" : "Some audio could not be transcribed. Other accepted audio will finish. Review and restart for missing content.");
-          controls.current?.stop();
+          // A user stop still flushes accepted audio; only then is the
+          // microphone already closed. Otherwise recording continues and
+          // only the failed fragment needs repeating.
+          const stopped = closed;
+          setError(locale === "ja"
+            ? (stopped ? "一部の音声を文字にできませんでした。受信済みの音声の処理は続けます。下書きは保持しています。"
+              : timedOut ? "文字起こしが時間切れになりましたが、受付は続けています。最後の部分をもう一度話してください。下書きは保持しています。"
+              : "一部の音声を文字にできませんでしたが、受付は続けています。話し続けられます。下書きは保持しています。")
+            : (stopped ? "Some audio could not be transcribed. Accepted audio will finish; the draft is retained."
+              : timedOut ? "Transcription timed out, but listening continues. Repeat the last part; the draft is retained."
+              : "Some audio could not be transcribed, but listening continues. Keep talking; the draft is retained."));
         }
       }).finally(() => {
         requests--; if (valid()) {setBusy(requests > 0); if (closed && requests === 0) {
           controls.current = null; yieldMicrophone(abort);
         }}
+        pumpBacklog();
       });
-      if(continuous&&requests>=3){
-        logVoiceEvent("capture.pause", "3 pending transcriptions");
-        setNotice(locale==="ja"?"音声受付を一時停止しました。受信済みの音声は破棄せず処理します。完了後に「音声操作を再開」を押してください。下書きは保持しています。":"Capture paused. Accepted audio will finish. Resume afterward; the draft is retained.");
-        cleanup();
-      }
     };
-    controls.current = {abort: () => { logVoiceEvent("capture.stop", "cancel"); abort(); }, markReview:epoch=>node?.port.postMessage({type:"review",epoch}), stop: () => { if (!closed && valid()) logVoiceEvent("capture.stop", requests ? "user stop; accepted audio continues" : "user stop"); if (!closed) {submit(); cleanup();} if (!requests) controls.current = null; }};
+    const pumpBacklog = () => {
+      if (!valid() || closed || requests >= 2) return;
+      const next = backlog.shift();
+      if (!next) {refreshBacklogNotice(); return;}
+      backlogSamples -= batchSamples(next.frames);
+      runBatch(next.frames, next.rate, next.review);
+      refreshBacklogNotice();
+    };
+    const submit = () => {
+      if (!voiced || !frames.length || !context) {frames = []; samples = 0; silent = 0; voiced = false; return;}
+      const batch = frames, rate = context.sampleRate, capturedReview = speechReviewEpoch;
+      frames = []; samples = 0; silent = 0; voiced = false;
+      if (requests >= 3) {
+        // Buffer instead of pausing capture: the mic stays open and buffered
+        // utterances transcribe automatically as slots free up.
+        backlog.push({frames: batch, rate, review: capturedReview});
+        backlogSamples += batchSamples(batch);
+        while (backlogSamples > BACKLOG_MAX_SAMPLES && backlog.length) {
+          const dropped = backlog.shift()!;
+          backlogSamples -= batchSamples(dropped.frames);
+          logVoiceEvent("capture.backlog.drop", "oldest buffered utterance spilled");
+        }
+        logVoiceEvent("capture.backlog", `${backlog.length} buffered`);
+        refreshBacklogNotice();
+        return;
+      }
+      runBatch(batch, rate, capturedReview);
+    };
+    controls.current = {abort: () => { logVoiceEvent("capture.stop", "cancel"); abort(); }, markReview:epoch=>node?.port.postMessage({type:"review",epoch}), stop: () => { if (!closed && valid()) logVoiceEvent("capture.stop", requests || backlog.length ? "user stop; accepted audio continues" : "user stop"); if (!closed) {submit(); while (backlog.length && valid()) {const next = backlog.shift()!; backlogSamples -= batchSamples(next.frames); runBatch(next.frames, next.rate, next.review);} refreshBacklogNotice(); cleanup();} if (!requests) controls.current = null; }};
     takeMicrophone(abort);
     setError("");setNotice(""); setRecording(true);
     logVoiceEvent("capture.start", continuous ? "shared microphone" : "local microphone");

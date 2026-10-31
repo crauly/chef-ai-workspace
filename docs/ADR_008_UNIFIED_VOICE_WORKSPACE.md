@@ -101,6 +101,36 @@ one stop cue, draft retention/resume, and later batches surviving an earlier
 failed request. They are not new live-provider, physical-audio or database
 accuracy evidence.
 
+## Follow-up: continuous capture (2026-10-31, supersedes the pause/stop rules above)
+
+User task (voice UX overhaul) reported three defects in the rules above:
+transcription failure stopped recording, three pending transcriptions paused
+capture until a manual resume, and a real device saw `POST
+/api/voice/transcribe` 502 without an attributable cause. The following
+replaces the "third batch pauses" and "one ASR failure stops capture" rules;
+all other rules (review epochs, approval gating, Human Gate, draft retention)
+are unchanged.
+
+- A transcription failure no longer stops capture. The microphone stays open,
+  the draft is kept, and the failure is announced visually plus one error cue.
+  Only the failed fragment needs repeating. A flush after an explicit user
+  stop keeps a distinct "stopped" message so a completed stop is never
+  reported as still listening.
+- The third-batch pause and manual resume are replaced by a bounded backlog
+  (60 seconds of audio, oldest spilling first with a diagnostic event).
+  Buffered utterances transcribe automatically as slots free; the notice shows
+  the buffered count and clears on drain. No stop cue plays for buffering.
+- The recording→stopped cue rule is refined: the transition plays the stop
+  cue, or the error cue on failure, unless the same error was already
+  announced while recording (no double cue). Mute/volume still honored.
+- `/api/voice/transcribe` returns attributable codes without leaking provider
+  detail: `provider_timeout` (504) for provider timeouts, `provider_unavailable`
+  / `invalid_response` (502) for upstream/invalid payloads, plus the existing
+  validation codes. Transcription failures are classified at the transport
+  (`timeout` / `upstream` / `invalid`) instead of one generic throw.
+- The 1-second silence split, 29-second bound, single microphone, and
+  coalescing while two requests are pending are retained.
+
 ## Verification
 
 See `web/tests/unified-voice.spec.ts` for one actual AudioWorklet session through

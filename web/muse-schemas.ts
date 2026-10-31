@@ -25,8 +25,13 @@ const MATERIAL_SCHEMA = {
     price_jpy: { type: "string" },
     price_quantity: { type: "string" },
     price_unit: { type: "string" },
+    // Spoken purchase source (store, market, brand outlet). Empty string
+    // when unstated; never inferred. Displayed on the draft card and kept
+    // through review; recipe lines carry no supplier column, so saving keeps
+    // the manufacturer inside name and never drops this text silently.
+    supplier: { type: "string" },
   },
-  required: ["name", "quantity", "unit", "price_jpy", "price_quantity", "price_unit"],
+  required: ["name", "quantity", "unit", "price_jpy", "price_quantity", "price_unit", "supplier"],
   additionalProperties: false,
 };
 
