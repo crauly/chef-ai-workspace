@@ -114,3 +114,17 @@ test("header notification failure remains distinguishable from zero unread", asy
   await bell.click();
   await expect(page.getByText("通知を取得できませんでした。")).toBeVisible();
 });
+
+test("mobile price bell panel stays within viewport edges", async ({page}) => {
+  await page.setViewportSize({width:390,height:844});
+  await page.route("**/api/notifications", route => route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({items:[]})}));
+  await page.goto("/");
+  await page.getByRole("button",{name:"価格通知を開く"}).click();
+  const panel=page.locator(".price-bell-panel");
+  await expect(panel).toBeVisible();
+  const box=await panel.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x+box!.width).toBeLessThanOrEqual(390);
+  expect(box!.y+box!.height).toBeLessThanOrEqual(844);
+});
