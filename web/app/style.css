@@ -196,4 +196,18 @@ a,.link{color:#b3d5ff}
 .price-bell-advanced input{min-width:0;flex:1 1 170px}
 @keyframes chef-bell-ring{0%,100%{transform:rotate(0)}20%{transform:rotate(13deg)}40%{transform:rotate(-10deg)}60%{transform:rotate(7deg)}80%{transform:rotate(-3deg)}}
 .price-bell-ring svg{animation:chef-bell-ring .7s ease-in-out 1;transform-origin:top center}
+/* On narrow screens anchor the popover to the viewport, not the bell's
+   center-of-header position; otherwise its left edge leaves the screen. */
+@media(max-width:720px){
+ .price-bell-panel{
+  position:fixed;
+  top:calc(106px + env(safe-area-inset-top,0px));
+  left:max(12px,env(safe-area-inset-left,0px));
+  right:max(12px,env(safe-area-inset-right,0px));
+  width:auto;
+  max-height:calc(100dvh - 122px - env(safe-area-inset-top,0px));
+  overflow-x:hidden;
+ }
+ .price-bell-panel .toolbar>*{min-width:0}
+}
 @media(prefers-reduced-motion:reduce){.price-bell-ring svg{animation:none}}
