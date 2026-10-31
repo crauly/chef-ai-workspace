@@ -2,6 +2,18 @@
 
 Status: Accepted (fixture-verified; real Meta realtime path unverified).
 
+## Ticket storage: Supabase (2026-10-31 follow-up)
+
+Single-use tickets moved from the process-local `WsTicketStore` to
+`public.voice_ws_tickets` + atomic `consume_voice_ws_ticket(p_token_hash)`
+(migration `202610310001`, record of the already-applied definition;
+interface verified read-only via the live PostgREST OpenAPI). Issue stores
+only the token SHA-256; consume hashes the presented token and deletes
+exactly one valid row server-side. Expired, replayed, tampered or
+DB-error cases refuse (WS close 4401 / HTTP 503) and Meta is never dialled
+before a successful consume. Process memory remains available only as an
+explicitly injected test double, never as the production store.
+
 ## Context and decision
 
 Phase A kept REST batch transcription (`POST /api/voice/transcribe`) as the
