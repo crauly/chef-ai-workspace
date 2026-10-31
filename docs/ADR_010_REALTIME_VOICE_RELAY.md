@@ -79,7 +79,11 @@ sends `endStream` and waits for Meta's final `speechComplete` with a finite
 4s drain timeout on both the browser and the Python relay; timeout or
 abrupt loss closes locally without touching the draft. `POST /confirm` remains the only
 approval path; transcription cannot write recipes, adopt prices, or bypass
-the Human Gate. Diagnostics carry sequence/kind/trace only — no audio,
+the Human Gate. Voice approval epochs match REST: each turn carries the
+review epoch from its speechStart (first start wins; a turn whose start was
+never seen commits with a null epoch, labeled -1 downstream, which never
+equals a live approval epoch), so a pre-review utterance completing after
+review cannot approve a save. Diagnostics carry sequence/kind/trace only — no audio,
 keys, or full utterances.
 
 ## Ops constraints (not permanent spec)
@@ -101,7 +105,7 @@ keys, or full utterances.
   (200/403, owner-scoped keywords), WS without ticket (4401), WS ticket
   replay (first use ok, replay 4401). The suite neutralizes MODEL_API_KEY
   so no test touches the network.
-- `web/tests/voice-realtime.spec.ts` (6): the real TS modules, transpiled
+- `web/tests/voice-realtime.spec.ts` (9): the real TS modules, transpiled
   in the spec, checked in a real browser — partial/end/dedup, final:true
   never commits with speechComplete canonical, resampling/silence/endpoint,
   ticket waits for open (pre-open close sends nothing), drain commits a

@@ -242,3 +242,99 @@ test("drain timeout closes locally when the relay stays silent", async ({page}) 
   expect(result["closed"]).toBe(true);
   expect(result["states"]).toEqual(["connecting", "ready", "draining", "closed"]);
 });
+
+test("approval epoch is captured at speechStart, not at completion", async ({page}) => {
+  await page.goto("/");
+  const result = await page.evaluate(([bundle, boot]: [RealtimeSources, string]) => {
+    const run = new Function("bundle", boot + `
+      // Downstream gate (VoiceRecipeRegistration): approval only when the
+      // turn's epoch strictly equals the live approval epoch.
+      const store = new exports.VoiceTurnStore();
+      let approvalEpoch = 5;
+      // Case 1: utterance starts before review, completes after it.
+      store.handle({type: "speechStart", turnId: "pre"}, 5);
+      approvalEpoch = 6; // user reviews meanwhile; markReview() -> 6
+      const late = store.handle({type: "speechComplete", turnId: "pre", text: "保存してください"});
+      const preApproved = late.length === 1 && late[0].startEpoch === approvalEpoch;
+      // Case 2: utterance starts after review: approved normally.
+      store.handle({type: "speechStart", turnId: "post"}, 6);
+      const fresh = store.handle({type: "speechComplete", turnId: "post", text: "保存してください"});
+      const postApproved = fresh.length === 1 && fresh[0].startEpoch === approvalEpoch;
+      return {preEpoch: late[0]?.startEpoch ?? null, preApproved,
+        postEpoch: fresh[0]?.startEpoch ?? null, postApproved};
+    `);
+    return run(bundle) as Record<string, unknown>;
+  }, [bundle(), BOOT] as [RealtimeSources, string]);
+  // A pre-review "save please" completing after review must NOT approve.
+  expect(result["preEpoch"]).toBe(5);
+  expect(result["preApproved"]).toBe(false);
+  // A genuinely post-review approval still works.
+  expect(result["postEpoch"]).toBe(6);
+  expect(result["postApproved"]).toBe(true);
+});
+
+test("missing/late/duplicate starts never escalate approval", async ({page}) => {
+  await page.goto("/");
+  const result = await page.evaluate(([bundle, boot]: [RealtimeSources, string]) => {
+    const run = new Function("bundle", boot + `
+      const store = new exports.VoiceTurnStore();
+      // Missing start: no guessed epoch.
+      const missing = store.handle({type: "speechComplete", turnId: "lost", text: "保存してください"});
+      // Late start after completion must not upgrade the epoch.
+      store.handle({type: "speechStart", turnId: "lost"}, 9);
+      const afterLateStart = store.drain();
+      // Duplicate starts: the first epoch wins, never overwritten.
+      store.handle({type: "speechStart", turnId: "dup"}, 3);
+      store.handle({type: "speechStart", turnId: "dup"}, 7);
+      const duped = store.handle({type: "speechComplete", turnId: "dup", text: "保存してください"});
+      // Duplicate completion: absorbed, single commit.
+      const again = store.handle({type: "speechComplete", turnId: "dup", text: "保存してください"});
+      // Out-of-order: complete arrives before start.
+      const store2 = new exports.VoiceTurnStore();
+      const early = store2.handle({type: "speechComplete", turnId: "ooo", text: "保存してください"});
+      store2.handle({type: "speechStart", turnId: "ooo"}, 4);
+      return {missingEpoch: missing[0]?.startEpoch ?? "none",
+        afterLateStartEpoch: afterLateStart[0]?.startEpoch ?? "none",
+        dupEpoch: duped[0]?.startEpoch ?? "none", dupCount: again.length,
+        earlyEpoch: early[0]?.startEpoch ?? "none"};
+    `);
+    return run(bundle) as Record<string, unknown>;
+  }, [bundle(), BOOT] as [RealtimeSources, string]);
+  // Harness maps a null (unknown) epoch to "none": never a guessed approval.
+  expect(result["missingEpoch"]).toBe("none");
+  expect(result["afterLateStartEpoch"]).toBe("none");
+  expect(result["dupEpoch"]).toBe(3);
+  expect(result["dupCount"]).toBe(0);
+  expect(result["earlyEpoch"]).toBe("none");
+});
+
+test("transport samples the review epoch at speechStart", async ({page}) => {
+  await page.goto("/");
+  const result = await page.evaluate(([bundle, boot]: [RealtimeSources, string]) => {
+    const run = new Function("bundle", boot + `
+      const committed = [];
+      let epoch = 5;
+      let box = null;
+      const t = new exports.RealtimeTransport(url => {
+        const s = {send(d) {}, close(c) {}, onopen: null, onmessage: null, onclose: null, onerror: null};
+        box = s; return s;
+      }, {onCommitted: (text, id, startEpoch) => committed.push([text, id, startEpoch ?? null]),
+          getReviewEpoch: () => epoch,
+          onState: () => {}});
+      t.connect("wss://relay/demo/voice-realtime", "ticket");
+      box.onopen();
+      box.onmessage({data: JSON.stringify({type: "ready"})});
+      box.onmessage({data: JSON.stringify({type: "speechStart", turnId: "t1"})});
+      epoch = 6; // review happens while the turn is still open
+      box.onmessage({data: JSON.stringify({type: "speechComplete", turnId: "t1", transcript: "保存してください"})});
+      // Turn with no start: null epoch, never a guessed approval.
+      box.onmessage({data: JSON.stringify({type: "speechComplete", turnId: "t2", transcript: "保存してください"})});
+      return {committed};
+    `);
+    return run(bundle) as Record<string, unknown>;
+  }, [bundle(), BOOT] as [RealtimeSources, string]);
+  expect(result["committed"]).toEqual([
+    ["保存してください", "t1", 5],
+    ["保存してください", "t2", null],
+  ]);
+});

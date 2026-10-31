@@ -7,26 +7,33 @@
 // - speechComplete(turnId, text) is the only committed transcript for that
 //   turn; duplicates are ignored; a lost turn is never fabricated.
 // - Events may arrive out of order; completion wins over later partials.
+// - Approval epoch is captured at speechStart, never at completion. A turn
+//   whose start was never seen commits with startEpoch null so the caller
+//   cannot mistake it for a post-review approval. First start wins:
+//   duplicate or reordered starts never overwrite the original epoch.
 export type TurnEvent =
   | {type: "speechStart"; turnId: string}
   | {type: "partial"; text: string}
   | {type: "speechEnd"; turnId: string}
   | {type: "speechComplete"; turnId: string; text: string};
 
-export type TurnState = {partial: string; completed: string | null; ended: boolean};
+export type CommittedTurn = {turnId: string; text: string; startEpoch: number | null};
+
+export type TurnState = {partial: string; completed: string | null; ended: boolean; startEpoch: number | null};
 
 export class VoiceTurnStore {
   private turns = new Map<string, TurnState>();
   private order: string[] = [];
   private lastOpen: string | null = null;
-  private pending: Array<{turnId: string; text: string}> = [];
+  private pending: Array<CommittedTurn> = [];
 
-  handle(event: TurnEvent): Array<{turnId: string; text: string}> {
-    const fresh: Array<{turnId: string; text: string}> = [];
+  handle(event: TurnEvent, startEpoch?: number): Array<CommittedTurn> {
+    const fresh: Array<CommittedTurn> = [];
     if (event.type === "speechStart") {
       if (!event.turnId) return fresh;
       if (!this.turns.has(event.turnId)) {
-        this.turns.set(event.turnId, {partial: "", completed: null, ended: false});
+        this.turns.set(event.turnId, {partial: "", completed: null, ended: false,
+          startEpoch: typeof startEpoch === "number" ? startEpoch : null});
         this.order.push(event.turnId);
       }
       this.lastOpen = event.turnId;
@@ -46,20 +53,21 @@ export class VoiceTurnStore {
       if (!event.turnId || !text) return fresh;
       let state = this.turns.get(event.turnId);
       if (!state) {
-        state = {partial: "", completed: null, ended: true};
+        // Start never seen (lost or reordered): never guess an epoch.
+        state = {partial: "", completed: null, ended: true, startEpoch: null};
         this.turns.set(event.turnId, state);
         this.order.push(event.turnId);
       }
       if (state.completed !== null) return fresh; // duplicate delivery
       state.completed = text;
-      const record = {turnId: event.turnId, text};
+      const record: CommittedTurn = {turnId: event.turnId, text, startEpoch: state.startEpoch};
       this.pending.push(record);
       fresh.push(record);
     }
     return fresh;
   }
 
-  drain(): Array<{turnId: string; text: string}> {
+  drain(): Array<CommittedTurn> {
     const out = [...this.pending];
     this.pending = [];
     return out;

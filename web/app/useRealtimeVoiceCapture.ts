@@ -233,12 +233,15 @@ export function useRealtimeVoiceCapture(
           }
         },
         onPartial: text => { if (session.current === current) setPartial(text.slice(0, 200)); },
-        onCommitted: (text, turnId) => {
+        getReviewEpoch: () => epochOf.current?.() ?? fallbackEpoch.current,
+        onCommitted: (text, turnId, startEpoch) => {
           if (session.current !== current) return;
           setPartial("");
           logVoiceEvent("transcribe.ok", "realtime turn committed", current.trace);
-          const epoch = epochOf.current?.() ?? fallbackEpoch.current;
-          callback.current(text, {reviewEpoch: epoch, traceId: current.trace});
+          // Approval uses the epoch from when the utterance started. A turn
+          // whose start was never seen carries -1 (the established
+          // no-approval sentinel), which never equals a live approval epoch.
+          callback.current(text, {reviewEpoch: startEpoch ?? -1, traceId: current.trace});
           void turnId;
         },
       },

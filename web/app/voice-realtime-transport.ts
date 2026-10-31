@@ -24,7 +24,12 @@ import {
 
 export type RealtimeState = "idle" | "connecting" | "ready" | "draining" | "closed" | "failed";
 export type RealtimeCallbacks = {
-  onCommitted?: (text: string, turnId: string) => void;
+  // startEpoch is the review epoch captured when this turn started (null
+  // when the start was never seen): label the turn with it, never with the
+  // completion-time epoch, so a pre-review utterance cannot pass as approval.
+  onCommitted?: (text: string, turnId: string, startEpoch?: number | null) => void;
+  // Current review epoch, sampled when a speechStart frame arrives.
+  getReviewEpoch?: () => number;
   onPartial?: (text: string, turnId: string) => void;
   onState?: (state: RealtimeState, reason: string) => void;
 };
@@ -176,7 +181,8 @@ export class RealtimeTransport {
     }
     if (type === "error") { this.setState("failed", String(event["reason"] ?? "upstream")); return; }
     if (type === "speechStart" && typeof event["turnId"] === "string") {
-      this.turns.handle({type: "speechStart", turnId: event["turnId"]});
+      this.turns.handle({type: "speechStart", turnId: event["turnId"]},
+        this.callbacks.getReviewEpoch?.());
       return;
     }
     if (type === "speechEnd" && typeof event["turnId"] === "string") {
@@ -199,7 +205,7 @@ export class RealtimeTransport {
       if (!turnId || !text.trim()) return;
       const fresh = this.turns.handle({type: "speechComplete", turnId, text});
       if (!fresh.length) return; // duplicate delivery
-      try { this.callbacks.onCommitted?.(fresh[0].text, fresh[0].turnId); } catch { /* ignore */ }
+      try { this.callbacks.onCommitted?.(fresh[0].text, fresh[0].turnId, fresh[0].startEpoch); } catch { /* ignore */ }
     }
   }
 }
