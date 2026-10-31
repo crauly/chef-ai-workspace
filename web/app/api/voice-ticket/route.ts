@@ -1,5 +1,5 @@
 import {NextRequest, NextResponse} from "next/server";
-import {previewAuthorized} from "../../../preview-access";
+import {previewAuthorized, sameOrigin} from "../../../preview-access";
 
 export const runtime = "nodejs";
 const headers = {"Cache-Control": "no-store"};
@@ -10,7 +10,7 @@ const fail = (status: number) => NextResponse.json({error: "Realtime ticket fail
 // the Python backend for a single-use ticket.
 export async function POST(req: NextRequest) {
   if (!await previewAuthorized(req)) return fail(403);
-  if (req.headers.get("origin") !== req.nextUrl.origin) return fail(403);
+  if (!sameOrigin(req)) return fail(403);
   const api = process.env.CHEF_FASTAPI_INTERNAL_URL;
   const key = process.env.DEMO_ACCESS_TOKEN;
   if (!api || !key) return fail(503);
