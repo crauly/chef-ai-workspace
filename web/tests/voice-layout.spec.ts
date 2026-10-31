@@ -66,7 +66,7 @@ test("bottom mic control shares one recording state with the panel button", asyn
   await expect(panelMic).toBeEnabled();
   expect(await navMic.getAttribute("aria-pressed")).toBe("false");
   await navMic.click();
-  await expect(panelMic).toHaveText("■ マイクを停止");
+  await expect(panelMic).toHaveAttribute("aria-label", "■ マイクを停止");
   expect(await navMic.getAttribute("aria-pressed")).toBe("true");
   await panelMic.click();
   expect(await navMic.getAttribute("aria-pressed")).toBe("false");
