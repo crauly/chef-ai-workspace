@@ -197,7 +197,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   </form>}
   <button type="button" disabled={busy||!dataTurns.current.length||phase==="saving"} onClick={retry}>解析を再試行</button>
   <div><p>認識した発話（{turns.length}件・新しい順）：{turns.length?"":"なし"}</p>{turns.length>0&&<ol aria-label="認識した発話の一覧">{[...turns].reverse().map((turn,index)=><li key={`${turns.length-index}`}>{turn}</li>)}</ol>}</div>
-  {draft&&<div aria-label="未保存のレシピ下書き">
+  {draft&&<div id="draft" aria-label="未保存のレシピ下書き">
    <h3>未保存の下書き：{draft.title||"料理名未設定"}</h3>
    {draft.interpretations?.map((item,index)=><p key={index}>料理の文脈からの解釈案：{item.source} → {item.suggestion}（{item.reason}）</p>)}
    <p>売価：{draft.selling_price_jpy?("¥"+draft.selling_price_jpy):"未設定（売価なしでも保存できます）"}</p>

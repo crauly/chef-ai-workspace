@@ -93,6 +93,20 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    if(nav.target&&!registration.current?.hasPending())registration.current?.submit(source??nav.target);
   }else feedback("編集モードです。変更内容を話してください。保存には変更案の確認と明示承認が必要です。");
  }
+ // One mic state drives both the panel button and the fixed bottom control,
+ // so recording/stop/processing can never disagree between the two.
+ const micDisabled=!voice.recording&&(voice.supported===false||voice.busy);
+ function toggleMic(){
+  if(micRecording){if(realtimeMode)realtime.stop();else voice.stop();}
+  else void (realtimeMode?realtime.start():voice.start());
+ }
+ // Draft stays reachable from any mode: route through the guarded create
+ // transition first (never a bare anchor jump), then scroll to the draft.
+ async function revealDraft(){
+  await navigate({mode:"create",target:""});
+  if(currentMode.current!=="create")return;
+  document.getElementById("draft")?.scrollIntoView({block:"start"});
+ }
  function receive(text:string,meta?:VoiceCaptureMeta){
   if(!text.trim())return;
   if(registration.current?.isSaving()){feedback("承認された下書きを保存中です。完了後に続きをお願いします。",true);return;}
@@ -171,7 +185,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    <p>現在のモード: <strong>{labels[mode]}</strong>{mode==="edit"&&selected?` — ${selected.title.value}`:""}</p>
    {draftPending&&mode!=="create"&&<p role="status">登録途中の下書きを保持しています。<button type="button" onClick={()=>void (async()=>{await navigate({mode:"create",target:""});if(currentMode.current!=="create")return;registration.current?.requestReview();feedback("保持していた下書きを確認します。");})()}>下書きに戻る</button></p>}
    <p>「レシピを登録します」「〇〇を見せて」「パスタを150gに変更」のように続けて話してください。</p>
-   <button type="button" disabled={!voice.recording&&(voice.supported===false||voice.busy)} onClick={micRecording?(realtimeMode?realtime.stop:voice.stop):()=>void (realtimeMode?realtime.start():voice.start())} aria-pressed={micRecording}>{micRecording?"■ マイクを停止":micError||micNotice?"🎙 音声操作を再開":"🎙 音声操作を開始"}</button>
+   <button type="button" className="mic-primary" disabled={micDisabled} onClick={toggleMic} aria-pressed={micRecording}>{micRecording?"■ マイクを停止":micError||micNotice?"🎙 音声操作を再開":"🎙 音声操作を開始"}</button>
    <button type="button" disabled={micRecording} onClick={()=>setRealtimeMode(value=>!value)}>{realtimeMode?"通常音声に切替":"リアルタイム音声に切替"}</button>
    <p role="status">{micRecording?(realtimeMode?"リアルタイム音声受付中":"音声受付中"):micBusy?"音声受付は一時停止・受信済みの音声を処理中":micError||micNotice?"音声受付は停止中・再開できます":"音声受付は停止中"}</p>
    {micNotice&&<p role="status">{micNotice}</p>}
@@ -200,5 +214,12 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
   const supplierNote=suppliers.length?`（仕入先メモ：${suppliers.join("／")} — 台帳の仕入先連携で登録できます）`:"";
   setDraftPending(false);transition("browse");feedback((mode==="unconfirmed"?"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"レシピを保存しました。")+supplierNote);onCreated(recipe);
   }}/></div>
+  <nav aria-label={locale==="ja"?"主要":"Primary"} className="bottom-nav">
+   <a href="#top">{locale==="ja"?"ホーム":"Home"}</a>
+   <a href="#recipes">{locale==="ja"?"レシピ":"Recipes"}</a>
+   <button type="button" aria-label={locale==="ja"?"下部の音声操作":"Bottom voice control"} aria-pressed={micRecording} disabled={micDisabled} onClick={toggleMic}>{micRecording?"■":"🎙"}</button>
+   <button type="button" onClick={()=>void revealDraft()}>{locale==="ja"?"下書き":"Draft"}</button>
+   <a href="#assist">{locale==="ja"?"その他":"More"}</a>
+  </nav>
  </>;
 }
