@@ -42,11 +42,11 @@ test("bottom nav reveals a retained draft from browse mode", async ({ page }) =>
   await page.getByRole("button", {name: "反映"}).click();
   await expect(page.getByText("未保存の下書き：保持カレー")).toBeVisible();
   // Leave create mode: the draft must stay reachable from the fixed nav.
-  await page.getByRole("button", {name: "レシピを参照"}).click();
-  await expect(page.locator("#voice-controls").getByText("参照", {exact: true})).toBeVisible();
+  await page.locator(".voice-quick-modes").getByRole("button", {name: "参照"}).click();
+  await expect(page.locator(".voice-quick-modes").getByRole("button", {name: "参照"})).toBeVisible();
   await page.locator("nav.bottom-nav").getByRole("button", {name: "下書き"}).click();
   await expect(page.getByText("未保存の下書き：保持カレー")).toBeVisible();
-  await expect(page.locator("#voice-controls").getByText("登録", {exact: true})).toBeVisible();
+  await expect(page.locator(".voice-quick-modes").getByRole("button", {name: "登録"})).toBeVisible();
 });
 
 test("bottom mic control shares one recording state with the panel button", async ({ page }) => {
@@ -70,4 +70,23 @@ test("bottom mic control shares one recording state with the panel button", asyn
   expect(await navMic.getAttribute("aria-pressed")).toBe("true");
   await panelMic.click();
   expect(await navMic.getAttribute("aria-pressed")).toBe("false");
+});
+
+test("voice settings and recognized turns remain collapsed until requested", async ({page}) => {
+  await page.goto("/");
+  const settings = page.getByRole("button", {name: "設定を開く"});
+  await expect(settings).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("region", {name: "音声設定"})).toHaveCount(0);
+  await settings.click();
+  await expect(settings).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("region", {name: "音声設定"})).toBeVisible();
+  await expect(page.getByLabel("通知音の音量")).toBeVisible();
+  const help = page.locator(".voice-help");
+  // Registration guidance and transcript are not expanded until requested.
+  await page.locator(".voice-quick-modes").getByRole("button", {name: "登録"}).click();
+  await expect(help).not.toHaveAttribute("open", "");
+  const transcript = page.locator(".voice-transcript");
+  await expect(transcript).not.toHaveAttribute("open", "");
+  await transcript.locator("summary").click();
+  await expect(transcript).toHaveAttribute("open", "");
 });
