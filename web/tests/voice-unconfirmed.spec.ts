@@ -51,7 +51,7 @@ test("a confirmed voice recipe with a spoken supplier saves without 422 and keep
  await entry.fill("ペペロンチーノ、ディチェコのパスタ100グラム、500グラム350円、築地場外");
  await page.getByRole("button", {name: "反映"}).click();
  await expect(page.getByText("未保存の下書き：ペペロンチーノ")).toBeVisible();
- await expect(page.getByText("仕入先：築地場外")).toBeVisible();
+ await expect(page.getByText("仕入先: 築地場外")).toBeVisible();
  expect(saved).toBe(0);
  await entry.fill("保存してください"); await page.getByRole("button", {name: "反映"}).click();
  await expect(page.getByRole("button", {name: "内容を承認して保存"})).toBeEnabled();
