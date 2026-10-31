@@ -4,7 +4,16 @@ import type {Locale} from "./i18n";
 import {logVoiceEvent} from "./voice-diagnostics";
 
 // One microphone across all entry points. Never run overlapping voice sessions.
+// Both the REST batch hook and the realtime hook arbitrate through these
+// helpers: starting one input stops the other, and neither discards a draft.
 let releaseMicrophone: (() => void) | undefined;
+export function takeMicrophone(releaser: () => void): void {
+  releaseMicrophone?.();
+  releaseMicrophone = releaser;
+}
+export function yieldMicrophone(releaser: () => void): void {
+  if (releaseMicrophone === releaser) releaseMicrophone = undefined;
+}
 export const VOICE_SILENCE_MS = 1000;
 // traceId is assigned at utterance intake and forwarded through submit/enqueue.
 export type VoiceCaptureMeta = {reviewEpoch: number; traceId?: string};
@@ -62,11 +71,11 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
       if (node) {node.port.onmessage = null; node.disconnect();}
       if (context && context.state !== "closed") void context.close();
       if (valid()) setRecording(false);
-      if (!requests && releaseMicrophone === abort) releaseMicrophone = undefined;
+      if (!requests) yieldMicrophone(abort);
     };
     const abort = () => {
       cleanup(); aborter.abort(); ++generation.current; controls.current = null;
-      if (releaseMicrophone === abort) releaseMicrophone = undefined;
+      yieldMicrophone(abort);
       if (mounted.current) {setRecording(false); setBusy(false);}
     };
     const submit = () => {
@@ -97,7 +106,7 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
         }
       }).finally(() => {
         requests--; if (valid()) {setBusy(requests > 0); if (closed && requests === 0) {
-          controls.current = null; if (releaseMicrophone === abort) releaseMicrophone = undefined;
+          controls.current = null; yieldMicrophone(abort);
         }}
       });
       if(continuous&&requests>=3){
@@ -107,7 +116,7 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
       }
     };
     controls.current = {abort: () => { logVoiceEvent("capture.stop", "cancel"); abort(); }, markReview:epoch=>node?.port.postMessage({type:"review",epoch}), stop: () => { if (!closed && valid()) logVoiceEvent("capture.stop", requests ? "user stop; accepted audio continues" : "user stop"); if (!closed) {submit(); cleanup();} if (!requests) controls.current = null; }};
-    releaseMicrophone = abort;
+    takeMicrophone(abort);
     setError("");setNotice(""); setRecording(true);
     logVoiceEvent("capture.start", continuous ? "shared microphone" : "local microphone");
     try {

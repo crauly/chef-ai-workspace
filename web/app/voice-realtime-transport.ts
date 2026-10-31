@@ -1,6 +1,19 @@
 // Phase B realtime transport: browser WS to the Python relay, then Meta.
 // No API keys here; the browser presents only a single-use ticket.
 // The socket factory is injectable so fixture tests run without a microphone.
+//
+// Turn contract (SSOT: VoiceTurnStore):
+// - transcript events are provisional display info only, even with final:true.
+// - speechComplete is the sole committed transcript, once per turnId, and
+//   its body is the canonical text.
+// - speechEnd is a boundary signal only; it never commits, never fabricates.
+import {VoiceTurnStore} from "./voice-turn-store";
+import {
+  REALTIME_BACKLOG_BYTES,
+  REALTIME_REFRESH_MS,
+  REALTIME_SESSION_LIMIT_MS,
+} from "./voice-realtime-audio";
+
 export type RealtimeState = "idle" | "connecting" | "ready" | "closed" | "failed";
 export type RealtimeCallbacks = {
   onCommitted?: (text: string, turnId: string) => void;
@@ -15,8 +28,7 @@ export type SocketLike = {
   onerror: (() => void) | null;
 };
 
-export const REALTIME_BACKLOG_BYTES = 5 * 24000 * 2; // 5s of 16-bit mono 24kHz PCM
-export const REALTIME_SESSION_LIMIT_MS = 60 * 60 * 1000;
+export {REALTIME_BACKLOG_BYTES, REALTIME_REFRESH_MS, REALTIME_SESSION_LIMIT_MS};
 
 export function backlogExceeded(pendingBytes: number): boolean {
   return pendingBytes > REALTIME_BACKLOG_BYTES;
@@ -25,11 +37,10 @@ export function backlogExceeded(pendingBytes: number): boolean {
 export class RealtimeTransport {
   private socket: SocketLike | null = null;
   private state: RealtimeState = "idle";
-  private seen = new Set<string>();
-  private lastOpen: string | null = null;
   constructor(
     private openSocket: (url: string) => SocketLike,
     private callbacks: RealtimeCallbacks = {},
+    readonly turns: VoiceTurnStore = new VoiceTurnStore(),
   ) {}
 
   connect(url: string, ticket: string): void {
@@ -75,30 +86,30 @@ export class RealtimeTransport {
     if (type === "ready") { this.setState("ready", "relay ready"); return; }
     if (type === "error") { this.setState("failed", String(event["reason"] ?? "upstream")); return; }
     if (type === "speechStart" && typeof event["turnId"] === "string") {
-      this.lastOpen = event["turnId"];
+      this.turns.handle({type: "speechStart", turnId: event["turnId"]});
+      return;
+    }
+    if (type === "speechEnd" && typeof event["turnId"] === "string") {
+      this.turns.handle({type: "speechEnd", turnId: event["turnId"]});
       return;
     }
     if (type === "transcript") {
+      // Provisional even when final:true. Never commits; never reaches Muse.
       const text = typeof event["transcript"] === "string" ? event["transcript"] : "";
-      const final = event["final"] === true;
-      const turnId = typeof event["turnId"] === "string" ? event["turnId"] : this.lastOpen;
-      if (!turnId || !text.trim()) return;
-      if (final) {
-        if (this.seen.has(turnId)) return; // duplicate speechComplete
-        this.seen.add(turnId);
-        try { this.callbacks.onCommitted?.(text, turnId); } catch { /* ignore */ }
-      } else {
-        try { this.callbacks.onPartial?.(text, turnId); } catch { /* ignore */ }
-      }
+      if (!text.trim()) return;
+      this.turns.handle({type: "partial", text});
+      const open = this.turns.openTurns();
+      if (!open.length) return; // stray partial with no open turn: drop it
+      try { this.callbacks.onPartial?.(text, open[open.length - 1]); } catch { /* ignore */ }
       return;
     }
     if (type === "speechComplete") {
-      const turnId = typeof event["turnId"] === "string" ? event["turnId"] : this.lastOpen;
+      const turnId = typeof event["turnId"] === "string" ? event["turnId"] : "";
       const text = typeof event["transcript"] === "string" ? event["transcript"] : "";
-      if (!turnId || !text.trim() || this.seen.has(turnId)) return;
-      this.seen.add(turnId);
-      try { this.callbacks.onCommitted?.(text, turnId); } catch { /* ignore */ }
+      if (!turnId || !text.trim()) return;
+      const fresh = this.turns.handle({type: "speechComplete", turnId, text});
+      if (!fresh.length) return; // duplicate delivery
+      try { this.callbacks.onCommitted?.(fresh[0].text, fresh[0].turnId); } catch { /* ignore */ }
     }
-    // speechEnd is a boundary-only signal: never commits, never fabricates.
   }
 }

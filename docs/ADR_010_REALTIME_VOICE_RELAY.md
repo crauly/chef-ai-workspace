@@ -41,11 +41,34 @@ applied and recorded in code.
 
 ## Turn contract (SSOT: `voice-turn-store.ts`)
 
-- `partial` is display-only and overwrites the same turn.
+- `transcript` events are provisional display info only, **even with
+  `final:true`**. They never commit and never reach Muse.
+- `speechComplete` is the sole committed transcript, once per `turnId`,
+  and its body is the canonical text (it may differ from earlier partials).
 - `speechEnd` is a boundary signal only; it never commits a draft update.
-- `speechComplete` is the sole committed transcript, once per `turnId`;
-  duplicates are ignored and lost turns are never fabricated.
+- Duplicates are ignored and lost turns are never fabricated.
 - Overlapping turns and out-of-order delivery are keyed by `turnId`.
+- The transport (`voice-realtime-transport.ts`) holds no duplicate turn
+  state: it delegates every turn event to the shared store, which survives
+  session refresh and reconnects so committed turns are never re-sent.
+
+## Audio path (browser)
+
+`useRealtimeVoiceCapture` reuses `/voice-capture-v2.js` and the single-mic
+arbitration in `useVoiceCapture.ts`: starting one input stops the other,
+and neither path discards a draft. Each worklet frame is resampled to
+24kHz/16-bit mono (`voice-realtime-audio.ts`, pure and fixture-tested) and
+a 100ms pacer releases only audio that has actually elapsed in real time,
+so silence PCM continues and the 5s backlog cap is enforced over the total
+pending buffer (oldest audio dropped, draft untouched). A proactive
+refresh with a fresh ticket happens at 55 minutes, before Meta's 60-minute
+limit; one automatic reconnect is attempted on unexpected loss, otherwise
+the UI shows the stop reason and guides the user to resume. The relay
+origin is the public (non-secret) `NEXT_PUBLIC_DEMO_WS_URL`; when unset,
+realtime reports unconfigured and REST remains the path. VoiceWorkspace
+exposes a mode toggle (REST default) sharing the same receive queue and
+review-epoch domain, so realtime transcripts obey the same mode-boundary
+and approval guards.
 
 ## Safety (unchanged)
 
@@ -55,12 +78,27 @@ approval path; transcription cannot write recipes, adopt prices, or bypass
 the Human Gate. Diagnostics carry sequence/kind/trace only — no audio,
 keys, or full utterances.
 
+## Ops constraints (not permanent spec)
+
+- `MODEL_API_KEY` lives only in server routes and the Python backend; the
+  browser carries the single-use ticket alone (verified by code inspection).
+- Tickets are single-use and short-lived; unknown/replayed tickets close
+  the socket with 4401 (tested at the protocol level).
+- The ticket store is in-memory: consistent on the current single-worker
+  Render setup (`render.yaml` starts one uvicorn worker). A multi-worker
+  layout would need a shared ticket store first; do not assume otherwise.
+- No approval path is added: realtime transcripts enter the existing
+  receive queue only. `POST /confirm` remains the sole approval.
+
 ## Verification
 
-- `tests/test_voice_realtime.py`: language bias, keyword assembly/cap,
+- `tests/test_voice_realtime.py` (9): language bias, keyword assembly/cap,
   handshake shape, ticket single-use/expiry, backlog guard, ticket endpoint
-  (200/403, owner-scoped keywords).
-- `web/tests/voice-realtime.spec.ts`: the real TS modules, transpiled in
-  the spec, checked in a real browser — partial/end/dedup/backlog.
+  (200/403, owner-scoped keywords), WS without ticket (4401), WS ticket
+  replay (first use ok, replay 4401). The suite neutralizes MODEL_API_KEY
+  so no test touches the network.
+- `web/tests/voice-realtime.spec.ts` (3): the real TS modules, transpiled
+  in the spec, checked in a real browser — partial/end/dedup, final:true
+  never commits with speechComplete canonical, resampling/silence/endpoint.
 - Real Meta realtime audio, Render WS behavior, and on-device microphone
   capture are explicitly unverified; REST batch stays the default path.

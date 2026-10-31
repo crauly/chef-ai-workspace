@@ -118,3 +118,81 @@ class WsTicketEndpointTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WsAuthTests(unittest.TestCase):
+    """Unauthenticated and replayed realtime connections are refused."""
+
+    def _client(self):
+        import os
+        from fastapi.testclient import TestClient
+        from chef_ai_workspace.api import app
+        from chef_ai_workspace import voice_realtime as realtime
+        saved = {name: getattr(app.state, name, None)
+                 for name in ("demo_owner_id", "demo_access_token",
+                              "repository_factory", "ws_ticket_store",
+                              "model_api_key", "meta_api_key")}
+        saved_env = os.environ.pop("MODEL_API_KEY", None)
+        saved["_env_MODEL_API_KEY"] = saved_env
+        app.state.demo_owner_id = "00000000-0000-4000-8000-000000000001"
+        app.state.demo_access_token = "test-only-backend-token-1234567890"
+
+        class FakeRepo:
+            def search_owned_ingredients(self, owner, query, limit=20):
+                return []
+
+        app.state.repository_factory = lambda: FakeRepo()
+        app.state.ws_ticket_store = realtime.WsTicketStore(ttl_s=120)
+        return TestClient(app), app, saved
+
+    def _restore(self, app, saved):
+        import os
+        previous_key = saved.pop("_env_MODEL_API_KEY", None)
+        if previous_key is None:
+            os.environ.pop("MODEL_API_KEY", None)
+        else:
+            os.environ["MODEL_API_KEY"] = previous_key
+        for name, value in saved.items():
+            if value is None and hasattr(app.state, name):
+                delattr(app.state, name)
+            elif value is not None:
+                setattr(app.state, name, value)
+
+    def test_connect_without_ticket_refused(self):
+        from starlette.websockets import WebSocketDisconnect
+        client, app, saved = self._client()
+        try:
+            with client.websocket_connect("/demo/voice-realtime") as ws:
+                ws.send_text("{}")
+                with self.assertRaises(WebSocketDisconnect) as raised:
+                    ws.receive_text()
+            self.assertEqual(raised.exception.code, 4401)
+        finally:
+            self._restore(app, saved)
+
+    def test_ticket_replay_refused(self):
+        from starlette.websockets import WebSocketDisconnect
+        client, app, saved = self._client()
+        try:
+            good = {"X-Demo-Access": "test-only-backend-token-1234567890"}
+            first = client.post("/demo/ws-ticket", headers=good,
+                                json={"locale": "en"}).json()["ticket"]
+            # First use consumes the ticket; the relay then reports the demo
+            # backend as unavailable (no MODEL_API_KEY in tests) instead of
+            # an auth failure.
+            with client.websocket_connect("/demo/voice-realtime") as ws:
+                ws.send_text('{"ticket": "%s"}' % first)
+                body = ws.receive_text()
+                self.assertIn("realtime_unavailable", body)
+            # Replay of the consumed ticket is an auth failure.
+            with client.websocket_connect("/demo/voice-realtime") as again:
+                again.send_text('{"ticket": "%s"}' % first)
+                with self.assertRaises(WebSocketDisconnect) as raised:
+                    again.receive_text()
+            self.assertEqual(raised.exception.code, 4401)
+        finally:
+            self._restore(app, saved)
+
+
+if __name__ == "__main__":
+    unittest.main()

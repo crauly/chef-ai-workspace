@@ -1,18 +1,35 @@
 "use client";
-// Phase B opt-in realtime capture. REST batch remains the default fallback.
-// Silence / speechEnd / disconnect never discard a draft; speechComplete is
-// the only committed transcript handed to the existing draft pipeline.
+// Phase B realtime capture: microphone -> 24kHz/16-bit mono PCM ->
+// authenticated Python relay -> Meta Realtime ASR -> speechComplete ->
+// the shared VoiceWorkspace queue -> Muse Spark -> draft.
+// REST batch remains the default path and the fallback.
+//
+// Safety contract (unchanged):
+// - Silence, speechEnd, ticket/relay/mic failures, session refresh, and
+//   reconnects never discard a draft and never confirm a save.
+// - Only speechComplete transcripts reach the draft pipeline, via the same
+//   receive() queue as REST. No confirm/save path is added here.
+// - Single microphone: starting realtime stops REST capture and vice versa.
 import {useEffect, useRef, useState} from "react";
 import type {Locale} from "./i18n";
 import {logVoiceEvent} from "./voice-diagnostics";
 import {VoiceTurnStore} from "./voice-turn-store";
-import {RealtimeTransport, type RealtimeState, type SocketLike} from "./voice-realtime-transport";
-import type {VoiceCaptureMeta} from "./useVoiceCapture";
+import {
+  RealtimeTransport,
+  type RealtimeState,
+  type SocketLike,
+} from "./voice-realtime-transport";
+import {takeMicrophone, yieldMicrophone, type VoiceCaptureMeta} from "./useVoiceCapture";
 
-export function realtimeWsEndpoint(): string {
-  const base = process.env.NEXT_PUBLIC_DEMO_WS_URL ?? "";
-  return base ? base.replace(/\/$/, "") + "/demo/voice-realtime" : "/demo/voice-realtime";
-}
+import {
+  REALTIME_BACKLOG_BYTES,
+  REALTIME_MAX_SEND_SAMPLES,
+  REALTIME_REFRESH_MS,
+  REALTIME_SAMPLE_RATE,
+  REALTIME_SEND_INTERVAL_MS,
+  realtimeWsEndpoint,
+  resampleTo24kMono,
+} from "./voice-realtime-audio";
 
 function wrapBrowserSocket(socket: WebSocket): SocketLike {
   let messageHandler: ((ev: {data: unknown}) => void) | null = null;
@@ -33,70 +50,306 @@ function wrapBrowserSocket(socket: WebSocket): SocketLike {
   };
 }
 
+type Session = {
+  stream: MediaStream;
+  context: AudioContext;
+  node: AudioWorkletNode;
+  transport: RealtimeTransport;
+  timer: ReturnType<typeof setInterval>;
+  refreshTimer: ReturnType<typeof setTimeout>;
+  outbox: Int16Array[];
+  outboxSamples: number;
+  sentSamples: number;
+  startedAt: number;
+  trace: string;
+  retries: number;
+  userStop: boolean;
+  refreshing: boolean;
+  micGone: boolean;
+  inRate: number;
+};
+
 export function useRealtimeVoiceCapture(
   locale: Locale,
   onTranscript: (text: string, meta?: VoiceCaptureMeta) => void,
+  opts: {getEpoch?: () => number} = {},
 ) {
   const [state, setState] = useState<RealtimeState>("idle");
+  const [recording, setRecording] = useState(false);
   const [partial, setPartial] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const callback = useRef(onTranscript); callback.current = onTranscript;
-  const transport = useRef<RealtimeTransport | null>(null);
+  const epochOf = useRef(opts.getEpoch); epochOf.current = opts.getEpoch;
+  const session = useRef<Session | null>(null);
   const turns = useRef(new VoiceTurnStore());
-  const reviewEpoch = useRef(0);
+  const fallbackEpoch = useRef(0);
   const traceCounter = useRef(0);
-  useEffect(() => () => transport.current?.close(), []);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; stopSession(true); };
+  }, []);
 
-  function markReview(): number { return ++reviewEpoch.current; }
+  function markReview(): number { return ++fallbackEpoch.current; }
+  const alive = () => mounted.current && session.current !== null;
 
-  async function start(contextTerms: string[] = []): Promise<void> {
-    if (transport.current) return;
-    const trace = `${Date.now().toString(36)}-${++traceCounter.current}`;
-    logVoiceEvent("capture.start", "realtime opening", trace);
-    setState("connecting");
-    let ticket = "";
+  function stopAll(): void { stopSession(false); }
+  function stopSession(silent: boolean): void {
+    const current = session.current;
+    session.current = null;
+    if (current) {
+      current.userStop = current.userStop || silent;
+      clearInterval(current.timer);
+      clearTimeout(current.refreshTimer);
+      try { current.transport.finish(); } catch { /* ignore */ }
+      try { current.transport.close(); } catch { /* ignore */ }
+      try { current.stream.getTracks().forEach(track => track.stop()); } catch { /* ignore */ }
+      try { current.node.port.onmessage = null; current.node.disconnect(); } catch { /* ignore */ }
+      if (current.context.state !== "closed") void current.context.close().catch(() => {});
+    }
+    yieldMicrophone(stopAll);
+    if (mounted.current) {
+      setRecording(false);
+      if (!silent) setState("closed");
+    }
+  }
+
+  function failReason(trace: string, reason: string, message: string): void {
+    logVoiceEvent("capture.error", reason, trace);
+    stopSession(true);
+    if (mounted.current) {
+      setError(message);
+      setNotice(locale === "ja"
+        ? "下書きは保持しています。通常の音声入力も利用できます。"
+        : "The draft is retained. Standard voice input remains available.");
+      setState("failed");
+    }
+  }
+
+  function pushPcm(frame: Int16Array): void {
+    const current = session.current;
+    if (!current || current.userStop) return;
+    current.outbox.push(frame);
+    current.outboxSamples += frame.length;
+    // Total pending backlog cap: drop oldest audio beyond 5s, never the draft.
+    const cap = REALTIME_BACKLOG_BYTES / 2;
+    if (current.outboxSamples > cap) {
+      let excess = current.outboxSamples - cap;
+      while (excess > 0 && current.outbox.length) {
+        const head = current.outbox[0];
+        if (head.length <= excess) { current.outbox.shift(); current.outboxSamples -= head.length; excess -= head.length; }
+        else { current.outbox[0] = head.slice(excess); current.outboxSamples -= excess; excess = 0; }
+      }
+      logVoiceEvent("queue.dropped", "realtime backlog over 5s; oldest audio dropped", current.trace);
+    }
+  }
+
+  function pump(): void {
+    const current = session.current;
+    if (!current || current.userStop) return;
+    // Real-time pace: only audio that has actually elapsed since session
+    // start may leave. Silence flows too, because the worklet emits
+    // continuously while the microphone is open.
+    const elapsed = (Date.now() - current.startedAt) / 1000;
+    let due = Math.min(Math.floor(elapsed * REALTIME_SAMPLE_RATE) - current.sentSamples, REALTIME_MAX_SEND_SAMPLES);
+    while (due > 0 && current.outbox.length && session.current === current) {
+      const head = current.outbox[0];
+      const take = Math.min(head.length, due);
+      const bytes = new ArrayBuffer(take * 2);
+      new Int16Array(bytes).set(head.subarray(0, take));
+      const pendingBytes = current.outboxSamples * 2;
+      if (!current.transport.sendPcm(bytes, pendingBytes)) return; // not ready or backlog: retry next tick
+      if (take === head.length) current.outbox.shift();
+      else current.outbox[0] = head.slice(take);
+      current.outboxSamples -= take;
+      current.sentSamples += take;
+      due -= take;
+    }
+  }
+
+  async function openTransport(current: Session, ticket: string, endpoint: string): Promise<void> {
+    const active = new RealtimeTransport(
+      url => wrapBrowserSocket(new WebSocket(url)),
+      {
+        onState: next => {
+          if (session.current !== current) return;
+          if (next === "ready") {
+            current.retries = 0;
+            setState("ready");
+            logVoiceEvent("transcribe.ok", "realtime relay ready", current.trace);
+          } else if (next === "failed" || next === "closed") {
+            if (current.userStop || current.refreshing) return;
+            if (current.micGone) {
+              failReason(current.trace, "microphone disconnected; draft kept",
+                locale === "ja" ? "マイクが切断されました。下書きは保持しています。" : "Microphone disconnected. The draft is retained.");
+              return;
+            }
+            if (current.retries < 1) {
+              // One automatic reconnect with a fresh ticket; committed turns
+              // stay committed in the shared store, so nothing is re-sent.
+              current.retries++;
+              logVoiceEvent("capture.disconnect", "relay lost; one reconnect attempt", current.trace);
+              setNotice(locale === "ja" ? "接続が切れました。再接続しています。下書きは保持しています。" : "Connection lost. Reconnecting; the draft is retained.");
+              void reconnect(current);
+            } else {
+              failReason(current.trace, "relay unavailable; draft kept",
+                locale === "ja" ? "リアルタイム接続を利用できません。下書きは保持しています。「音声操作を再開」で再試行できます。" : "Realtime connection unavailable. The draft is retained; resume to retry.");
+            }
+          }
+        },
+        onPartial: text => { if (session.current === current) setPartial(text.slice(0, 200)); },
+        onCommitted: (text, turnId) => {
+          if (session.current !== current) return;
+          setPartial("");
+          logVoiceEvent("transcribe.ok", "realtime turn committed", current.trace);
+          const epoch = epochOf.current?.() ?? fallbackEpoch.current;
+          callback.current(text, {reviewEpoch: epoch, traceId: current.trace});
+          void turnId;
+        },
+      },
+      turns.current, // shared across refresh/reconnect: no duplicate commits
+    );
+    current.transport = active;
+    active.connect(endpoint, ticket);
+  }
+
+  async function fetchTicket(trace: string, contextTerms: string[]): Promise<string | null> {
     try {
       const response = await fetch("/api/voice-ticket", {
         method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({locale: locale === "ja" ? "ja" : "en", context_terms: contextTerms}),
       });
-      if (!response.ok) throw new Error("ticket");
+      if (!response.ok) return null;
       const data = (await response.json()) as {ticket?: unknown};
-      if (typeof data.ticket !== "string" || !data.ticket) throw new Error("ticket");
-      ticket = data.ticket;
-    } catch {
-      logVoiceEvent("capture.error", "realtime ticket failed; draft kept", trace);
+      return typeof data.ticket === "string" && data.ticket ? data.ticket : null;
+    } catch { return null; }
+  }
+
+  async function reconnect(current: Session): Promise<void> {
+    if (session.current !== current || current.userStop) return;
+    // Held until the replacement transport exists: the old socket's close
+    // frame must not trigger a second reconnect.
+    current.refreshing = true;
+    try {
+      const endpoint = realtimeWsEndpoint();
+      if (!endpoint) { failReason(current.trace, "relay origin unconfigured", ""); return; }
+      const ticket = await fetchTicket(current.trace + "-r", []);
+      if (session.current !== current || current.userStop) return;
+      if (!ticket) {
+        failReason(current.trace, "ticket refresh failed; draft kept",
+          locale === "ja" ? "再接続できませんでした。下書きは保持しています。" : "Could not reconnect. The draft is retained.");
+        return;
+      }
+      try { current.transport.finish(); } catch { /* ignore */ }
+      try { current.transport.close(); } catch { /* ignore */ }
+      current.startedAt = Date.now();
+      current.sentSamples = 0;
+      current.outbox = [];
+      current.outboxSamples = 0;
+      await openTransport(current, ticket, endpoint);
+      armRefresh(current);
+    } finally {
+      if (session.current === current) current.refreshing = false;
+    }
+  }
+
+  function armRefresh(current: Session): void {
+    clearTimeout(current.refreshTimer);
+    current.refreshTimer = setTimeout(() => {
+      if (session.current !== current || current.userStop) return;
+      // Proactive refresh before the 60-minute session limit. The shared
+      // turn store survives, so committed turns are never re-sent and
+      // uncommitted partials are dropped without touching the draft.
+      logVoiceEvent("capture.pause", "session refresh before 60-minute limit", current.trace);
+      void reconnect(current);
+    }, REALTIME_REFRESH_MS);
+  }
+
+  async function start(contextTerms: string[] = []): Promise<void> {
+    if (session.current) return;
+    const trace = `${Date.now().toString(36)}-${++traceCounter.current}`;
+    const endpoint = realtimeWsEndpoint();
+    if (!endpoint) {
+      logVoiceEvent("capture.error", "relay origin unconfigured; draft kept", trace);
+      setError(locale === "ja"
+        ? "リアルタイム音声は未設定です。通常の音声入力を利用してください。下書きは保持しています。"
+        : "Realtime voice is not configured. Use standard voice input; the draft is retained.");
       setState("failed");
       return;
     }
-    const active = new RealtimeTransport(
-      url => wrapBrowserSocket(new WebSocket(url)),
-      {
-        onState: next => {
-          setState(next);
-          if (next === "failed" || next === "closed") {
-            logVoiceEvent(next === "failed" ? "capture.error" : "capture.stop", "realtime ended; draft kept", trace);
-            if (transport.current === active) transport.current = null;
-          }
-        },
-        onPartial: text => setPartial(text.slice(0, 200)),
-        onCommitted: (text, turnId) => {
-          turns.current.handle({type: "speechComplete", turnId, text});
-          setPartial("");
-          logVoiceEvent("transcribe.ok", "realtime turn committed", trace);
-          callback.current(text, {reviewEpoch: reviewEpoch.current, traceId: trace});
-        },
-      },
-    );
-    transport.current = active;
-    active.connect(realtimeWsEndpoint(), ticket);
+    takeMicrophone(stopAll); // single microphone: stops REST capture, keeps its draft
+    setError(""); setNotice(""); setPartial("");
+    setState("connecting");
+    logVoiceEvent("capture.start", "realtime microphone", trace);
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: true, noiseSuppression: true}});
+    } catch {
+      yieldMicrophone(stopAll);
+      failReason(trace, "getUserMedia failed",
+        locale === "ja" ? "マイクを開始できません。権限と対応ブラウザを確認してください。" : "Could not start microphone. Check permission and browser support.");
+      return;
+    }
+    let context: AudioContext;
+    let node: AudioWorkletNode;
+    try {
+      context = new AudioContext();
+      await context.resume();
+      await context.audioWorklet.addModule("/voice-capture-v2.js");
+      node = new AudioWorkletNode(context, "voice-capture", {processorOptions: {reviewEpoch: 0}});
+      context.createMediaStreamSource(stream).connect(node);
+      node.connect(context.destination);
+    } catch {
+      stream.getTracks().forEach(track => track.stop());
+      yieldMicrophone(stopAll);
+      failReason(trace, "audio graph failed",
+        locale === "ja" ? "音声処理を開始できませんでした。通常の音声入力を利用してください。" : "Could not start audio processing. Use standard voice input.");
+      return;
+    }
+    const ticket = await fetchTicket(trace, contextTerms);
+    if (!ticket) {
+      try { node.port.onmessage = null; node.disconnect(); } catch { /* ignore */ }
+      if (context.state !== "closed") void context.close().catch(() => {});
+      stream.getTracks().forEach(track => track.stop());
+      yieldMicrophone(stopAll);
+      failReason(trace, "ticket failed; draft kept",
+        locale === "ja" ? "リアルタイム接続を開始できません。通常の音声入力を利用してください。下書きは保持しています。" : "Could not start realtime. Use standard voice input; the draft is retained.");
+      return;
+    }
+    const current: Session = {
+      stream, context, node,
+      transport: undefined as unknown as RealtimeTransport,
+      timer: undefined as unknown as ReturnType<typeof setInterval>,
+      refreshTimer: undefined as unknown as ReturnType<typeof setTimeout>,
+      outbox: [], outboxSamples: 0, sentSamples: 0, startedAt: Date.now(),
+      trace, retries: 0, userStop: false, refreshing: false, micGone: false,
+      inRate: context.sampleRate,
+    };
+    session.current = current;
+    node.port.onmessage = (event: MessageEvent<{samples: Float32Array}>) => {
+      if (session.current !== current || current.userStop) return;
+      pushPcm(resampleTo24kMono(event.data.samples, current.inRate));
+    };
+    stream.getTracks().forEach(track => {
+      track.onended = () => {
+        if (session.current !== current || current.userStop) return;
+        current.micGone = true;
+        logVoiceEvent("capture.disconnect", "microphone track ended", current.trace);
+      };
+    });
+    current.timer = setInterval(pump, REALTIME_SEND_INTERVAL_MS);
+    await openTransport(current, ticket, endpoint);
+    armRefresh(current);
+    if (alive()) setRecording(true);
   }
 
   function stop(): void {
-    transport.current?.finish();
-    transport.current?.close();
-    transport.current = null;
-    setState("closed");
+    const current = session.current;
+    if (current) logVoiceEvent("capture.stop", "user stop realtime; draft kept", current.trace);
+    stopSession(false);
+    if (mounted.current) { setPartial(""); setNotice(""); }
   }
 
-  return {state, partial, start, stop, markReview};
+  return {state, recording, partial, error, notice, start, stop, markReview};
 }
