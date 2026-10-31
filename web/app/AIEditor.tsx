@@ -112,17 +112,17 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
     const command=voiceCommand(text);
     if(command==="cancel"||command==="hold"){
       invalidate();if(command==="cancel"){voiceHistory.current=[];setInstruction("");}
-      setNotice("保存していません。変更案の承認を解除しました。");return;
+      setNotice(locale==="ja"?"保存していません。変更案の承認を解除しました。":"Not saved. Proposal approval was cleared.");return;
     }
     if(command==="review"||command==="save"){
       const current=reviewRef.current;
-      if(!current){setNotice("保存できる変更案がありません。変更内容を話してください。");return;}
+      if(!current){setNotice(locale==="ja"?"保存できる変更案がありません。変更内容を話してください。":"No proposal to save. Describe the desired changes.");return;}
       if(command==="save"&&(!meta||meta.reviewEpoch===reviewEpoch.current))await confirm(current);
-      else {reviewEpoch.current=markReview?.()??-1;setNotice("差分を確認してください。その後、もう一度「保存してください」と明示してください。");}
+      else {reviewEpoch.current=markReview?.()??-1;setNotice(locale==="ja"?"差分を確認してください。その後、もう一度「保存してください」と明示してください。":"Review the changes, then explicitly request saving again.");}
       return;
     }
     const next=[...voiceHistory.current,text];
-    if(next.join("\n").length>4000){setError("変更指示が長すぎます。変更案を確認・保存するか、破棄してください。");return;}
+    if(next.join("\n").length>4000){setError(locale==="ja"?"変更指示が長すぎます。変更案を確認・保存するか、破棄してください。":"Too many change instructions. Review and save or discard the existing proposal.");return;}
     voiceHistory.current=next;setInstruction(next.join("\n"));await proposeText(next.join("\n"));
   }
   async function record(e: React.FormEvent) {

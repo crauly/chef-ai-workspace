@@ -150,3 +150,12 @@ a,.link{color:#b3d5ff}
 
 /* Prevent native language select intrinsic width from widening 390px viewport. */
 @media(max-width:720px){.chef-header .toolbar{width:100%;min-width:0;gap:8px}.chef-header .toolbar>.tag{flex:1 1 0;min-width:0}.chef-header .toolbar>.language-picker{display:flex;flex:0 1 auto;min-width:0;max-width:55%;gap:4px}.chef-header .language-picker select{min-width:0;max-width:100%;width:100%;padding:6px 4px}.chef-header .language-picker span{flex:none}}
+
+/* Frosted floating navigation: content remains visible while scrolling beneath. */
+.bottom-nav{background:rgba(18,20,23,.38);border-color:rgba(220,232,245,.18);-webkit-backdrop-filter:blur(16px) saturate(125%);backdrop-filter:blur(16px) saturate(125%);box-shadow:0 10px 28px rgba(0,0,0,.23)}
+.bottom-nav a:hover,.bottom-nav button:not(.bottom-nav-mic):hover{background:rgba(255,255,255,.09)}
+
+/* Use the same microphone artwork for primary voice action and floating nav. */
+.mic-primary{display:flex;align-items:center;justify-content:center;gap:10px}
+.mic-primary svg{width:23px;height:23px;flex:none;display:block}
+.mic-primary .stop-glyph{width:17px;height:17px;border-radius:3px;display:block;background:currentColor;flex:none}
