@@ -235,7 +235,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
     <details><summary>{locale==="ja"?"音声の状態履歴（直近の動作）":"Recent voice activity"}</summary>
      <ul>{diag.slice(-10).map(event=><li key={event.seq}>{new Date(event.at).toLocaleTimeString()} {event.kind}{event.trace?` [${event.trace}]`:""}{event.detail?`：${event.detail}`:""}</li>)}</ul>
     </details>
-   </section>
+   </section>}
   </section>
   <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} onDiscarded={()=>setDraftPending(false)} sharedVoice={{markReview:mark,cancel:()=>{},captureMessage:micRecording?"音声受付中です。確認後は「登録」「登録してください」でも保存できます。":micBusy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${micError||micNotice||""}`}} onCreated={(recipe,mode,suppliers)=>{
    // The spoken purchase source survives as a memo in this always-visible
