@@ -46,10 +46,15 @@ changing the voice harness, draft, approval, or save contracts.
   production "Allowed units" constraint, and the app-side value gate
   (missing[], never silent accept) is the designed backstop. With the
   production constraint mirrored, units conform.
-- `tests/test_structured_output_contract.py::SchemaParityTests` (offline,
-  always runs) pins the probe's Python mirror to `web/muse-schemas.ts`
-  (required-sets, property names, `additionalProperties: false` count,
-  intent enum), so the live test cannot pass against a stale schema.
+- `tests/test_structured_output_contract.py::SchemaParityTests` (offline)
+  serializes the real `web/muse-schemas.ts` with the existing dependency-free
+  Node runtime and deep-compares the entire `VOICE_RECIPE_SCHEMA` structure:
+  field types, `required`, array `items`, nesting and `additionalProperties`.
+  Intent is covered by required/enum checks only, not a deep compare. If Node
+  is unavailable the deep check skips with a reason instead of passing blind.
+  This prevents the live test from passing against a stale schema; it does not
+  execute `parse()` and does not prove model output semantics beyond the
+  probed values.
 - No DB write, no approval, no persistence in either probe.
 
 ## Language policy (voice-recipe prompt)

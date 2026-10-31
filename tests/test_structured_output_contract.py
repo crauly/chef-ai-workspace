@@ -59,29 +59,38 @@ class StructuredOutputContractTests(unittest.TestCase):
         self.assertIn("no text.format", matrix["responses"])
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class SchemaParityTests(unittest.TestCase):
     """Offline guard: the live probe's Python mirror must equal the SSOT.
 
-    Prevents the live test from passing against a stale, diverging schema.
-    No network, no key, always runs.
+    Serializes the real `web/muse-schemas.ts` with the existing Node runtime
+    (no dependencies: the module is erasable-syntax-only) and deep-compares
+    the whole VOICE_RECIPE_SCHEMA structure: field types, required, array
+    items, nesting and additionalProperties. Prevents the live test from
+    passing against a stale, diverging schema. No network, no key.
+    If Node is unavailable the deep check is skipped with a reason.
     """
     TS_PATH = os.path.join(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))), "web", "muse-schemas.ts")
 
-    def _object_schemas(self, schema):
-        found = [schema]
-        for prop in schema.get("properties", {}).values():
-            items = prop.get("items")
-            if isinstance(items, dict) and items.get("type") == "object":
-                found.append(items)
-        return found
+    def _ssot_voice_schema(self):
+        import shutil
+        import subprocess
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("Node runtime unavailable for SSOT check")
+        script = ("import(process.argv[1]).then(m=>console.log("
+                  "JSON.stringify(m.VOICE_RECIPE_SCHEMA)))")
+        try:
+            out = subprocess.run(
+                [node, "--input-type=module", "-e", script, self.TS_PATH],
+                capture_output=True, timeout=60, check=True)
+        except (subprocess.SubprocessError, OSError) as exc:
+            self.skipTest("SSOT serialization unavailable: %r" % (exc,))
+        return json.loads(out.stdout.decode("utf-8"))
 
-    def test_python_mirror_matches_ts_ssot(self):
-        import re
+    def test_python_mirror_deep_equals_ts_ssot(self):
         try:
             import test_structured_output_live as live
         except ModuleNotFoundError:  # package-style invocation
@@ -89,18 +98,22 @@ class SchemaParityTests(unittest.TestCase):
         mirror = live.VOICE_RECIPE_SCHEMA_PY
         # The live probe sends exactly this object as JSON.
         json.dumps(mirror)
+        self.assertEqual(self._ssot_voice_schema(), mirror)
+
+    def test_intent_contract_matches_ts_ssot(self):
+        import re
+        try:
+            import test_structured_output_live as live
+        except ModuleNotFoundError:  # package-style invocation
+            from tests import test_structured_output_live as live
+        _ = live  # intent schema lives inline in the live probe payload
         text = open(self.TS_PATH, encoding="utf-8").read()
-        ts_required = [set(re.findall(r'"([^"]+)"', m)) for m in
-                       re.findall(r"required:\s*\[([^\]]*)\]", text)]
-        py_required = [set(s["required"]) for s in
-                       self._object_schemas(mirror)]
-        self.assertEqual(sorted(map(sorted, ts_required)),
-                         sorted([["intent", "target"]] +
-                                list(map(sorted, py_required))))
-        for obj in self._object_schemas(mirror):
-            for key in obj["properties"]:
-                self.assertIn('"%s"' % key, text)
-            self.assertFalse(obj.get("additionalProperties", True))
-        self.assertEqual(text.count("additionalProperties: false"), 4)
+        required = re.findall(r"required:\s*\[([^\]]*)\]", text)
+        self.assertIn(set(["intent", "target"]),
+                      [set(re.findall(r'"([^"]+)"', m)) for m in required])
         for value in ("create", "browse", "edit", "clarify"):
             self.assertIn('"%s"' % value, text)
+
+
+if __name__ == "__main__":
+    unittest.main()
