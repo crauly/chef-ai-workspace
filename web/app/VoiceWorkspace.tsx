@@ -23,6 +23,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  const [mode,setMode]=useState<VoiceMode>("idle"),[volume,setVolume]=useState(.5),[manual,setManual]=useState("");
  const [message,setMessage]=useState(locale==="ja"?"登録・呼び出し・修正を一つのマイクで続けられます。":"Create, browse and edit with one microphone."),[heard,setHeard]=useState("");
  const [routing,setRouting]=useState(false);
+ const [settingsOpen,setSettingsOpen]=useState(false);
  // The initial guidance is state, so changing locale must update it explicitly.
  useEffect(()=>{setMessage(previous=>previous==="登録・呼び出し・修正を一つのマイクで続けられます。"||previous==="Create, browse and edit with one microphone."?(locale==="ja"?"登録・呼び出し・修正を一つのマイクで続けられます。":"Create, browse and edit with one microphone."):previous);},[locale]);
  const [draftPending,setDraftPending]=useState(false);
@@ -202,7 +203,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  }
  return <>
   <section id="voice-controls" aria-label={locale==="ja"?"音声操作モード":"Voice operation mode"} className="voice-mode-panel">
-   <h2>{locale==="ja"?"音声操作":"Voice control"}</h2>
+   <div className="voice-heading"><h2>{locale==="ja"?"音声操作":"Voice control"}</h2><button type="button" className="voice-settings-button" aria-label={locale==="ja"?"設定を開く":"Open settings"} aria-expanded={settingsOpen} onClick={()=>setSettingsOpen(v=>!v)}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M10 2h4l.7 2.5 2 1.1 2.5-.6 2 3.5-1.8 1.9v2.2l1.8 1.9-2 3.5-2.5-.6-2 1.1L14 22h-4l-.7-2.5-2-1.1-2.5.6-2-3.5 1.8-1.9v-2.2L2.8 9.5l2-3.5 2.5.6 2-1.1L10 2z"/></svg></button></div>
    <p>{locale==="ja"?"現在のモード: ":"Current mode: "}<strong>{locale==="ja"?labels[mode]:({idle:"Idle",create:"Create",browse:"Browse",edit:"Edit"} as const)[mode]}</strong>{mode==="edit"&&selected?` — ${selected.title.value}`:""}</p>
    {draftPending&&mode!=="create"&&<p role="status">{locale==="ja"?"登録途中の下書きを保持しています。":"Your unfinished recipe draft is preserved."}<button type="button" onClick={()=>void (async()=>{await navigate({mode:"create",target:""});if(currentMode.current!=="create")return;registration.current?.requestReview();feedback("保持していた下書きを確認します。");})()}>{locale==="ja"?"下書きに戻る":"Return to draft"}</button></p>}
    <p>{locale==="ja"?"「レシピを登録します」「〇〇を見せて」「パスタを150gに変更」のように続けて話してください。":"Speak naturally, such as “Create a recipe,” “Show me a recipe,” or “Change the pasta to 150g.”"}</p>
@@ -211,22 +212,31 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    <p role="status">{micRecording?(locale==="ja"?"音声受付中":"Listening"):micBusy?(locale==="ja"?"音声受付は一時停止・受信済みの音声を処理中":"Processing recorded audio; microphone paused"):(micError||micNotice)?(locale==="ja"?"音声受付は停止中・再開できます":"Microphone stopped; you can resume"):(locale==="ja"?"音声受付は停止中":"Microphone stopped")}</p>
    {micNotice&&<p role="status">{micNotice}</p>}
    {realtimeActive&&realtime.partial&&<p role="status">{locale==="ja"?"認識中：":"Recognizing: "}{realtime.partial}</p>}
-   <p>{locale==="ja"?"音声はMetaへ送信して文字起こしします。録音は保存しません。切り替え音の後に話してください。":"Audio is sent to Meta for transcription. Recordings are not saved. Speak after the cue."}</p>
    <p aria-live="polite">{micRecording?(locale==="ja"?"聞き取り中… ":"Listening… "):""}{micBusy?(locale==="ja"?"音声を文字にしています… ":"Transcribing… "):""}{routing?(locale==="ja"?"操作を処理中… ":"Processing… "):""}{message}</p>
    {micError&&<p role="alert">{micError}</p>}
-   {heard&&<p>{locale==="ja"?"認識した指示：":"Recognized instruction: "}{heard}</p>}
    <form onSubmit={event=>{event.preventDefault();receive(manual);setManual("");}}>
     <input aria-label={locale==="ja"?"音声認識できない場合の入力":"Manual input when voice recognition is unavailable"} value={manual} onChange={event=>setManual(event.target.value)} placeholder={locale==="ja"?"音声認識できないときの補助入力":"Type when voice recognition is unavailable"}/>
     <button type="submit" disabled={!manual.trim()}>{locale==="ja"?"反映":"Apply"}</button>
    </form>
-   <label>{locale==="ja"?"通知音の音量 ":"Notification volume "}<input aria-label={locale==="ja"?"通知音の音量":"Notification volume"} type="range" min="0" max="1" step="0.1" value={volume} onChange={event=>setVolume(Number(event.target.value))}/></label>
-   <button type="button" onClick={()=>setVolume(volume?0:.5)}>{volume?(locale==="ja"?"通知音をミュート":"Mute sounds"):(locale==="ja"?"通知音をオン":"Enable sounds")}</button>
-   <button type="button" onClick={()=>void navigate({mode:"create",target:""})}>{locale==="ja"?"新規登録・下書きを再開":"New recipe / resume draft"}</button>
-   <button type="button" onClick={()=>void navigate({mode:"browse",target:""})}>{locale==="ja"?"レシピを参照":"Browse recipes"}</button>
-   <button type="button" onClick={()=>void navigate({mode:"edit",target:""})}>{locale==="ja"?"選択レシピを編集":"Edit selected recipe"}</button>
-   <details><summary>{locale==="ja"?"音声の状態履歴（直近の動作）":"Recent voice activity"}</summary>
-    <ul>{diag.slice(-10).map(event=><li key={event.seq}>{new Date(event.at).toLocaleTimeString()} {event.kind}{event.trace?` [${event.trace}]`:""}{event.detail?`：${event.detail}`:""}</li>)}</ul>
-   </details>
+   <div className="voice-quick-modes" role="group" aria-label={locale==="ja"?"操作モード":"Operation mode"}>
+    <button type="button" aria-pressed={mode==="create"} onClick={()=>void navigate({mode:"create",target:""})}>{locale==="ja"?"登録":"Create"}</button>
+    <button type="button" aria-pressed={mode==="browse"} onClick={()=>void navigate({mode:"browse",target:""})}>{locale==="ja"?"参照":"Browse"}</button>
+    <button type="button" aria-pressed={mode==="edit"} onClick={()=>void navigate({mode:"edit",target:""})}>{locale==="ja"?"編集":"Edit"}</button>
+   </div>
+   {settingsOpen&&<section className="voice-settings-panel" aria-label={locale==="ja"?"音声設定":"Voice settings"}>
+    <h3>{locale==="ja"?"設定":"Settings"}</h3>
+    <label>{locale==="ja"?"通知音の音量 ":"Notification volume "}<input aria-label={locale==="ja"?"通知音の音量":"Notification volume"} type="range" min="0" max="1" step="0.1" value={volume} onChange={event=>setVolume(Number(event.target.value))}/></label>
+    <button type="button" onClick={()=>setVolume(volume?0:.5)}>{volume?(locale==="ja"?"通知音をミュート":"Mute sounds"):(locale==="ja"?"通知音をオン":"Enable sounds")}</button>
+    <details><summary>{locale==="ja"?"使い方を確認":"How to use"}</summary>
+     <p>{locale==="ja"?"「レシピを登録します」「〇〇を見せて」「パスタを150gに変更」のように話してください。":"Speak naturally to create, find or edit a recipe."}</p>
+     <p>{locale==="ja"?"音声はMetaへ送信して文字起こしします。録音は保存しません。切り替え音の後に話してください。":"Audio is sent to Meta for transcription. Recordings are not saved. Speak after the cue."}</p>
+     <p>{locale==="ja"?"保存・変更には内容確認と明示承認が必要です。":"Saving changes requires review and explicit approval."}</p>
+    </details>
+    {heard&&<details><summary>{locale==="ja"?"最後に認識した指示":"Last recognized instruction"}</summary><p>{heard}</p></details>}
+    <details><summary>{locale==="ja"?"音声の状態履歴（直近の動作）":"Recent voice activity"}</summary>
+     <ul>{diag.slice(-10).map(event=><li key={event.seq}>{new Date(event.at).toLocaleTimeString()} {event.kind}{event.trace?` [${event.trace}]`:""}{event.detail?`：${event.detail}`:""}</li>)}</ul>
+    </details>
+   </section>
   </section>
   <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} onDiscarded={()=>setDraftPending(false)} sharedVoice={{markReview:mark,cancel:()=>{},captureMessage:micRecording?"音声受付中です。確認後は「登録」「登録してください」でも保存できます。":micBusy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${micError||micNotice||""}`}} onCreated={(recipe,mode,suppliers)=>{
    // The spoken purchase source survives as a memo in this always-visible
