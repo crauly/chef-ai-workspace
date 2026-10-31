@@ -36,9 +36,16 @@ VOICE_RECIPE_SCHEMA_PY = {
                 "suggestion": {"type": "string"},
                 "reason": {"type": "string"}},
             "required": ["source", "suggestion", "reason"],
+            "additionalProperties": False}},
+        "price_research": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "material_name": {"type": "string"},
+                "request": {"type": "string"}},
+            "required": ["material_name", "request"],
             "additionalProperties": False}}},
     "required": ["title", "materials", "selling_price_jpy",
-                 "notes", "interpretations"],
+                 "notes", "interpretations", "price_research"],
     "additionalProperties": False}
 
 
@@ -106,7 +113,7 @@ class LiveStructuredOutputTests(unittest.TestCase):
         # fixture spec, not in this live probe.
         self.assertEqual(set(parsed),
                          {"title", "materials", "selling_price_jpy",
-                          "notes", "interpretations"})
+                          "notes", "interpretations", "price_research"})
         self.assertIsInstance(parsed["title"], str)
         self.assertIsInstance(parsed["notes"], list)
         self.assertTrue(all(isinstance(n, str) for n in parsed["notes"]))

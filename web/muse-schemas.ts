@@ -35,6 +35,20 @@ const MATERIAL_SCHEMA = {
   additionalProperties: false,
 };
 
+const PRICE_RESEARCH_SCHEMA = {
+  type: "object",
+  properties: {
+    // Ingredient name as spoken in the price-research request.
+    material_name: { type: "string" },
+    // Chef's request in their own words: average, market quote, cheaper
+    // supplier, named maker or shop. Recorded only; the app resolves it
+    // against the owned ledger, never against model knowledge.
+    request: { type: "string" },
+  },
+  required: ["material_name", "request"],
+  additionalProperties: false,
+};
+
 const INTERPRETATION_SCHEMA = {
   type: "object",
   properties: {
@@ -54,8 +68,13 @@ export const VOICE_RECIPE_SCHEMA = {
     selling_price_jpy: { type: "string" },
     notes: { type: "array", items: { type: "string" } },
     interpretations: { type: "array", items: INTERPRETATION_SCHEMA },
+    // Explicit price-research requests only (average, market quote, cheaper
+    // supplier, named maker/shop). [] otherwise. The app resolves each entry
+    // against the owned ledger and reports back in notes; prices from model
+    // knowledge are never filled in.
+    price_research: { type: "array", items: PRICE_RESEARCH_SCHEMA },
   },
-  required: ["title", "materials", "selling_price_jpy", "notes", "interpretations"],
+  required: ["title", "materials", "selling_price_jpy", "notes", "interpretations", "price_research"],
   additionalProperties: false,
 } as const;
 

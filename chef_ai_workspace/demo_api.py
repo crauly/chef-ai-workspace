@@ -658,6 +658,86 @@ def impact_demo_price(ingredient_id: UUID, observation_id: UUID,
                             str(observation_id))
 
 
+# --- Price reference for natural-language research requests (read-only) ---
+
+MAX_REFERENCE_CANDIDATES = 3
+
+
+@router.get("/price-reference")
+def reference_demo_price(name: str = Query(default="", max_length=200),
+                         ctx=Depends(demo_context)):
+    """Ledger-grounded reference price for draft creation.
+
+    Resolves a spoken ingredient name against the caller's owned ledger
+    (up to three candidates) and returns a deterministic representative
+    unit price per candidate, computed only from comparable owned
+    observations via summarize_reference_price. No web retrieval exists,
+    so nothing here invents market prices: unknown terms stay unknown.
+    Reads only; never adopts, confirms, or writes anything.
+    """
+    from .price_history import summarize_reference_price
+    owner, repository = ctx
+    query = (name or "").strip()
+    if not query:
+        raise HTTPException(422, "Ingredient name required")
+    searcher = getattr(repository, "search_owned_ingredients", None)
+    offers_of = getattr(repository, "list_ingredient_offers", None)
+    latest_of = getattr(repository, "list_latest_observations_for_offers", None)
+    if not callable(searcher) or not callable(offers_of) or not callable(latest_of):
+        raise HTTPException(503, "Price reference not configured")
+    hits = [hit for hit in (searcher(owner, query, MAX_REFERENCE_CANDIDATES) or [])
+            if isinstance(hit, dict) and hit.get("id") and hit.get("name")]
+    hits = hits[:MAX_REFERENCE_CANDIDATES]
+    candidates = []
+    for hit in hits:
+        ingredient_id = str(hit["id"])
+        try:
+            offers = offers_of(owner, ingredient_id) or []
+        except ValueError:
+            continue
+        offer_ids = [str(offer.get("id")) for offer in offers if offer.get("id")]
+        per_offer = latest_of(owner, offer_ids) if offer_ids else {}
+        observations = []
+        provenance = []
+        for offer in offers:
+            row = per_offer.get(str(offer.get("id")))
+            if not isinstance(row, dict) or not row.get("id"):
+                continue
+            full = {"id": row.get("id"), "ingredient_id": ingredient_id,
+                    "offer_id": offer.get("id"),
+                    "supplier_id": row.get("supplier_id"),
+                    "amount_jpy": row.get("amount_jpy"),
+                    "currency": row.get("currency"),
+                    "tax_note": row.get("tax_note"),
+                    "shipping_note": row.get("shipping_note"),
+                    "package_quantity": (offer.get("package_quantity")
+                                         or row.get("package_quantity")),
+                    "package_unit": (offer.get("package_unit")
+                                     or row.get("package_unit")),
+                    "source": row.get("source"),
+                    "confirmed": row.get("confirmed"),
+                    "observed_at": row.get("observed_at")}
+            try:
+                observations.append(_to_price_observation(full))
+            except (KeyError, TypeError, ValueError):
+                continue
+            provenance.append({
+                "observation_id": str(row.get("id")),
+                "amount": row.get("amount_jpy"),
+                "currency": row.get("currency"),
+                "package_quantity": full["package_quantity"],
+                "package_unit": full["package_unit"],
+                "source": row.get("source"),
+                "observed_at": row.get("observed_at"),
+                "supplier_id": row.get("supplier_id")})
+        candidates.append({
+            "ingredient_id": ingredient_id,
+            "ingredient_name": hit.get("name"),
+            "reference": summarize_reference_price(observations),
+            "observations": provenance})
+    return _json({"query": query, "candidates": candidates})
+
+
 # --- M6: price-change bell notifications (explicit confirmation only) ---
 
 class NotificationStatusBody(BaseModel):
