@@ -108,5 +108,58 @@ class GroundingContractTests(unittest.TestCase):
         self.assertFalse(res["available"])
 
 
+class NonFiniteTests(unittest.TestCase):
+    def test_non_finite_amounts_rejected_without_abort(self):
+        base = dict(CANDIDATE)
+        for bad in ("NaN", "sNaN", "Infinity", "-Infinity"):
+            # Must return None, never raise out of validation.
+            self.assertIsNone(validate_external_candidate(
+                dict(base, amount=bad)), "amount=" + bad)
+            self.assertIsNone(validate_external_candidate(
+                dict(base, package_quantity=bad)), "quantity=" + bad)
+
+    def test_non_finite_rows_dropped_aggregate_unchanged(self):
+        good = dict(CANDIDATE)
+        good2 = dict(CANDIDATE, name="豚バラ肉B", amount="460",
+                     seller="Shop B", source="shop2.example")
+        poisoned = [good, {"name": "x", "amount": "NaN", "currency": "JPY",
+                            "package_quantity": "500", "package_unit": "g",
+                            "seller": "S", "source": "s"},
+                    dict(good2, amount="Infinity"), good2]
+        res = summarize_external_reference(poisoned)
+        self.assertTrue(res["available"])
+        self.assertEqual(res["sample_count"], 2)
+        # (380 + 460) / 2 per 500g -> 0.84/g; poisoned rows excluded.
+        self.assertEqual(res["average_unit_price"], "0.8400")
+        self.assertEqual(res["excluded_count"], 0)
+
+
+class ProvenanceTests(unittest.TestCase):
+    OLD = "2020-05-01T10:00:00+00:00"
+
+    def test_samples_keep_provenance_no_backfill(self):
+        mine = dict(CANDIDATE, fetched_at=self.OLD,
+                    tax_note="税込", shipping_note="送料別")
+        res = summarize_external_reference([mine])
+        self.assertTrue(res["available"])
+        sample = res["samples"][0]
+        # Original observation time/URL/terms survive aggregation.
+        self.assertEqual(sample["fetched_at"], self.OLD)
+        self.assertEqual(sample["url"], CANDIDATE["url"])
+        self.assertEqual(sample["tax_note"], "税込")
+        self.assertEqual(sample["shipping_note"], "送料別")
+        # Aggregation time is labelled as such, never as fetched_at.
+        self.assertIn("aggregated_at", res)
+        self.assertNotIn("fetched_at", res)
+        self.assertNotEqual(res["aggregated_at"], self.OLD)
+
+    def test_missing_provenance_never_fabricated(self):
+        res = summarize_external_reference([dict(CANDIDATE)])
+        sample = res["samples"][0]
+        self.assertNotIn("fetched_at", sample)
+        self.assertNotIn("tax_note", sample)
+        self.assertEqual(sample["url"], CANDIDATE["url"])
+
+
 if __name__ == "__main__":
     unittest.main()

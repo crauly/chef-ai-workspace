@@ -89,6 +89,39 @@ test("real grounded shape (commentary, open_page, prose citations) parses", () =
   expect(entry.text).toContain("サンプルからの参考値");
 });
 
+test("non-finite amounts are rejected in parity with Python is_finite", () => {
+  for (const bad of ["NaN", "Infinity", "-Infinity"]) {
+    expect(validateGroundedCandidate({...CANDIDATE, amount: bad})).toBeNull();
+    expect(validateGroundedCandidate({...CANDIDATE, package_quantity: bad})).toBeNull();
+  }
+  // Poisoned rows drop out; the valid aggregate is unchanged: (380+460)/2/500.
+  const good2 = {...CANDIDATE, name: "B", amount: "460", seller: "S2", source: "s2.example"};
+  const entry = summarizeGroundedCandidates(
+    [CANDIDATE, {...CANDIDATE, amount: "NaN"}, {...good2, amount: "Infinity"}, good2],
+    [CITATION], "豚バラ肉", "2026-11-01T00:00:00Z");
+  expect(entry.status).toBe("available");
+  expect(entry.average_unit_price).toBe("0.8400");
+  expect(entry.observation_count).toBe(2);
+});
+
+test("samples keep provenance; missing fields are never backfilled", () => {
+  const mine = {...CANDIDATE, fetched_at: undefined,
+    tax_note: "税込", shipping_note: "送料別"};
+  const withTime = {...mine};
+  (withTime as Record<string, unknown>).fetched_at = "2020-05-01T10:00:00Z";
+  const entry = summarizeGroundedCandidates([withTime], [CITATION], "豚バラ肉", "2026-11-01T00:00:00Z");
+  expect(entry.status).toBe("available");
+  // Candidate-level observation time/URL/terms survive; the entry time differs.
+  expect(entry.samples[0].fetched_at).toBe("2020-05-01T10:00:00Z");
+  expect(entry.samples[0].url).toBe(CANDIDATE.url);
+  expect(entry.samples[0].tax_note).toBe("税込");
+  expect(entry.fetched_at).toBe("2026-11-01T00:00:00Z");
+  const bare = summarizeGroundedCandidates([{...CANDIDATE}], [CITATION], "豚バラ肉", "2026-11-01T00:00:00Z");
+  expect(bare.samples[0].url).toBe(CANDIDATE.url);
+  expect(bare.samples[0].tax_note).toBeUndefined();
+  expect(bare.samples[0].fetched_at).toBe("2026-11-01T00:00:00Z");
+});
+
 test("ledger hit never triggers web search; ledger miss falls back to grounding", async () => {
   const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
   const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;

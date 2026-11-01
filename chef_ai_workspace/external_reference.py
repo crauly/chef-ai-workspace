@@ -60,11 +60,15 @@ def validate_external_candidate(raw):
     """Validate one external price candidate. Returns a normalized dict or
     None when required provenance/pricing fields are missing.
 
-    Required: name, amount (decimal string, >= 0), currency,
-    package_quantity (positive decimal string), package_unit, seller,
-    source. Optional: url, fetched_at, tax_note, shipping_note, maker,
-    spec. Comparability is decided later; validation only rejects
-    uninterpretable rows, never silently repairs them.
+    Required: name, amount (finite decimal string, >= 0), currency,
+    package_quantity (finite positive decimal string), package_unit,
+    seller, source. Optional: url, fetched_at, tax_note, shipping_note,
+    maker, spec. Non-finite values (NaN, sNaN, Infinity, -Infinity) are
+    rejected: Decimal() accepts them but ordered comparisons either raise
+    or misbehave, so finiteness is checked before any comparison and only
+    the offending row is dropped, never the whole batch. Comparability is
+    decided later; validation only rejects uninterpretable rows, never
+    silently repairs them.
     """
     if not isinstance(raw, dict):
         return None
@@ -84,6 +88,8 @@ def validate_external_candidate(raw):
         value = Decimal(amount.strip())
         base_qty = Decimal(quantity.strip())
     except (InvalidOperation, AttributeError):
+        return None
+    if not value.is_finite() or not base_qty.is_finite():
         return None
     if value < 0 or base_qty <= 0 or len(amount.strip()) > 30:
         return None
@@ -124,6 +130,13 @@ def summarize_external_reference(candidates):
     result is labelled a sample reference with its count -- never a
     general market average. Insufficient or empty input yields
     {"available": False} with the reason stated.
+
+    Provenance: each sample keeps the candidate's own url, fetched_at,
+    tax_note, shipping_note, maker, and spec when supplied -- never
+    backfilled, never guessed. Top-level "aggregated_at" is when this
+    summary was computed, NOT when the offers were observed; a listing
+    fetched earlier keeps its own fetched_at and is never relabelled as
+    fetched now.
     """
     valid = []
     for raw in candidates or []:
@@ -150,15 +163,23 @@ def summarize_external_reference(candidates):
     average = (total / len(members)).quantize(Decimal("0.0001"))
     excluded = len(valid) - len(members)
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    samples = []
+    for item, _ in members:
+        sample = {"name": item["name"], "seller": item["seller"],
+                  "source": item["source"],
+                  "amount": item["amount"],
+                  "package": (item["package_quantity"]
+                              + item["package_unit"])}
+        for key in ("url", "fetched_at", "tax_note", "shipping_note",
+                    "maker", "spec"):
+            if key in item:
+                sample[key] = item[key]
+        samples.append(sample)
     return {"available": True, "origin": "external",
             "currency": currency, "dimension": dim,
             "average_unit_price": str(average),
             "sample_count": len(members), "excluded_count": excluded,
             "label": (f"{len(members)}件のサンプルからの参考値"
                       f"{'（比較対象外' + str(excluded) + '件を除外）' if excluded else ''}"),
-            "fetched_at": now,
-            "samples": [{"name": item["name"], "seller": item["seller"],
-                         "source": item["source"],
-                         "amount": item["amount"],
-                         "package": (item["package_quantity"] + item["package_unit"])}
-                        for item, _ in members]}
+            "aggregated_at": now,
+            "samples": samples}

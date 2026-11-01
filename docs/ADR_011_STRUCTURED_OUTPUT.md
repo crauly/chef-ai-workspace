@@ -91,8 +91,12 @@ longer singles out any cuisine in dish-title normalization examples.
   excluded, never mixed. `price_references` entries carry
   `origin: "ledger" | "external"`, external ones additionally
   `sources: [{url, title}]` + `fetched_at` (UI-safe: the existing card
-  renders `text` only). No EC-specific code, no fabricated prices, no
-  model-knowledge fill.
+  renders `text` only). Validation rejects non-finite decimals (NaN,
+  Infinity) row-wise on both runtimes without aborting. Each sample keeps
+  its own url/fetched_at/tax/shipping provenance (never backfilled); the
+  Python summary labels computation time `aggregated_at` so old listings
+  are never relabelled as fetched now. No EC-specific code, no fabricated
+  prices, no model-knowledge fill.
 - Price research signal: `price_research: [{material_name, request}]` records the chef's explicit request only; the route resolves it against the owned ledger (`GET /demo/price-reference`, read-only) and reports back in the non-blocking `price_references` response field (never `notes`, so the save gate is untouched). Non-JPY references keep their currency verbatim; candidate selection prefers exact-name available history and names any non-exact fallback explicitly. Prices stay empty (missing path); enrichment failure never fails the draft. Lookup failures are reported distinctly from genuine no-history (`status: unavailable | unauthorized | invalid_response` vs `none`) with non-secret Japanese text, so a backend/auth outage is never disguised as "no history". No web retrieval exists, so model-knowledge prices stay forbidden.
 - Tests: `web/tests/structured-output.spec.ts` (fixture, no key),
   `tests/test_structured_output_contract.py` (contract pin).

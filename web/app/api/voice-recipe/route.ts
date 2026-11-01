@@ -13,7 +13,7 @@ function backendBase():string|undefined{
 type ReferenceSummary={available:boolean;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null};
 type ReferenceCandidate={ingredient_id:string;ingredient_name:string;reference:ReferenceSummary;observations?:unknown[]};
 type LedgerLookup={kind:"ok";candidates:ReferenceCandidate[]}|{kind:"unavailable"|"unauthorized"|"invalid_response"};
-type PriceReferenceEntry={material_name:string;status:"available"|"none"|"unavailable"|"unauthorized"|"invalid_response";origin:"ledger"|"external";ingredient_name:string|null;currency:string|null;unit_basis:string|null;average_unit_price:string|null;observation_count:number|null;observed_to:string|null;sources?:{url:string;title:string}[];fetched_at?:string;text:string};
+type PriceReferenceEntry={material_name:string;status:"available"|"none"|"unavailable"|"unauthorized"|"invalid_response";origin:"ledger"|"external";ingredient_name:string|null;currency:string|null;unit_basis:string|null;average_unit_price:string|null;observation_count:number|null;observed_to:string|null;sources?:{url:string;title:string}[];fetched_at?:string;samples?:{name:string;seller:string;source:string;amount:string;package:string;url?:string;fetched_at?:string;tax_note?:string;shipping_note?:string;maker?:string;spec?:string}[];text:string};
 async function lookupCandidates(name:string):Promise<LedgerLookup>{
  const base=backendBase(),token=process.env.DEMO_ACCESS_TOKEN;
  // No connection means configured: the ledger cannot be reached, which is

@@ -21,8 +21,15 @@ export type GroundedCitation = {url: string; title: string};
 export type GroundedCandidate = {
   name: string; amount: string; currency: string;
   package_quantity: string; package_unit: string;
-  seller: string; source: string; url?: string;
+  seller: string; source: string; url?: string; fetched_at?: string;
   maker?: string; spec?: string; tax_note?: string; shipping_note?: string;
+};
+export type GroundedSample = {
+  name: string; seller: string; source: string;
+  amount: string; package: string;
+  url?: string; fetched_at?: string;
+  tax_note?: string; shipping_note?: string;
+  maker?: string; spec?: string;
 };
 export type ExternalPriceEntry = {
   material_name: string;
@@ -36,6 +43,7 @@ export type ExternalPriceEntry = {
   observed_to: string | null;
   sources: GroundedCitation[];
   fetched_at: string;
+  samples: GroundedSample[];
   text: string;
 };
 
@@ -138,7 +146,13 @@ export function parseGroundedResponse(raw: unknown): {
   return out;
 }
 
-/** Mirror of Python validate_external_candidate: normalize or null. */
+/** Mirror of Python validate_external_candidate: normalize or null.
+ *
+ * Finiteness parity: the DECIMAL regex only matches plain digit strings,
+ * so "NaN", "Infinity", and "-Infinity" are rejected here exactly as
+ * Python's is_finite() gate rejects them -- no exception path exists on
+ * either side, and only the offending row is dropped.
+ */
 export function validateGroundedCandidate(raw: unknown): GroundedCandidate | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const rec = raw as Record<string, unknown>;
@@ -159,7 +173,9 @@ export function validateGroundedCandidate(raw: unknown): GroundedCandidate | nul
     seller: String(rec.seller).trim().slice(0, 200),
     source: String(rec.source).trim().slice(0, 200),
   };
-  for (const k of ["url", "maker", "spec", "tax_note", "shipping_note"] as const) {
+  // fetched_at passes through exactly like Python: a candidate-observed
+  // timestamp survives; when absent the shared search time is used below.
+  for (const k of ["url", "fetched_at", "maker", "spec", "tax_note", "shipping_note"] as const) {
     const v = rec[k];
     if (typeof v === "string" && v.trim() && v.length <= 500) out[k] = v.trim();
   }
@@ -191,7 +207,7 @@ export function summarizeGroundedCandidates(
     material_name: wanted, status: "none", origin: "external",
     ingredient_name: null, currency: null, unit_basis: null,
     average_unit_price: null, observation_count: null, observed_to: null,
-    sources: citations.slice(0, 10), fetched_at: fetchedAt, text,
+    sources: citations.slice(0, 10), fetched_at: fetchedAt, samples: [], text,
   });
   if (!valid.length) {
     return none(`参考価格なし：${wanted}のWeb調査では価格と容量が確認できる候補がありませんでした（価格未確定のまま保存できます）`);
@@ -227,11 +243,29 @@ export function summarizeGroundedCandidates(
   }).filter(Boolean))].slice(0, 3).join("・");
   const terms = [tax ? `税条件:${tax}` : "", ship ? `送料:${ship}` : ""].filter(Boolean).join(" ");
   const amount = currency === "JPY" ? `${unit}あたり平均${avgStr}円` : `${unit}あたり平均${avgStr} ${currency}`;
+  // Per-sample provenance: url/tax/shipping/maker/spec travel with the
+  // sample only when the candidate supplied them -- never backfilled.
+  // fetched_at here is the search time shared by all candidates of this
+  // grounding call, i.e. their genuine observation time, not an estimate.
+  const samples: GroundedSample[] = sorted.map(({item}) => {
+    const sample: GroundedSample = {
+      name: item.name, seller: item.seller, source: item.source,
+      amount: item.amount,
+      package: item.package_quantity + item.package_unit,
+      // The candidate's own observation time wins; otherwise the shared
+      // search time (genuine for this grounding call, never an estimate).
+      fetched_at: item.fetched_at ?? fetchedAt,
+    };
+    for (const k of ["url", "tax_note", "shipping_note", "maker", "spec"] as const) {
+      if (item[k] !== undefined) sample[k] = item[k];
+    }
+    return sample;
+  });
   return {
     material_name: wanted, status: "available", origin: "external",
     ingredient_name: sorted[0].item.name, currency, unit_basis: unit,
     average_unit_price: avgStr, observation_count: sorted.length, observed_to: null,
-    sources: citations.slice(0, 10), fetched_at: fetchedAt,
+    sources: citations.slice(0, 10), fetched_at: fetchedAt, samples,
     text: `Web参考価格：${sorted[0].item.name}は${amount}` +
       `（${sorted.length}件のサンプルからの参考値` +
       `${excluded ? `・比較対象外${excluded}件を除外` : ""}` +
