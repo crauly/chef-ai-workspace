@@ -186,3 +186,22 @@ set suppresses duplicate calls for the same ingredient + request.
 - Fixture proof: `web/tests/voice-price-lifecycle.spec.ts` (carry-over
   with exactly 1 prices call, rename restarts without stale binding,
   failure keeps draft and clears searching, bottom-mic recording state).
+
+## Price-search lifecycle follow-ups (PR #100 review)
+Three completions to the flight model, same guarantees (row identity,
+Human Gate, no misbinding):
+- Empty follow-up pending terminates the old flight: a parse result with
+  no `pending_research` aborts any running search and drops its stash, so
+  unneeded prices can never land and loading never sticks.
+- Discarding the draft resets search history: `clear()` and successful
+  save clear `priceDoneKeys` (plus flight/stash/loading), so the same
+  ingredient in a fresh registration is searched again.
+- Search finishing mid-parse is stashed, not lost: when the prices
+  response arrives while no live draft exists (a follow-up parse is in
+  flight), it is kept with its key/rows and applied by the completing
+  parse without refetching (exactly one prices call); a stale stash never
+  overwrites a changed draft, and a parse failure adopts a matching stash
+  onto the kept draft instead of stranding it.
+- Fixture proof: three added cases in
+  `web/tests/voice-price-lifecycle.spec.ts` (empty-pending termination,
+  discard-then-research, mid-parse completion without refetch).
