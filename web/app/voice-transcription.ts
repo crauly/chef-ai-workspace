@@ -96,7 +96,13 @@ export async function transcribeWav(audio: Uint8Array, language: "ja" | "en-US",
     const bytes = await readBody(reader, bodyBudgetMs);
     const out: unknown = JSON.parse(new TextDecoder().decode(bytes));
     const transcript = out && typeof out === "object" ? (out as {transcript?: unknown}).transcript : null;
-    if (typeof transcript !== "string" || !transcript.trim() || transcript.length > 1000)
+    // Silence / unrecognizable audio is normal operation, not a provider
+    // fault: Meta returns HTTP 200 with an empty transcript (live-verified).
+    // Report it as 200 with no_speech so the UI keeps listening silently
+    // without an error cue. Anything structurally wrong stays "invalid".
+    if (typeof transcript === "string" && !transcript.trim())
+      return {transcript: "", no_speech: true as const, provider: "meta_voice", model: VOICE_MODEL};
+    if (typeof transcript !== "string" || transcript.length > 1000)
       throw new TranscriptionError("invalid");
     return {transcript, provider: "meta_voice", model: VOICE_MODEL};
   } catch (error) {

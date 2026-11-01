@@ -115,6 +115,14 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
           throw new Error("transcription:" + (code || response.status));
         }
         const result: unknown = await response.json();
+        // Silence / unrecognizable audio arrives as 200 + no_speech: keep the
+        // microphone open and the draft, but stay silent (no error cue, no
+        // transcript callback). Malformed payloads still raise and are shown.
+        if (result && typeof result === "object" &&
+          (result as {no_speech?: unknown}).no_speech === true) {
+          logVoiceEvent("transcribe.nospeech", "");
+          return;
+        }
         const text = result && typeof result === "object" ? (result as {transcript?: unknown}).transcript : null;
         if (typeof text !== "string" || !text.trim() || text.length > 1000) throw new Error("transcription:invalid");
         logVoiceEvent("transcribe.ok", "");
