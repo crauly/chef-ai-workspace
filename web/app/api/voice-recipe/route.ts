@@ -11,7 +11,7 @@ function backendBase():string|undefined{
 }
 type ReferenceSummary={available:boolean;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null};
 type ReferenceCandidate={ingredient_id:string;ingredient_name:string;reference:ReferenceSummary;observations?:unknown[]};
-type PriceReferenceEntry={material_name:string;status:"available"|"none";ingredient_name:string|null;currency:string|null;unit_basis:string|null;average_unit_price:string|null;observation_count:number|null;observed_to:string|null;text:string};
+type PriceReferenceEntry={material_name:string;status:"available"|"none";origin:"ledger"|"external";ingredient_name:string|null;currency:string|null;unit_basis:string|null;average_unit_price:string|null;observation_count:number|null;observed_to:string|null;text:string};
 async function lookupCandidates(name:string):Promise<ReferenceCandidate[]|null>{
  const base=backendBase(),token=process.env.DEMO_ACCESS_TOKEN;
  if(!base||!token)return null;
@@ -44,7 +44,7 @@ function selectReference(materialName:string,candidates:ReferenceCandidate[]|nul
  const chosen=exact||available[0];
  if(!chosen||typeof chosen.reference.average_unit_price!=="string"||
     typeof chosen.reference.unit_basis!=="string"||typeof chosen.reference.currency!=="string"){
-  return {material_name:wanted,status:"none",ingredient_name:null,currency:null,unit_basis:null,
+  return {material_name:wanted,status:"none",origin:"ledger",ingredient_name:null,currency:null,unit_basis:null,
    average_unit_price:null,observation_count:null,observed_to:null,
    text:`参考価格なし：${wanted}の仕入履歴がありません（価格未確定のまま保存できます）`};
  }
@@ -56,7 +56,7 @@ function selectReference(materialName:string,candidates:ReferenceCandidate[]|nul
  // judge; its ingredient is stated explicitly, never merged silently.
  const prefix=chosen.ingredient_name.trim()===wanted?`参考価格：${chosen.ingredient_name}は`:
   `参考価格（完全一致なし・${chosen.ingredient_name}の履歴を参考）：`;
- return {material_name:wanted,status:"available",ingredient_name:chosen.ingredient_name,
+ return {material_name:wanted,status:"available",origin:"ledger",ingredient_name:chosen.ingredient_name,
   currency,unit_basis:basis,average_unit_price:average,
   observation_count:count,observed_to:typeof ref.observed_to==="string"?ref.observed_to:null,
   text:`${prefix}${formatAmount(average,basis,currency)}（あなたの仕入履歴${count}件${when}・推定・要確認）`};
@@ -68,12 +68,29 @@ type Material={name:string;quantity:string;unit:string;price_jpy:string;price_qu
 function parse(raw:unknown) {
  if(!raw||typeof raw!=="object"||Array.isArray(raw))return null;
  const o=raw as Record<string,unknown>;
- const keys=Object.keys(o).sort().join("|");
- if(keys!=="materials|notes|selling_price_jpy|title"&&keys!=="interpretations|materials|notes|selling_price_jpy|title"&&keys!=="materials|notes|price_research|selling_price_jpy|title"&&keys!=="interpretations|materials|notes|price_research|selling_price_jpy|title")return null;
+ const optionalKeys=new Set(["interpretations","price_research","name_corrections"]);
+ const coreKeys=Object.keys(o).sort().filter(k=>!optionalKeys.has(k)).join("|");
+ if(coreKeys!=="materials|notes|selling_price_jpy|title")return null;
  if(typeof o.title!=="string"||o.title.length>200||typeof o.selling_price_jpy!=="string"||o.selling_price_jpy.length>30||
     !Array.isArray(o.materials)||o.materials.length>40||!Array.isArray(o.notes)||o.notes.length>30||
     !o.notes.every(n=>typeof n==="string"&&n.length<=200))return null;
  const materials:Material[]=[];
+ const nameCorrections=o.name_corrections===undefined?[]:o.name_corrections;
+ if(!Array.isArray(nameCorrections)||nameCorrections.length>40||!nameCorrections.every(value=>{
+  if(!value||typeof value!=="object"||Array.isArray(value))return false;
+  const item=value as Record<string,unknown>;
+  if(Object.keys(item).sort().join("|")!=="candidates|heard|material_name")return false;
+  if(typeof item.material_name!=="string"||!item.material_name.trim()||item.material_name.length>200)return false;
+  if(typeof item.heard!=="string"||item.heard.length>200)return false;
+  const list=item.candidates;
+  return Array.isArray(list)&&list.length>=1&&list.length<=3&&list.every(c=>{
+   if(!c||typeof c!=="object"||Array.isArray(c))return false;
+   const cand=c as Record<string,unknown>;
+   return Object.keys(cand).sort().join("|")==="name|reason"&&
+    typeof cand.name==="string"&&cand.name.trim().length>0&&cand.name.length<=200&&
+    typeof cand.reason==="string"&&cand.reason.trim().length>0&&cand.reason.length<=200;
+  });
+ }))return null;
  const priceResearch=o.price_research===undefined?[]:o.price_research;
  if(!Array.isArray(priceResearch)||priceResearch.length>10||!priceResearch.every(value=>{
   if(!value||typeof value!=="object"||Array.isArray(value))return false;
@@ -104,7 +121,7 @@ function parse(raw:unknown) {
   if(!decimal.test(m.price_jpy)||!decimal.test(m.price_quantity)||Number(m.price_quantity)<=0||!units.has(m.price_unit))
    missing.push(`${m.name||"食材"}の仕入単価・基準数量・単位`);
  }
- return {title:o.title.trim(),materials,selling_price_jpy:o.selling_price_jpy,notes:o.notes,missing,interpretations,priceResearch:priceResearch as {material_name:string;request:string}[]};
+ return {title:o.title.trim(),materials,selling_price_jpy:o.selling_price_jpy,notes:o.notes,missing,interpretations,priceResearch:priceResearch as {material_name:string;request:string}[],nameCorrections:nameCorrections as {material_name:string;heard:string;candidates:{name:string;reason:string}[]}[]};
 }
 export async function POST(req:NextRequest){
  if(!await previewAuthorized(req))return error(403);
@@ -132,8 +149,8 @@ export async function POST(req:NextRequest){
   }
   const system=`You are a professional chef interpreting English or Japanese recipe dictation, not a literal stenographer. English is the primary language; Japanese is fully supported. Do not favor any cuisine.
 Read the chronological spoken turns as one conversation, merge fragments and explicit corrections, and return a proposed UNSAVED recipe.
-Output only JSON with exactly title, materials, selling_price_jpy, notes, interpretations, price_research. title/selling_price_jpy are strings. notes MUST be an array of strings; [] if no unresolved ambiguity. interpretations is an array of {source,suggestion,reason}, all short strings; [] when no dish-name normalization is needed.
-Use culinary context to normalize a clear phonetic ASR error in a familiar DISH TITLE in the spoken language, without favoring any cuisine. Record the verbatim source, proposed title and brief culinary reason in interpretations. These are visible suggestions awaiting human review, not edits to the raw transcript. Respect intentionally coined names and explicit user corrections. If several titles remain plausible, retain the source and ask in notes instead of guessing.
+Output only JSON with exactly title, materials, selling_price_jpy, notes, interpretations, price_research, name_corrections. name_corrections is an array of {material_name, heard, candidates}, all short strings; [] when every ingredient name is confident. title/selling_price_jpy are strings. notes MUST be an array of strings; [] if no unresolved ambiguity. interpretations is an array of {source,suggestion,reason}, all short strings; [] when no dish-name normalization is needed.
+Use culinary context to normalize a clear phonetic ASR error in a familiar DISH TITLE in the spoken language, without favoring any cuisine. Record the verbatim source, proposed title and brief culinary reason in interpretations. These are visible suggestions awaiting human review, not edits to the raw transcript. Respect intentionally coined names and explicit user corrections. For ingredient names, list correction candidates in name_corrections: material_name is the name used in materials, heard is the verbatim ASR span (or "" when identical), and candidates holds 1-3 {name, reason} alternatives for the chef to choose from. Normalize only obvious phonetic or ASR errors in common ingredient and seasoning names using the dish context, in English and Japanese alike. Never rewrite a distinctive, brand, or maker name into another product; keep the maker's wording in materials name. Omit the entry when confident and never pad the list to fill the count. Candidates are suggestions awaiting explicit user choice and are never applied automatically. If several titles remain plausible, retain the source and ask in notes instead of guessing.
 Never invent or change ingredient brands, quantities, prices, units or selling prices based on what a dish normally contains. Never add unspoken typical ingredients. Merge later brand/package information into the same ingredient; preserve the chef's ingredient wording. Filler and repeated syllables are normal. Missing selling price is optional and must not block saving or create a note.
 materials is an array of objects with exactly name, quantity, unit, price_jpy, price_quantity, price_unit, supplier, all strings. Allowed units: g, kg, ml, L. Prices are JPY; numbers are plain decimal strings. Use empty strings for missing string facts. supplier holds ONLY the spoken purchase source (store, market, brand outlet); empty string when unstated, never guessed. Keep preserving the manufacturer inside name exactly as spoken. Convert spoken numerals faithfully in the spoken language (Japanese: 千 is thousands, 百 is hundreds; English number words at face value); never drop a zero, convert units, or infer a market price. When the chef explicitly asks for price research (checking a price, using an average or market quote, finding a cheaper supplier, naming a maker or shop), record one price_research entry per ingredient with material_name and the request in their own words, and leave that ingredient's price fields empty. You have no web retrieval: never fill prices from your own knowledge, even when asked. A named shop or site is recorded as the request, never fetched. price_research is [] when no research was asked. A package price is not the quantity consumed. Example: 100g used, a 500g pack costing 350円 => quantity "100", unit "g", price_jpy "350", price_quantity "500", price_unit "g". Preserve the manufacturer in name when no separate field exists.
 When a previous draft is supplied alongside new turns, revise that draft using only the new turns: preserve resolved facts unless a new turn contradicts them, and never reintroduce facts the draft already dropped.
