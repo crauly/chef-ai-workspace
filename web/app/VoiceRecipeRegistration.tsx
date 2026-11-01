@@ -61,9 +61,26 @@ export function priceMissingNames(draft:Draft):string[]{
 // tests). The generated image is a preview only, never recipe evidence.
 export function dishImagePrompt(title:string,names:string[],hint:string):string{
  const dish=(title||"").trim()||"unspecified dish";
- const items=names.map(n=>n.trim()).filter(Boolean).slice(0,8);
- const extra=hint.trim().slice(0,200);
- return `Appetizing food photograph of ${dish}`+(items.length?`, made with ${items.join(", ")}`:"")+(extra?`. ${extra}`:"");
+ let items=names.map(n=>n.trim()).filter(Boolean).slice(0,8);
+ let extra=hint.trim().slice(0,200);
+ const build=()=>`Appetizing food photograph of ${dish}`+(items.length?`, made with ${items.join(", ")}`:"")+(extra?`. ${extra}`:"");
+ let prompt=build();
+ // The route rejects the whole prompt past 500 chars: shed trailing
+ // ingredients first (title + explicit hint carry the intent), then the
+ // hint, so the UI never offers a request guaranteed to fail.
+ while(prompt.length>500&&items.length>1){items=items.slice(0,-1);prompt=build();}
+ if(prompt.length>500){extra="";prompt=build();}
+ if(prompt.length>500)prompt=prompt.slice(0,500);
+ return prompt;
+}
+// Block 3 guards (pure, exported for tests): an aborted flight is a normal
+// cancellation, never an API failure; a result belongs only to the draft it
+// started from, so a discarded/saved/replaced draft never receives it.
+export function isAbortError(err:unknown):boolean{
+ return !!err&&typeof err==="object"&&"name" in err&&(err as {name?:unknown}).name==="AbortError";
+}
+export function dishCompletionKept(started:object|null,current:object|null,aborted:boolean):boolean{
+ return !aborted&&started!==null&&started===current;
 }
 export function toSaveMaterials(draft:Draft){
  return draft.materials.map(m=>({name:m.name,
@@ -371,6 +388,10 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    // announces them after its browse transition (this panel hides then).
    const suppliers=[...new Set(d.materials.map(m=>(m.supplier||"").trim()).filter(Boolean))];
    priceAbort.current?.abort();priceAbort.current=null;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);setPriceFailed(false);
+   // Dish preview belongs to the saved recipe only: abort its flight and
+   // clear preview/failure so neither survives into the next recipe (this
+   // panel stays mounted while hidden). The saved draft itself is untouched.
+   dishAbort.current?.abort();dishAbort.current=null;setDishGenerating(false);setDishFailed(false);setDishImageUrl(null);setDishHint("");
    say(mode==="confirmed"?(sharedVoice?"保存済みです。":"レシピを保存しました。"):"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。");onCreated(recipe,mode,suppliers);
   }catch{setStage("review");say("保存結果を確認できませんでした。再送時も同じ登録IDを使います。一覧を確認してから再試行してください。");}
   finally{if(alive.current&&!draining.current)setBusy(false);}
@@ -484,21 +505,30 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   if(phaseRef.current==="saving"||dishGenerating)return;
   const current=draftRef.current;
   if(!current){say(ja?"先に下書きを作成してください。":"Create a draft first.");return;}
+  const started=current;
   const prompt=dishImagePrompt(current.title,current.materials.map(m=>m.name),dishHint);
   setDishFailed(false);setDishGenerating(true);
   const traceId=`dish-image-${Date.now().toString(36)}`;
   logVoiceEvent("dish-image.start",prompt.slice(0,80),traceId);
+  const controller=new AbortController();dishAbort.current=controller;
   try{
-   const controller=new AbortController();dishAbort.current=controller;
    const out=await request<{image:string}>("/api/dish-image",{method:"POST",body:JSON.stringify({prompt}),signal:controller.signal});
-   if(!alive.current||controller.signal.aborted)return;
+   // Completion guard: a discarded/saved/replaced draft never receives
+   // a stale preview or failure — only the exact draft object this flight
+   // started from. (clear()/save() null draftRef.current and abort, so an
+   // already-settled fetch cannot leak into the next recipe either.)
+   if(!alive.current||!dishCompletionKept(started,draftRef.current,controller.signal.aborted))return;
    // Preview only: the draft object is untouched (no revision/epoch bump),
    // so a late voice/price result can never be clobbered by an image.
    setDishImageUrl(out.image);
    logVoiceEvent("dish-image.ok","preview ready; draft kept",traceId);
    say(ja?"料理イメージを生成しました。":"Dish image generated.");
   }catch(err){
-   if(alive.current){setDishFailed(true);logVoiceEvent("dish-image.fail",err instanceof Error?err.message:"failed",traceId);say(ja?"画像の生成に失敗しました。下書きは保持しています。":"Image generation failed. The draft is kept.");}
+   // Abort (draft discarded/saved mid-flight) is a normal cancellation:
+   // never surface it as an API failure. HTTP/timeouts arrive as
+   // Error("<status>") from request(), so genuine failures still display.
+   if(!alive.current||controller.signal.aborted||isAbortError(err))return;
+   setDishFailed(true);logVoiceEvent("dish-image.fail",err instanceof Error?err.message:"failed",traceId);say(ja?"画像の生成に失敗しました。下書きは保持しています。":"Image generation failed. The draft is kept.");
   }finally{
    if(alive.current)setDishGenerating(false);
   }

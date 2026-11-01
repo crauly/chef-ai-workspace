@@ -63,3 +63,17 @@ quantities, prices, or the finished dish.
 - Generation cost accrues per tap ($0.01); no rate limiting added.
 - Persistent saving / public sharing of generated images is out of scope;
   revisit `IMAGE_STORAGE_DECISION.md` before adding any store.
+
+## Follow-up (review #104)
+1. Preview reset on save: `save()` now aborts the dish flight and clears
+   preview/failure/hint (the panel stays mounted while hidden), so neither a
+   completed preview nor a late response crosses into the next recipe.
+2. Prompt budget: `dishImagePrompt` guarantees ≤500 chars (shed trailing
+   ingredients, then hint, then hard slice), so the UI never offers a request
+   the route must reject. Title head + explicit hint survive.
+3. Abort silence + stale guard: `generateDishImage` captures the draft object
+   at start; completion lands only on that exact object (`dishCompletionKept`),
+   and `catch` returns silently on abort (`controller.signal.aborted` /
+   `isAbortError`). HTTP/timeout failures still arrive as `Error("<status>")`
+   and keep their failure display. `clear()` already aborted + reset; the
+   identity guard covers already-settled fetches too.

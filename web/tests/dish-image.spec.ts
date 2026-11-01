@@ -1,7 +1,7 @@
 import {test, expect} from "@playwright/test";
 import {NextRequest} from "next/server";
 import {POST as generateDish} from "../app/api/dish-image/route";
-import {dishImagePrompt} from "../app/VoiceRecipeRegistration";
+import {dishImagePrompt, isAbortError, dishCompletionKept} from "../app/VoiceRecipeRegistration";
 
 const PASSWORD = "test-only-preview-password-32-characters";
 function authed(url: string, body: unknown) {
@@ -97,4 +97,34 @@ test("upstream failure and bad shape are distinguished, never a preview", async 
     expect((await res2.json()).code).toBe("bad_response");
     done();
   } finally { restore(); }
+});
+
+test("combined prompt never exceeds the route 500-char cap", async () => {
+  // Review example shape: 14-char title + eight 39-char names + 200-char
+  // hint = 584 chars uncapped, which the route would always reject.
+  const long = dishImagePrompt(
+    "トマトパスタの特別仕立て",
+    Array.from({length: 8}, (_, i) => `n${i}-` + "x".repeat(36)),
+    "x".repeat(200));
+  expect(long.length).toBeLessThanOrEqual(500);
+  // Intent survives the budget: title head stays, request is non-empty.
+  expect(long).toContain("トマトパスタ");
+  expect(long.length).toBeGreaterThan(0);
+  // Short inputs are unchanged (no silent truncation).
+  expect(dishImagePrompt("t", ["a"], "")).toBe("Appetizing food photograph of t, made with a");
+});
+
+test("abort is cancellation, not failure; stale results never land", async () => {
+  // fetch-abort rejects with DOMException AbortError; HTTP failures arrive
+  // as Error("<status>") from request() and must still display.
+  expect(isAbortError(new DOMException("aborted", "AbortError"))).toBe(true);
+  expect(isAbortError(new Error("504"))).toBe(false);
+  expect(isAbortError(null)).toBe(false);
+  const draft = {};
+  // Only the exact draft object the flight started from accepts the result.
+  expect(dishCompletionKept(draft, draft, false)).toBe(true);
+  expect(dishCompletionKept(draft, {}, false)).toBe(false);
+  expect(dishCompletionKept(draft, null, false)).toBe(false);
+  expect(dishCompletionKept(null, draft, false)).toBe(false);
+  expect(dishCompletionKept(draft, draft, true)).toBe(false);
 });
