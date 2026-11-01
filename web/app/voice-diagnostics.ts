@@ -9,6 +9,7 @@ export type VoiceDiagKind =
   | "capture.disconnect" | "capture.error"
   | "transcribe.ok" | "transcribe.nospeech" | "transcribe.fail"
   | "muse.start" | "muse.ok" | "muse.fail"
+  | "price.start" | "price.ok" | "price.fail"
   | "mode.transition" | "mode.transition.rejected"
   | "draft.created" | "draft.updated" | "draft.kept" | "draft.discarded.explicit"
   | "intent.fallback" | "queue.dropped";
