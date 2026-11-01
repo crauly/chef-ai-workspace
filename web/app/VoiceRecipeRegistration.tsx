@@ -194,7 +194,9 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   const materials=current.materials.map((m,i)=>i===materialIndex?{...m,name}:m);
   const missing=current.missing.map(text=>text.startsWith(previousName+"の仕入単価")?name+text.slice(previousName.length):text);
   const nameCorrections=current.nameCorrections?.filter((_,i)=>i!==index);
-  const next={...current,materials,missing,nameCorrections};
+  // A price lookup for the old ingredient name cannot safely be carried over.
+  const price_references=name===previousName?current.price_references:current.price_references?.filter(ref=>ref.material_name!==previousName);
+  const next={...current,materials,missing,nameCorrections,price_references};
   draftRef.current=next;parseBase.current=next;setDraft(next);
   reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");setCorrectionIndex(null);
  }
