@@ -128,3 +128,21 @@ test("mobile price bell panel stays within viewport edges", async ({page}) => {
   expect(box!.x+box!.width).toBeLessThanOrEqual(390);
   expect(box!.y+box!.height).toBeLessThanOrEqual(844);
 });
+
+test("reference prices are informative, remain unconfirmed, and do not block review", async ({page}) => {
+  await page.route("**/api/voice-recipe",route=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({
+    title:"Soy sauce test",materials:[{name:"濃口醤油",quantity:"10",unit:"g",price_jpy:"",price_quantity:"",price_unit:"",supplier:""}],
+    selling_price_jpy:"",notes:[],missing:["濃口醤油の仕入単価・基準数量・単位"],interpretations:[],
+    price_references:[{material_name:"濃口醤油",status:"available",ingredient_name:"濃口醤油",currency:"USD",unit_basis:"g",average_unit_price:"0.5",observation_count:2,observed_to:"2026-10-20",text:"Reference: USD 0.5/g, based on 2 observations (unconfirmed)"}]
+  })}));
+  await page.goto("/");
+  const entry=page.getByLabel("音声認識できない場合の入力");
+  await entry.fill("濃口醤油を10グラム、参考価格を調べて");
+  await page.getByRole("button",{name:"反映"}).click();
+  const draft=page.locator("#draft");
+  await expect(draft.getByRole("region",{name:"参考価格の調査結果"})).toContainText("USD 0.5/g");
+  await expect(draft).toContainText("仕入単価 未確定");
+  await expect(draft.getByRole("button",{name:"内容を確認"})).toBeEnabled();
+  await draft.getByRole("button",{name:"内容を確認"}).click();
+  await expect(draft.getByRole("button",{name:"価格未確定として承認して保存"})).toBeEnabled();
+});
