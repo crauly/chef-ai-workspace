@@ -119,3 +119,72 @@ test("upstream 500 and model-shape failures never return a draft", async () => {
     restoreFetch();
   } finally { restore(); }
 });
+
+const MUSE_GUESSED = {title: "トマトパスタ",
+  materials: [
+    {name: "ホールトマト", quantity: "200", unit: "g", price_jpy: "300", price_quantity: "400", price_unit: "g", supplier: "○○商店"}],
+  selling_price_jpy: "1200", notes: [], interpretations: [], price_research: [],
+  name_corrections: []};
+function upstreamProposal(proposal: unknown) {
+  return mockUpstream(async () => Response.json({choices: [{finish_reason: "stop",
+    message: {content: JSON.stringify(proposal)}}]}));
+}
+
+test("photo-only guesses never reach the draft as confirmed values", async () => {
+  const restore = withEnv();
+  const restoreFetch = upstreamProposal(MUSE_GUESSED);
+  try {
+    const res = await proposeImage(authed("http://localhost/api/image-recipe", {image: PNG}));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const material = body.materials[0];
+    expect(material.quantity).toBe("");
+    expect(material.unit).toBe("");
+    expect(material.price_jpy).toBe("");
+    expect(material.price_quantity).toBe("");
+    expect(material.price_unit).toBe("");
+    expect(body.selling_price_jpy).toBe("");
+    // Name and supplier are identification hints, not measured facts: kept.
+    expect(material.name).toBe("ホールトマト");
+    expect(material.supplier).toBe("○○商店");
+    expect(body.missing).toContain("ホールトマトの数量・単位");
+    expect(body.missing).toContain("ホールトマトの仕入単価・基準数量・単位");
+    expect(body.notes.some((note: string) => note.includes("未確定に戻しました"))).toBe(true);
+  } finally { restore(); restoreFetch(); }
+});
+
+test("memo-stated values are kept; unstated guesses are reset", async () => {
+  const restore = withEnv();
+  const restoreFetch = upstreamProposal(MUSE_GUESSED);
+  try {
+    const res = await proposeImage(authed("http://localhost/api/image-recipe",
+      {image: PNG, text: "ホールトマト200g、400gで300円仕入れ、売価1200円"}));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const material = body.materials[0];
+    expect(material.quantity).toBe("200");
+    expect(material.unit).toBe("g");
+    expect(material.price_jpy).toBe("300");
+    expect(material.price_quantity).toBe("400");
+    expect(material.price_unit).toBe("g");
+    expect(body.selling_price_jpy).toBe("1200");
+    expect(body.missing).toEqual([]);
+    expect(body.notes.some((note: string) => note.includes("未確定に戻しました"))).toBe(false);
+  } finally { restore(); restoreFetch(); }
+});
+
+test("memo without the guessed numbers keeps nothing; token boundaries apply", async () => {
+  const restore = withEnv();
+  const restoreFetch = upstreamProposal(MUSE_GUESSED);
+  try {
+    const res = await proposeImage(authed("http://localhost/api/image-recipe",
+      {image: PNG, text: "トマトパスタです"}));
+    expect((await res.json()).materials[0].quantity).toBe("");
+    // "2000g" must not confirm a guessed "200": substring is not evidence.
+    const res2 = await proposeImage(authed("http://localhost/api/image-recipe",
+      {image: PNG, text: "ホールトマト2000g"}));
+    const body2 = await res2.json();
+    expect(body2.materials[0].quantity).toBe("");
+    expect(body2.materials[0].unit).toBe("");
+  } finally { restore(); restoreFetch(); }
+});

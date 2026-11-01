@@ -60,15 +60,47 @@ Output only JSON with exactly title, materials, selling_price_jpy, notes, interp
   if(typeof content!=="string"){console.error("image-recipe stage=content_shape");return error(502,"upstream_error");}
   let output:ReturnType<typeof parseRecipeDraft>;try{output=parseRecipeDraft(JSON.parse(content));}catch{console.error("image-recipe stage=model_json");return error(502,"model_json");}
   if(!output){console.error("image-recipe stage=app_parse");return error(502,"app_parse");}
+  // Provenance enforcement (server-side, never prompt-only): a quantity,
+  // unit, purchase price, or selling price counts as confirmed only when
+  // the user's memo states that exact value. Anything the model filled in
+  // from the photo alone is reset to "" and recomputed into missing[], so
+  // a guessed number can never reach the save path as a confirmed fact.
+  // Units ride with their sibling number: a unit without its quantity or
+  // price basis is meaningless and is reset as well. Matching uses token
+  // boundaries, so memo "2000g" never confirms a guessed "200".
+  const esc=(v:string)=>v.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  const stated=(value:string)=>value!==""&&hint!==""&&new RegExp(`(^|[^\\d.])${esc(value)}(?![\\d.])`).test(hint);
+  let stripped=false;
+  const materials=output.materials.map(m=>{
+   const keepQty=stated(m.quantity),keepPrice=stated(m.price_jpy)&&stated(m.price_quantity);
+   const next={...m,
+    quantity:keepQty?m.quantity:"",
+    unit:keepQty?m.unit:"",
+    price_jpy:keepPrice?m.price_jpy:"",
+    price_quantity:keepPrice?m.price_quantity:"",
+    price_unit:keepPrice?m.price_unit:""};
+   if(next.quantity!==m.quantity||next.unit!==m.unit||next.price_jpy!==m.price_jpy||
+      next.price_quantity!==m.price_quantity||next.price_unit!==m.price_unit)stripped=true;
+   return next;
+  });
+  const selling=stated(output.selling_price_jpy)?output.selling_price_jpy:"";
+  if(selling!==output.selling_price_jpy)stripped=true;
+  const notes=output.notes.slice();
+  if(stripped&&notes.length<30)notes.push("写真のみで推測された数量・価格・売価は未確定に戻しました。メモに明記された値のみ採用しています。");
+  // Re-validate the sanitized shape so missing[] reflects the reset
+  // values; only blanking was applied, so this cannot fail open.
+  const final=parseRecipeDraft({title:output.title,materials,selling_price_jpy:selling,notes,
+   interpretations:output.interpretations,price_research:output.priceResearch,name_corrections:output.nameCorrections});
+  if(!final){console.error("image-recipe stage=sanitize");return error(502,"app_parse");}
   // Deferred shape only: the client calls POST /api/voice-recipe/prices
-  // with the CURRENT materials snapshot after the chef confirms quantities,
-  // so no image-guessed price can reach the save path. materials are
-  // untouched; missing[] (expected: quantities/prices) blocks approval.
-  const entries=assembleEntries(output.materials,output.priceResearch,hint?[hint]:[]);
-  return NextResponse.json({...output,price_references:[],research_status:[],
-   provisional_prices:output.materials.map(()=>null),research_state:"deferred",
+  // with the CURRENT materials snapshot after the chef confirms quantities.
+  // Provenance-filtered materials flow on; missing[] (quantities/prices
+  // reset above) blocks approval until the chef confirms them.
+  const entries=assembleEntries(final.materials,final.priceResearch,hint?[hint]:[]);
+  return NextResponse.json({...final,price_references:[],research_status:[],
+   provisional_prices:final.materials.map(()=>null),research_state:"deferred",
    pending_research:entries.map(e=>({material_name:e.material_name,material_index:e.material_index,
-    row_name:e.material_index>=0?(output.materials[e.material_index]?.name??null):null,
+    row_name:e.material_index>=0?(final.materials[e.material_index]?.name??null):null,
     request:e.request,trigger:e.trigger}))},
    {headers:{"Cache-Control":"no-store","Server-Timing":`muse;dur=${Math.round(performance.now()-started)}`}});
  }catch{console.error("image-recipe stage=request");return error(502,"upstream_error");}

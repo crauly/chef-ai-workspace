@@ -93,6 +93,13 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  const [priceDetailIndex,setPriceDetailIndex]=useState<number|null>(null);
  const [unmatchedDetailIndex,setUnmatchedDetailIndex]=useState<number|null>(null);
  const [priceLoading,setPriceLoading]=useState(false);
+ // Photo analysis (Block 2): file + optional memo -> POST /api/image-recipe.
+ // photoAnalyzing mirrors its own flight only; photoFailed latches the last
+ // failure. The result lands in the same draft state as voice parses, so
+ // review/approval/saving stay on the single formal path.
+ const [photoMemo,setPhotoMemo]=useState("");
+ const [photoAnalyzing,setPhotoAnalyzing]=useState(false),[photoFailed,setPhotoFailed]=useState(false);
+ const photoFile=useRef<HTMLInputElement|null>(null),photoAbort=useRef<AbortController|null>(null);
  // Pipeline status (drives the status list; each flag is set only while its
  // own stage actually runs, and failure latches clear on retry/success):
  // parsing = Muse voice-recipe in flight, parseFailed = last parse failed,
@@ -119,13 +126,15 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  useImperativeHandle(control,()=>({submit:enqueue,hasPending:()=>Boolean(dataTurns.current.length||inbox.current.length||draftRef.current),isSaving:()=>phaseRef.current==="saving",requestReview:()=>{showReview();},suspend:()=>{
   reviewed.current=null;inbox.current=inbox.current.filter(input=>input.command==="data");setStage("dictating");
  }}));
- useEffect(()=>{alive.current=true;return()=>{alive.current=false;semanticAbort.current?.abort();priceAbort.current?.abort();inbox.current=[];};},[]);
+ useEffect(()=>{alive.current=true;return()=>{alive.current=false;semanticAbort.current?.abort();priceAbort.current?.abort();photoAbort.current?.abort();inbox.current=[];};},[]);
  function setStage(next:"dictating"|"review"|"saving"){phaseRef.current=next;setPhase(next);}
  const englishMessages:Record<string,string>={"下書きを破棄しました。新しいレシピを話してください。":"Draft discarded. Describe a new recipe.","Museが料理の文脈・数量・価格を解釈しています…":"Muse is interpreting the dish, quantities and prices…","料理の解釈に失敗しました。保存していません。「解析を再試行」か補助入力で再開できます。":"Could not interpret the recipe. Nothing was saved. Retry analysis or use manual input.","確認用の下書きを表示しました。料理名・食材・数量・価格を確認し、正しければもう一度「保存してください」と話すか、承認して保存を押してください。":"Draft ready to review. Check the dish, ingredients, quantities and prices, then explicitly approve saving.","承認された内容を保存しています…":"Saving approved recipe…","保存済みです。":"Already saved.","レシピを保存しました。":"Recipe saved.","価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"Saved with unconfirmed purchase prices. Unknown prices are not set to zero; only partial costs are shown.","保存結果を確認できませんでした。再送時も同じ登録IDを使います。一覧を確認してから再試行してください。":"Could not confirm the save result. The same request ID is used for retries; check the recipe list first.","保存せず、下書きを保持します。":"Not saved. Draft preserved."};
  function say(text:string){if(alive.current)setMessage(ja?text:(englishMessages[text]??text));}
+ const photoMessages:Record<string,string>={"既存の下書きがあります。破棄してから写真を解析してください。":"A draft already exists. Discard it before analyzing a photo.","写真を選択してください。":"Choose a photo first.","写真の解析に失敗しました。下書きは作成していません。":"Photo analysis failed. No draft was created."};
+ function sayPhoto(text:string){if(alive.current)setMessage(ja?text:(photoMessages[text]??text));}
  function clear(){
   if(phaseRef.current==="saving")return;
-  epoch.current++;revision.current++;semanticAbort.current?.abort();priceAbort.current?.abort();priceEpoch.current++;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);setParsing(false);setParseFailed(false);setPriceFailed(false);voice.cancel();inbox.current=[];
+  epoch.current++;revision.current++;semanticAbort.current?.abort();priceAbort.current?.abort();photoAbort.current?.abort();priceEpoch.current++;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);setParsing(false);setParseFailed(false);setPriceFailed(false);setPhotoAnalyzing(false);setPhotoFailed(false);voice.cancel();inbox.current=[];
   setCorrectionIndex(null);setPriceDetailIndex(null);setUnmatchedDetailIndex(null);dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);requestId.current=null;
   setStage("dictating");logVoiceEvent("draft.discarded.explicit","explicit cancel",clearTrace.current);clearTrace.current="";onDiscarded?.();say("下書きを破棄しました。新しいレシピを話してください。");
  }
@@ -398,6 +407,48 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    draining.current=false;if(alive.current)setBusy(false);if(inbox.current.length)void drain();
   });
  }
+ function readAsDataURL(file:File){
+  return new Promise<string>((resolve,reject)=>{
+   const reader=new FileReader();
+   reader.onload=()=>resolve(String(reader.result??""));
+   reader.onerror=()=>reject(reader.error??new Error("read failed"));
+   reader.readAsDataURL(file);
+  });
+ }
+ async function analyzePhoto(){
+  if(phaseRef.current==="saving"||photoAnalyzing)return;
+  // Never overwrite: an existing draft must be explicitly discarded first.
+  // No request is sent in that case, so the draft cannot be clobbered.
+  if(draftRef.current){sayPhoto("既存の下書きがあります。破棄してから写真を解析してください。");return;}
+  const file=photoFile.current?.files?.[0];
+  if(!file){sayPhoto("写真を選択してください。");return;}
+  setPhotoFailed(false);setPhotoAnalyzing(true);
+  const traceId=`photo-${Date.now().toString(36)}`;
+  logVoiceEvent("photo.start",file.name||"photo",traceId);
+  try{
+   const dataUrl=await readAsDataURL(file);
+   const memo=photoMemo.trim();
+   const controller=new AbortController();photoAbort.current=controller;
+   const out=await request<Draft>("/api/image-recipe",{method:"POST",body:JSON.stringify(memo?{image:dataUrl,text:memo}:{image:dataUrl}),signal:controller.signal});
+   if(!alive.current||controller.signal.aborted)return;
+   // New revision source: invalidate in-flight voice parse/enrichment so a
+   // stale voice result can never overwrite the photo draft. Still-unparsed
+   // voice turns are not dropped; they re-parse against this draft later.
+   revision.current++;epoch.current++;
+   const version=revision.current,current=epoch.current;
+   const enriched=applyFoundPrices(out);
+   parseBase.current=enriched;
+   logVoiceEvent("draft.created","image-recipe",traceId);
+   setCorrectionIndex(null);setPriceDetailIndex(null);setUnmatchedDetailIndex(null);draftRef.current=enriched;setDraft(enriched);reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
+   say(enriched.missing.length||enriched.notes.length?(ja?"写真から下書きを作りました。確認が必要です："+[...enriched.missing,...enriched.notes].join("、"):"Photo draft created. Needs review: "+[...enriched.missing,...enriched.notes].join(", ")):(ja?"写真から下書きを作りました。内容を確認してください。":"Photo draft created. Review it."));
+   const pending=enriched.pending_research??[];
+   if(out.research_state==="deferred"&&pending.length)void enrichPrices(enriched,version,current,traceId);
+  }catch{
+   if(alive.current){setPhotoFailed(true);logVoiceEvent("photo.fail","image-recipe failed; no draft created",traceId);sayPhoto("写真の解析に失敗しました。下書きは作成していません。");}
+  }finally{
+   if(alive.current)setPhotoAnalyzing(false);
+  }
+ }
  function chooseName(index:number,name:string){
   const current=draftRef.current;
   if(!current||phaseRef.current==="saving")return;
@@ -459,12 +510,14 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     {key:"listen",active:mic.recording&&!mic.transcribing&&!parsing,text:ja?"音声受付中…":"Receiving audio…"},
     {key:"transcribe",active:mic.transcribing,text:ja?`文字起こし中…${mic.queued>0?`（ほか${mic.queued}件処理待ち）`:""}`:`Transcribing…${mic.queued>0?` (${mic.queued} queued)`:""}`},
     {key:"parse",active:parsing,text:ja?"レシピ解析中…":"Analyzing recipe…"},
+    {key:"photo",active:photoAnalyzing,text:ja?"写真を解析中…":"Analyzing photo…"},
     {key:"price",active:priceLoading,text:ja?"価格検索中…":"Searching prices…"},
     {key:"parse-fail",active:parseFailed&&!parsing,text:ja?"解析に失敗しました。下書きは保持しています。":"Analysis failed. The draft is kept."},
     {key:"price-fail",active:priceFailed&&!priceLoading,text:ja?"価格検索に失敗しました。下書きは保持しています。":"Price search failed. The draft is kept."},
+    {key:"photo-fail",active:photoFailed&&!photoAnalyzing,text:ja?"写真の解析に失敗しました。下書きは作成していません。":"Photo analysis failed. No draft was created."},
     {key:"done",active:!mic.transcribing&&!parsing&&!priceLoading&&!parseFailed&&!priceFailed&&turns.length>0&&draft!==null,text:ja?"処理完了：下書きに反映しました。":"Done: reflected in the draft."},
    ].filter(row=>row.active);
-   return rows.length?<ul className="voice-status-list" role="status" aria-live="polite" aria-label={ja?"処理状況":"Processing status"}>{rows.map(row=><li key={row.key}>{["listen","transcribe","parse","price"].includes(row.key)?<span className="voice-spin" aria-hidden="true"/>:null}{row.text}</li>)}</ul>:null;
+   return rows.length?<ul className="voice-status-list" role="status" aria-live="polite" aria-label={ja?"処理状況":"Processing status"}>{rows.map(row=><li key={row.key}>{["listen","transcribe","parse","price","photo"].includes(row.key)?<span className="voice-spin" aria-hidden="true"/>:null}{row.text}</li>)}</ul>:null;
   })()}
   <p aria-live="polite" role="status">{busy?(ja?"処理中 ⏳ ":"Working ⏳ "):""}{message}</p>
   {!sharedVoice&&<form onSubmit={event=>{event.preventDefault();if(manual.trim()){enqueue(manual);setManual("");}}}>
@@ -472,6 +525,11 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    <button type="submit" disabled={!manual.trim()||phase==="saving"}>{ja?"反映":"Apply"}</button>
   </form>}
   <button type="button" disabled={busy||!dataTurns.current.length||phase==="saving"} onClick={retry}>{ja?"解析を再試行":"Retry analysis"}</button>
+  <div>
+   <label>{ja?"写真から下書き":"Draft from photo"}<input ref={photoFile} type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/x-icon" aria-label={ja?"解析する写真":"Photo to analyze"} disabled={phase==="saving"||photoAnalyzing}/></label>
+   <input aria-label={ja?"写真のメモ（任意）":"Photo note (optional)"} value={photoMemo} onChange={event=>setPhotoMemo(event.target.value)} maxLength={1000} placeholder={ja?"分量・価格が分かる場合のみ記入":"Quantities/prices only if known"} disabled={phase==="saving"||photoAnalyzing}/>
+   <button type="button" onClick={()=>void analyzePhoto()} disabled={phase==="saving"||photoAnalyzing}>{ja?"写真を解析":"Analyze photo"}</button>
+  </div>
 
   {draft&&<div id="draft" aria-label="未保存のレシピ下書き">
    {priceLoading&&<p role="status" aria-live="polite">{ja?"価格を検索しています… 下書きは先に確認できます。":"Searching prices… You can inspect the draft now."}</p>}

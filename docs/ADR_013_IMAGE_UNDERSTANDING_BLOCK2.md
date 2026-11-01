@@ -30,6 +30,32 @@ confirmation without an image-capable path.
   quantity/price/unit; `missing[]` blocks approval; uncertainty in
   `notes[]`; user label recorded in `interpretations[]`.
 
+## Follow-up (review #103)
+1. Server-side provenance guarantee: the system prompt asks the model to
+   leave photo-only quantities/prices empty, but the route no longer trusts
+   it. After `parseRecipeDraft`, every `quantity` / `price_jpy` /
+   `price_quantity` / `selling_price_jpy` is kept only when the user's memo
+   states that exact value (token-boundary match, so memo "2000g" never
+   confirms a guessed "200"). `unit` / `price_unit` ride with their
+   sibling number; a unit without its number is reset too. Reset values go
+   back through `parseRecipeDraft`, so `missing[]` recomputes and the Human
+   Gate stays closed until the chef confirms. Resets append one server
+   note (capped like all notes). Names/suppliers are identification hints,
+   not measured facts, and are untouched. Residual risk: a memo number
+   that coincidentally equals a guessed number is kept; the boundary rule
+   and the still-required chef review bound this.
+2. UI connection: `VoiceRecipeRegistration` gains file + memo inputs and
+   an Analyze button. The result lands in the same draft state (same
+   card, same review/approve/save, same deferred prices lifecycle); no
+   second save path exists. Guards: saving/photo-flight return silently;
+   an existing draft refuses before any request (no overwrite, no wasted
+   call). Success bumps revision+epoch so a stale in-flight voice result
+   can never clobber the photo draft (unparsed voice turns re-parse
+   against it later, losing nothing). New `photoAnalyzing` / `photoFailed`
+   status rows (spinner while the flight runs) and additive
+   `photo.start` / `photo.fail` diag kinds. Voice, Tool Calling, and
+   Search Grounding paths are untouched.
+
 ## Decision
 - New `POST /api/image-recipe` (`web/app/api/image-recipe/route.ts`,
   Next.js, not Python): input `{image: <data URL>, text?: string}`.
@@ -58,9 +84,15 @@ confirmation without an image-capable path.
   quantities. Voice transcription and grounding behavior unchanged.
 
 ## Tests
-- `web/tests/image-recipe.spec.ts` (5 tests): draft contract + image in
+- `web/tests/image-recipe.spec.ts` (8 tests): draft contract + image in
   upstream payload; `unsupported_media` / `invalid_image` pre-upstream;
-  422 vs 502 distinction; no draft on failure.
+  422 vs 502 distinction; no draft on failure; provenance: photo-only
+  guesses blanked (+server note), memo-stated values kept, memo without
+  numbers keeps nothing, "2000g" never confirms "200".
+- `web/tests/image-photo.spec.ts` (3 browser tests): photo -> existing
+  draft card with the Human Gate closed (review/approve disabled, no
+  save call); existing draft never overwritten (no request sent);
+  failure creates no draft and retry succeeds.
 - Regression: `voice-recipe-deferred` (9), `structured-output` (8),
   `voice-price-lifecycle` + `voice-conversation` (17/18) pass.
 - Known pre-existing failure (not this change): 

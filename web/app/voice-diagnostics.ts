@@ -10,6 +10,7 @@ export type VoiceDiagKind =
   | "capture.endpoint.deferred" | "capture.endpoint.forced"
   | "transcribe.ok" | "transcribe.nospeech" | "transcribe.fail"
   | "muse.start" | "muse.ok" | "muse.fail"
+  | "photo.start" | "photo.fail"
   | "price.start" | "price.ok" | "price.fail"
   | "mode.transition" | "mode.transition.rejected"
   | "draft.created" | "draft.updated" | "draft.kept" | "draft.discarded.explicit"
