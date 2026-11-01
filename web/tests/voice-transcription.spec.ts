@@ -35,16 +35,24 @@ test("Meta Voice transport uses the documented multipart contract and preserves 
   const stereo = wav(); stereo.writeUInt16LE(2, 22); expect(validWav(stereo)).toBe(false);
 });
 
-test("English settings and malformed, empty, excessive or failed upstream responses fail closed", async () => {
+test("English settings and malformed, excessive or failed upstream responses fail closed", async () => {
   await transcribeWav(wav(), "en-US", "fixture", async (_, init) => {
     const settings = JSON.parse(await ((init?.body as FormData).get("request") as Blob).text());
     expect(settings.languageBias).toEqual(["English"]);
     return Response.json({transcript: "pasta"});
   });
-  for (const response of [Response.json({transcript: ""}), Response.json({text: "wrong schema"}),
+  for (const response of [Response.json({text: "wrong schema"}),
     Response.json({transcript: "x".repeat(1001)}), new Response("secret", {status: 401}),
     new Response("x".repeat(70_000)), new Response("bad JSON")]) {
     await expect(transcribeWav(wav(), "ja", "fixture", async () => response)).rejects.toThrow();
+  }
+});
+
+test("empty transcript is silence, not a provider fault: 200 no_speech without transcript", async () => {
+  // Live-verified Meta shape for silence: HTTP 200 {transcript: "", ...}.
+  for (const body of [{transcript: ""}, {transcript: "   ", sessionId: "s", audioDurationMs: 1040, turns: []}]) {
+    const out = await transcribeWav(wav(), "ja", "fixture", async () => Response.json(body));
+    expect(out).toEqual({transcript: "", no_speech: true, provider: "meta_voice", model: VOICE_MODEL});
   }
 });
 

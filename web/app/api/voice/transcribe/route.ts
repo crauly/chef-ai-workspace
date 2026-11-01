@@ -37,6 +37,9 @@ export async function POST(req: NextRequest) {
     const key = process.env.MODEL_API_KEY;
     if (!key) return fail(503, "no_key");
     const started = performance.now();
+    // Contract: success (transcript) and silence (200 + no_speech) pass
+    // through as 200. Only timeout/upstream/invalid map to 5xx codes, so a
+    // real-device 502 stays attributable and silence never pages as a fault.
     try {
       const result = await transcribeWav(audio, language, key);
       return NextResponse.json(result, {headers: {...headers,

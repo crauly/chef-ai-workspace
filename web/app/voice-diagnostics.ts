@@ -7,7 +7,7 @@ export type VoiceDiagKind =
   | "capture.start" | "capture.stop" | "capture.pause" | "capture.resume"
   | "capture.backlog" | "capture.backlog.drop"
   | "capture.disconnect" | "capture.error"
-  | "transcribe.ok" | "transcribe.fail"
+  | "transcribe.ok" | "transcribe.nospeech" | "transcribe.fail"
   | "muse.start" | "muse.ok" | "muse.fail"
   | "mode.transition" | "mode.transition.rejected"
   | "draft.created" | "draft.updated" | "draft.kept" | "draft.discarded.explicit"
