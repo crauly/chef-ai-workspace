@@ -99,11 +99,13 @@ test("queued fragments coalesce and approval spoken before review cannot commit 
  release();
  await expect(page.getByRole("button",{name:"内容を承認して保存",exact:true})).toBeEnabled();
  expect(parses).toBe(2);
- // Incremental revision: only the 4 unparsed turns travel, with the last
- // draft as context, instead of reprocessing the whole history.
- expect(submitted[1].turns).toHaveLength(4);
+ // Cursor fix (#101): the first parse went stale mid-flight (revisions
+ // advanced while it was blocked), so no parsed draft exists yet. The
+ // follow-up resends the full 5-turn history with no previous context —
+ // otherwise the first utterance would never be interpreted at all.
+ expect(submitted[1].turns).toHaveLength(5);
  expect(submitted[1].turns).not.toContain("保存してください");
- expect(submitted[1].previous?.title).toContain("ペペロンチーノ");
+ expect(submitted[1].previous).toBeUndefined();
  expect(saves).toBe(0);
  await input(page,"保存しないでください");
  await expect(page.getByRole("button",{name:"内容を承認して保存",exact:true})).toBeDisabled();
