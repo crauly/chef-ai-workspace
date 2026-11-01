@@ -6,6 +6,10 @@ It uses native `instructions` and `input`, reads completed assistant
 `output[].content[]` blocks of type `output_text`, and strictly parses the
 result as an operations proposal. Reasoning is ignored; refusals, incomplete
 responses, tool calls, invalid JSON and malformed envelopes fail closed.
+Block 1 adds an opt-in owned-ledger tool loop (`propose_with_tools`,
+`?tools=ledger`): one read-only `search_owned_ingredients` function with
+manual stateless history (`store=false`), capped at 2 tool turns and 4
+calls/turn; the final turn uses the same strict parser. See ADR-012.
 The normal mutation validator still checks every operation before preview,
 and only the chef's explicit confirm action can persist and recalculate.
 

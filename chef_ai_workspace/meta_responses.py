@@ -3,6 +3,7 @@ import json
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from typing import Callable
 
 from .ai_provider import ProposalProviderError
 
@@ -111,6 +112,145 @@ class MetaResponsesProvider:
         except (ValueError, OSError):
             raise ProposalProviderError("Meta Responses request or response failed") from None
         return parse_response(raw)
+
+    def propose_with_tools(self, instruction: str, recipe_context: dict,
+                             search: Callable, max_tool_turns: int = 2) -> list[dict]:
+        """Proposal with owned-ledger function tools (Block 1, opt-in only).
+
+        The default propose() path is untouched. When the model emits
+        function_call items, the app executes them through the owner-scoped
+        search callable (read-only; only well-formed id/name rows from that
+        search reach the model) and returns the results as function_call_output
+        with manual stateless history (store=false, no previous_response_id
+        chaining). Every turn's assistant messages are strictly validated, so
+        refusals and incomplete messages fail closed on intermediate turns as
+        well as final ones. The final turn is parsed by the strict
+        parse_response: any tool-call, refusal, incomplete, timeout,
+        invalid-argument-flood, or loop-exhaustion state fails closed with
+        ProposalProviderError, and the downstream mutation validator plus human
+        approval still apply. A final link_ingredient whose ingredient_id was
+        not returned by a tool call in this session is rejected here
+        (provenance only; ownership and approval stay downstream).
+        """
+        from .tool_ledger import LEDGER_TOOLS, ToolLedgerError, execute_tool
+        if not instruction.strip() or len(instruction) > 4000:
+            raise ValueError("Instruction length invalid")
+        if not callable(search):
+            raise ValueError("Owner-scoped search callable required")
+        if not isinstance(max_tool_turns, int) or max_tool_turns < 0 or max_tool_turns > 2:
+            raise ValueError("max_tool_turns must be 0-2")
+        user_text = json.dumps({"instruction": instruction, "recipe": recipe_context}, ensure_ascii=False)
+        instructions = (INSTRUCTIONS + " You may call search_owned_ingredients to resolve an owned "
+                        "ingredient ID by name before link_ingredient. It is read-only. "
+                        "The link operation shape is link_ingredient: "
+                        "{op, material_id, ingredient_id, price_mode}, where material_id is "
+                        "the existing material ID from recipe context and price_mode is "
+                        "explicitly inherit or override (override links require an explicit "
+                        "quote in the chef instruction). ingredient_id values must come ONLY "
+                        "from that tool's results; never invent or guess an ID. "
+                        "If the tool returns no match, propose no link for that material. "
+                        "The final response must be ONLY the operations JSON object, "
+                        "same as without tools.")
+        history: list[dict] = [
+            {"type": "message", "role": "user",
+             "content": [{"type": "input_text", "text": user_text}]}]
+        seen_ids: set[str] = set()
+        first = True
+        for _ in range(max_tool_turns + 1):
+            payload = json.dumps({
+                "model": self.model, "instructions": instructions,
+                "input": user_text if first else history,
+                "store": False, "max_output_tokens": 4096,
+                "reasoning": {"effort": "low"}, "tools": LEDGER_TOOLS,
+            }, ensure_ascii=False).encode("utf-8")
+            first = False
+            req = urllib.request.Request(ENDPOINT, data=payload, method="POST", headers={
+                "Content-Type": "application/json", "Authorization": "Bearer " + self.api_key,
+            })
+            try:
+                with urllib.request.build_opener(_NoRedirect()).open(req, timeout=25) as response:
+                    data = response.read(MAX_RESPONSE_BYTES + 1)
+                if len(data) > MAX_RESPONSE_BYTES:
+                    raise ProposalProviderError("Meta response too large")
+                raw = json.loads(data)
+            except urllib.error.HTTPError as exc:
+                status = exc.code
+                exc.close()
+                raise ProposalProviderError(f"Meta Responses HTTP {status}") from None
+            except (ValueError, OSError):
+                raise ProposalProviderError("Meta Responses request or response failed") from None
+            calls = self._tool_calls(raw)
+            if not calls:
+                operations = parse_response(raw)
+                self._check_link_provenance(operations, seen_ids)
+                return operations
+            if len(calls) > 4:
+                raise ProposalProviderError("Too many tool calls in one turn")
+            for call in calls:
+                history.append({"type": "function_call", "call_id": call["call_id"],
+                                "name": call["name"], "arguments": call["arguments"]})
+                try:
+                    result = execute_tool(call["name"], json.loads(call["arguments"]), search)
+                except ToolLedgerError:
+                    raise ProposalProviderError("Unknown tool requested") from None
+                except (ValueError, TypeError):
+                    raise ProposalProviderError("Invalid tool arguments") from None
+                for item in result.get("ingredients", []):
+                    if isinstance(item, dict) and isinstance(item.get("id"), str):
+                        seen_ids.add(item["id"])
+                history.append({"type": "function_call_output", "call_id": call["call_id"],
+                                "output": json.dumps(result, ensure_ascii=False)})
+        raise ProposalProviderError("Tool loop did not converge")
+
+    @staticmethod
+    def _check_link_provenance(operations: list[dict], seen_ids: set[str]) -> None:
+        """Fail closed when a link references an ID no tool call returned.
+
+        Provenance only: shape/ownership/approval stay with the downstream
+        mutation validator and the Human Gate. Non-string or missing IDs are
+        left to that validator (HTTP 422), not rejected here."""
+        for op in operations:
+            if isinstance(op, dict) and op.get("op") == "link_ingredient":
+                ingredient_id = op.get("ingredient_id")
+                if isinstance(ingredient_id, str) and ingredient_id not in seen_ids:
+                    raise ProposalProviderError("Unresolved ingredient link")
+
+    @staticmethod
+    def _tool_calls(raw: object) -> list[dict]:
+        """Extract validated function_call items. Refusals, incomplete states
+        and malformed calls fail closed; a turn with no calls returns []."""
+        if not isinstance(raw, dict) or raw.get("status") != "completed" or raw.get("error"):
+            raise ProposalProviderError("Meta response did not complete")
+        output = raw.get("output")
+        if not isinstance(output, list):
+            raise ProposalProviderError("Invalid Meta output")
+        calls = []
+        for item in output:
+            if not isinstance(item, dict):
+                raise ProposalProviderError("Invalid Meta output item")
+            if item.get("type") == "reasoning":
+                continue
+            if item.get("type") == "function_call":
+                call_id = item.get("call_id")
+                name = item.get("name")
+                arguments = item.get("arguments")
+                if (not isinstance(call_id, str) or not 1 <= len(call_id) <= 64
+                        or not isinstance(name, str) or not name
+                        or not isinstance(arguments, str)):
+                    raise ProposalProviderError("Invalid function call")
+                calls.append({"call_id": call_id, "name": name, "arguments": arguments})
+                continue
+            if (item.get("type") != "message" or item.get("role") != "assistant"
+                    or item.get("status") != "completed"):
+                raise ProposalProviderError("Unexpected Meta output item")
+            content = item.get("content")
+            if not isinstance(content, list):
+                raise ProposalProviderError("Invalid Meta content")
+            for part in content:
+                if (not isinstance(part, dict) or part.get("type") != "output_text"
+                        or not isinstance(part.get("text"), str)):
+                    raise ProposalProviderError("Meta output is not text")
+        return calls
 
     def classify_intent(self, utterance: str, current_mode: str = "idle") -> dict:
         """Classify conversational navigation only. Never authorize mutations."""

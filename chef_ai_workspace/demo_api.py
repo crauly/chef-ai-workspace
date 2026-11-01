@@ -96,6 +96,32 @@ def _owned_candidates(owner, repository, recipe, name):
     return pool
 
 
+def _tool_search(owner, repository, recipe):
+    """Owner-scoped search callable for the Block 1 ledger tool.
+
+    Uses repository.search_owned_ingredients (the same owner-scoped method as
+    _owned_candidates), never the recipe-costing catalog that only holds
+    already-linked IDs. Repositories without that method fall back to a
+    substring search over the recipe catalog.
+    """
+    searcher = getattr(repository, "search_owned_ingredients", None)
+    if callable(searcher):
+        def _search(query, limit):
+            rows = searcher(owner, query, limit) or []
+            return [row for row in rows] if isinstance(rows, (list, tuple)) else []
+        return _search
+
+    def _fallback(query, limit):
+        from .ingredient_assist import search_owned_ingredients as _substring
+        try:
+            catalog = repository.load_owned_catalog(owner, recipe) or {}
+        except (ValueError, TypeError, AttributeError):
+            return []
+        return [{"id": g.id, "name": g.name}
+                for g in _substring(query, catalog)][:limit]
+    return _fallback
+
+
 class AssistRequestBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     material_id: UUID
@@ -327,13 +353,21 @@ class AIProposalBody(BaseModel):
 
 @router.post("/recipes/{recipe_id}/propose")
 def propose_demo_change(recipe_id: UUID, body: AIProposalBody,
-                        request: Request, ctx=Depends(demo_context)):
-    """Untrusted suggestion only. Never commit or confirm AI output here."""
+                        request: Request, ctx=Depends(demo_context),
+                        tools: str = ""):
+    """Untrusted suggestion only. Never commit or confirm AI output here.
+
+    tools="" (default) keeps the exact legacy path. tools="ledger" enables
+    the Block 1 owned-ledger function loop (read-only ingredient-ID search);
+    anything else is rejected. The tool path needs a MetaResponsesProvider.
+    """
     from .ai_provider import ProposalProviderError
     owner, repository = ctx
     provider = getattr(request.app.state, "ai_provider", None)
     if provider is None:
         raise HTTPException(503, "AI provider not configured")
+    if tools not in ("", "ledger"):
+        raise HTTPException(422, "Unknown tools option")
     try:
         recipe = repository.load_owned_recipe(owner, str(recipe_id))
     except ValueError as exc:
@@ -344,7 +378,14 @@ def propose_demo_change(recipe_id: UUID, body: AIProposalBody,
         context = asdict(recipe)
         if suggestions:
             context["correction_suggestions"] = suggestions
-        operations = provider.propose(body.instruction, context)
+        if tools == "ledger":
+            run_tools = getattr(provider, "propose_with_tools", None)
+            if run_tools is None:
+                raise HTTPException(503, "Tool path requires the Meta provider")
+            operations = run_tools(body.instruction, context,
+                                   _tool_search(owner, repository, recipe))
+        else:
+            operations = provider.propose(body.instruction, context)
     except ProposalProviderError as exc:
         raise HTTPException(502, "AI provider unavailable or invalid response") from exc
     # Pure validation on a copy: reject malformed/unknown edits before showing a diff.
@@ -352,6 +393,17 @@ def propose_demo_change(recipe_id: UUID, body: AIProposalBody,
         try:
             catalog = (repository.load_owned_catalog(owner, recipe)
                        if any(m.price_mode == "inherit" for m in recipe.materials) else {})
+            if tools == "ledger":
+                # Tool-resolved links reference owned ingredients the
+                # recipe-costing catalog does not contain yet. Load exactly
+                # those IDs owner-scoped (same pattern as save_recipe_with_ledger
+                # explicit IDs); ownership is enforced by the repository.
+                loader = getattr(repository, "load_owned_ingredients", None)
+                linked = {op["ingredient_id"] for op in operations
+                          if isinstance(op, dict) and op.get("op") == "link_ingredient"
+                          and isinstance(op.get("ingredient_id"), str)}
+                if linked and callable(loader):
+                    catalog = {**(catalog or {}), **(loader(owner, sorted(linked)) or {})}
             prepare_mutation(recipe, Proposal(str(recipe_id), recipe.revision,
                              str(uuid4()), tuple(operations)), user_confirmed=False,
                              catalog=catalog)
