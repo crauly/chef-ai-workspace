@@ -181,3 +181,50 @@ test("no request means no search, no provisional, no status", async () => {
     if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
   }
 });
+
+test("http internal binding host reaches the ledger (PR #89 contract kept)", async () => {
+  const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
+  const internal = process.env.CHEF_FASTAPI_INTERNAL_URL, base = process.env.FASTAPI_BASE_URL;
+  const token = process.env.DEMO_ACCESS_TOKEN;
+  delete process.env.FASTAPI_BASE_URL;
+  // Vercel/Render internal binding: http-only by platform design, must not be rejected.
+  process.env.CHEF_FASTAPI_INTERNAL_URL = "http://chef-ai-workspace-api:10000";
+  process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
+  process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
+  const previousFetch = global.fetch;
+  try {
+    let responsesCalls = 0;
+    global.fetch = (async (url: unknown) => {
+      if (String(url).includes("/v1/responses")) {
+        responsesCalls++;
+        return Response.json(grounded([CANDIDATE]));
+      }
+      if (String(url).includes("/demo/price-reference")) {
+        return Response.json({query: "pasta", candidates: [{ingredient_id: "ing-1",
+          ingredient_name: "pasta",
+          reference: {available: true, currency: "JPY", unit_basis: "g",
+            average_unit_price: "0.7600", observation_count: 3,
+            observed_to: "2026-10-01T00:00:00.000Z"}}]});
+      }
+      return Response.json({choices: [{finish_reason: "stop", message: {content:
+        JSON.stringify(MUSE_RECIPE([{material_name: "pasta", request: "r"}]))}}]});
+    }) as typeof fetch;
+    const res = await parseRecipe(authed("http://localhost/api/voice-recipe", {turns: ["pasta100g"]}));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // Ledger wins over http internal binding: no web search, ledger provisional.
+    expect(responsesCalls).toBe(0);
+    expect(body.price_references[0].origin).toBe("ledger");
+    expect(body.research_status).toEqual([{material_name: "pasta", trigger: "muse",
+      ledger: "available", web: "not_attempted", provisional: true}]);
+    expect(body.provisional_prices[0].origin).toBe("ledger");
+    expect(body.provisional_prices[0].approval).toBe("unapproved");
+  } finally {
+    global.fetch = previousFetch;
+    if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
+    if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
+    if (internal === undefined) delete process.env.CHEF_FASTAPI_INTERNAL_URL; else process.env.CHEF_FASTAPI_INTERNAL_URL = internal;
+    if (base === undefined) delete process.env.FASTAPI_BASE_URL; else process.env.FASTAPI_BASE_URL = base;
+    if (token === undefined) delete process.env.DEMO_ACCESS_TOKEN; else process.env.DEMO_ACCESS_TOKEN = token;
+  }
+});

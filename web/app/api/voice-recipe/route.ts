@@ -4,14 +4,10 @@ import {VOICE_RECIPE_SCHEMA,chatResponseFormat} from "../../../muse-schemas";
 import {runGroundedSearch} from "../../../price-web-search";
 import type {GroundedSample} from "../../../price-web-search";
 import {detectPriceResearch} from "../../../price-research-intent";
+import {backendUrl} from "../backend-url";
 export const runtime="nodejs";
-function backendBase():string|undefined{
- const internal=process.env.CHEF_FASTAPI_INTERNAL_URL;
- if(internal)return internal;
- const fallback=process.env.FASTAPI_BASE_URL;
- if(fallback&&(fallback.startsWith("http://127.0.0.1:")||fallback.startsWith("http://localhost:")))return fallback;
- return undefined;
-}
+// Backend origin allow-list lives in ../backend-url (shared SSOT): https,
+// loopback http, and the configured internal binding host over http.
 type ReferenceSummary={available:boolean;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null};
 type ReferenceCandidate={ingredient_id:string;ingredient_name:string;reference:ReferenceSummary;observations?:unknown[]};
 type LedgerLookup={kind:"ok";candidates:ReferenceCandidate[]}|{kind:"unavailable"|"unauthorized"|"invalid_response"};
@@ -35,14 +31,10 @@ function provisionalFor(index:number,material:{name:string},refs:PriceReferenceE
 }
 type PriceReferenceEntry={material_name:string;status:"available"|"none"|"unavailable"|"unauthorized"|"invalid_response";origin:"ledger"|"external";ingredient_name:string|null;currency:string|null;unit_basis:string|null;average_unit_price:string|null;observation_count:number|null;observed_to:string|null;sources?:{url:string;title:string}[];fetched_at?:string;samples?:{name:string;seller:string;source:string;amount:string;package:string;url?:string;fetched_at?:string;tax_note?:string;shipping_note?:string;maker?:string;spec?:string}[];text:string};
 async function lookupCandidates(name:string):Promise<LedgerLookup>{
- const base=backendBase(),token=process.env.DEMO_ACCESS_TOKEN;
+ const url=backendUrl(),token=process.env.DEMO_ACCESS_TOKEN;
  // No connection means configured: the ledger cannot be reached, which is
  // NOT the same as "no history". Never report this as not-found.
- if(!base||!token)return {kind:"unavailable"};
- let url:URL;
- try{url=new URL(base);}catch{return {kind:"unavailable"};}
- if(url.protocol!=="https:"&&!(url.protocol==="http:"&&["localhost","127.0.0.1","[::1]"].includes(url.hostname)))return {kind:"unavailable"};
- if(url.username||url.password)return {kind:"unavailable"};
+ if(!url||!token)return {kind:"unavailable"};
  try{
   const target=new URL("/demo/price-reference",url);
   target.searchParams.set("name",name);
