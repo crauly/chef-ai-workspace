@@ -69,7 +69,40 @@ longer singles out any cuisine in dish-title normalization examples.
 - Responses propose/axis paths unchanged until a live `text.format`
   acceptance is recorded; that acceptance must update this ADR first.
 - Name correction signal: `name_corrections: [{material_name, heard, candidates[{name, reason}]}]` (1-3 candidates, never padded; entry omitted when confident). Informational only: draft keeps a single name, candidates are never auto-applied, and saving is never blocked. Brand/maker names are never rewritten into other products.
-- External web reference: unavailable in this runtime (only the Meta model API and the Chef Supabase project are wired). `GET /demo/price-reference` reports `external: {available: false, required: [...]}` and `price_references` entries carry `origin: "ledger"`; no EC-specific code, no fabricated prices.
-- Price research signal: `price_research: [{material_name, request}]` records the chef's explicit request only; the route resolves it against the owned ledger (`GET /demo/price-reference`, read-only) and reports back in the non-blocking `price_references` response field (never `notes`, so the save gate is untouched). Non-JPY references keep their currency verbatim; candidate selection prefers exact-name available history and names any non-exact fallback explicitly. Prices stay empty (missing path); enrichment failure never fails the draft. No web retrieval exists, so model-knowledge prices stay forbidden.
+- External web reference: live retrieval runs on Meta Search Grounding ONLY
+  (Responses API `web_search` on muse-spark-1.3; no Tavily/Brave/Exa/Google).
+  `web/price-web-search.ts` calls the Responses endpoint with
+  `tools: [{type: "web_search", search_context_size: "low"}]` (context size
+  lives INSIDE the tool object; a top-level value is rejected with 400).
+  Search evidence is strict: an observed `web_search_call` AND at least one
+  `url_citation` annotation -- tool-request-only or citation-free answers
+  are "not searched" and never become prices. JSON-only instructions
+  suppress citations, so the call asks for one prose bullet per candidate
+  after the JSON to carry the citations. Verified live 2026-11-01: status
+  completed, 5 web_search_call (search + open_page), 6 url_citation
+  annotations, 3 JPY candidates (500g packs 920/1080/1200 yen with source
+  URLs) all passing the shared validation. The route tries the owned ledger
+  first and only falls back to grounding per entry (max 3); ledger hits
+  never search, and any grounding failure keeps the ledger entry -- the
+  draft never fails and nothing is auto-saved. `external_reference.py`
+  keeps the provider contract and `price_web_search.py` mirrors the
+  response parsing; sample references are labelled by sample count and
+  never claimed as a general market average; incomparable candidates are
+  excluded, never mixed. `price_references` entries carry
+  `origin: "ledger" | "external"`, external ones additionally
+  `sources: [{url, title}]` + `fetched_at` (UI-safe: the existing card
+  renders `text` only). Validation rejects non-finite decimals (NaN,
+  Infinity) row-wise on both runtimes without aborting. Each sample keeps
+  its own url/fetched_at/tax/shipping provenance (never backfilled); the
+  Python summary labels computation time `aggregated_at` so old listings
+  are never relabelled as fetched now. No EC-specific code, no fabricated
+  prices, no model-knowledge fill.
+- Price research signal: `price_research: [{material_name, request}]` records the chef's explicit request only; the route resolves it against the owned ledger (`GET /demo/price-reference`, read-only) and reports back in the non-blocking `price_references` response field (never `notes`, so the save gate is untouched). Non-JPY references keep their currency verbatim; candidate selection prefers exact-name available history and names any non-exact fallback explicitly. Prices stay empty (missing path); enrichment failure never fails the draft. Lookup failures are reported distinctly from genuine no-history (`status: unavailable | unauthorized | invalid_response` vs `none`) with non-secret Japanese text, so a backend/auth outage is never disguised as "no history". No web retrieval exists, so model-knowledge prices stay forbidden.
 - Tests: `web/tests/structured-output.spec.ts` (fixture, no key),
   `tests/test_structured_output_contract.py` (contract pin).
+  `web/tests/price-web-search.spec.ts` (fixture: evidence gating,
+  ledger-first fallback, real-shape parse),
+  `tests/test_price_grounding.py` (fixture: parse + contract),
+  `tests/test_price_grounding_live.py` (opt-in `CHEF_LIVE_GROUNDING=1`:
+  one low-context search asserting `web_search_call` + `url_citation`
+  + priced candidates; read-only, no DB).
