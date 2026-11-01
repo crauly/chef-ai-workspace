@@ -67,6 +67,20 @@ test("summary groups comparable offers and never claims a market average", () =>
   expect(empty.status).toBe("none");
 });
 
+test("average uses comparable samples only; cheapest comparable sample leads", () => {
+  const shop = (amount: string, seller: string) => ({...CANDIDATE, amount, seller,
+    url: "https://shop.example/" + seller});
+  const entry = summarizeGroundedCandidates(
+    [shop("1200", "c"), shop("920", "a"), shop("1080", "b")], [CITATION], "豚バラ肉",
+    "2026-11-01T00:00:00Z");
+  expect(entry.status).toBe("available");
+  // (920 + 1080 + 1200) / 3 / 500g = 2.1333/g.
+  expect(entry.average_unit_price).toBe("2.1333");
+  expect(entry.observation_count).toBe(3);
+  expect(entry.samples.map(x => x.amount)).toEqual(["920", "1080", "1200"]);
+  expect(entry.samples[0].seller).toBe("a");
+});
+
 test("real grounded shape (commentary, open_page, prose citations) parses", () => {
   const live = {status: "completed", output: [
     {type: "reasoning", status: "completed"},

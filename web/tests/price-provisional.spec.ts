@@ -159,7 +159,8 @@ test("omitted price_research still reaches grounding; provisional stays unapprov
     expect(res.status).toBe(200);
     const body = await res.json();
     // Grounding ran (heuristic trigger), materials untouched, provisional separate.
-    expect(body.research_status).toEqual([{material_name: "pasta", trigger: "heuristic",
+    expect(body.research_status).toEqual([{material_name: "pasta", material_index: 0,
+      request: "pasta100g、平均仕入価格を調べて", trigger: "heuristic",
       ledger: "unavailable", web: "available", provisional: true}]);
     expect(body.price_references[0].origin).toBe("external");
     expect(body.materials[0].price_jpy).toBe("");
@@ -197,7 +198,8 @@ test("grounding failure keeps the draft and reports the stage", async () => {
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe", {turns: ["pasta100g"]}));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.research_status).toEqual([{material_name: "pasta", trigger: "muse",
+    expect(body.research_status).toEqual([{material_name: "pasta", material_index: 0,
+      request: "r", trigger: "muse",
       ledger: "unavailable", web: "provider_error", provisional: false}]);
     expect(body.price_references[0].status).toBe("unavailable");
     expect(body.provisional_prices).toEqual([null]);
@@ -262,7 +264,8 @@ test("named heuristic request survives the entry cap; only saffron is searched",
     // Only the named ingredient is researched: one grounding call, and the
     // three-entry cap cannot eject saffron for unrelated lines.
     expect(groundingCalls).toBe(1);
-    expect(body.research_status).toEqual([{material_name: "サフラン", trigger: "heuristic",
+    expect(body.research_status).toEqual([{material_name: "サフラン", material_index: 3,
+      request: "サフランの平均仕入価格を調べて", trigger: "heuristic",
       ledger: "unavailable", web: "available", provisional: true}]);
     expect(body.provisional_prices.map((x: {material_name: string} | null) => x?.material_name ?? null))
       .toEqual([null, null, null, "サフラン"]);
@@ -308,7 +311,8 @@ test("http internal binding host reaches the ledger (PR #89 contract kept)", asy
     // Ledger wins over http internal binding: no web search, ledger provisional.
     expect(responsesCalls).toBe(0);
     expect(body.price_references[0].origin).toBe("ledger");
-    expect(body.research_status).toEqual([{material_name: "pasta", trigger: "muse",
+    expect(body.research_status).toEqual([{material_name: "pasta", material_index: 0,
+      request: "r", trigger: "muse",
       ledger: "available", web: "not_attempted", provisional: true}]);
     expect(body.provisional_prices[0].origin).toBe("ledger");
     expect(body.provisional_prices[0].approval).toBe("unapproved");
@@ -320,4 +324,137 @@ test("http internal binding host reaches the ledger (PR #89 contract kept)", asy
     if (base === undefined) delete process.env.FASTAPI_BASE_URL; else process.env.FASTAPI_BASE_URL = base;
     if (token === undefined) delete process.env.DEMO_ACCESS_TOKEN; else process.env.DEMO_ACCESS_TOKEN = token;
   }
+});
+
+test("drifted Muse name with material_index still binds the right row", async () => {
+  const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
+  const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
+  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
+  const previousFetch = global.fetch;
+  try {
+    // Row 0 is "ディチェコ パスタ" but Muse's research entry says "パスタ".
+    // material_index 0 is the canonical key: the provisional binds row 0
+    // under the ROW name, while the searched name stays in references.
+    const muse = {title: "t",
+      materials: [
+        {name: "ディチェコ パスタ", quantity: "100", unit: "g",
+          price_jpy: "", price_quantity: "", price_unit: "", supplier: "De Cecco"},
+        {name: "ホールトマト", quantity: "200", unit: "g",
+          price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+      selling_price_jpy: "", notes: [], interpretations: [],
+      price_research: [{material_name: "パスタ", material_index: 0, request: "平均価格を調べて"}]};
+    global.fetch = (async (url: unknown) => {
+      if (String(url).includes("/v1/responses")) return Response.json(grounded([CANDIDATE]));
+      return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(muse)}}]});
+    }) as typeof fetch;
+    const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["ディチェコのパスタ100g、平均価格を調べて"]}));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.research_status).toEqual([{material_name: "パスタ", material_index: 0,
+      request: "平均価格を調べて", trigger: "muse",
+      ledger: "unavailable", web: "available", provisional: true}]);
+    expect(body.price_references[0].material_name).toBe("パスタ");
+    expect(body.price_references[0].material_index).toBe(0);
+    const prov = body.provisional_prices[0];
+    expect(prov.material_index).toBe(0);
+    expect(prov.material_name).toBe("ディチェコ パスタ");
+    expect(prov.price_jpy).toBe("0.7600");
+    expect(body.provisional_prices[1]).toBeNull();
+    // The draft row itself is untouched: names and prices never rewritten.
+    expect(body.materials[0].name).toBe("ディチェコ パスタ");
+    expect(body.materials[0].price_jpy).toBe("");
+  } finally {
+    global.fetch = previousFetch;
+    if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
+    if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
+    if (base === undefined) delete process.env.FASTAPI_BASE_URL; else process.env.FASTAPI_BASE_URL = base;
+    if (token === undefined) delete process.env.DEMO_ACCESS_TOKEN; else process.env.DEMO_ACCESS_TOKEN = token;
+  }
+});
+
+test("contradictory index loses to an exact row-name match", async () => {
+  const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
+  const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
+  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
+  const previousFetch = global.fetch;
+  try {
+    // Row 0 is pasta, row 1 is tomato; the entry names tomato exactly but
+    // carries material_index 0. Trusting the pointer would misbind pasta.
+    const muse = {title: "t",
+      materials: [
+        {name: "pasta", quantity: "100", unit: "g",
+          price_jpy: "", price_quantity: "", price_unit: "", supplier: ""},
+        {name: "tomato", quantity: "200", unit: "g",
+          price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+      selling_price_jpy: "", notes: [], interpretations: [],
+      price_research: [{material_name: "tomato", material_index: 0, request: "r"}]};
+    global.fetch = (async (url: unknown) => {
+      if (String(url).includes("/v1/responses")) return Response.json(grounded([CANDIDATE]));
+      return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(muse)}}]});
+    }) as typeof fetch;
+    const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["tomato"]}));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.research_status[0].material_index).toBe(1);
+    expect(body.provisional_prices[0]).toBeNull();
+    expect(body.provisional_prices[1].material_name).toBe("tomato");
+  } finally {
+    global.fetch = previousFetch;
+    if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
+    if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
+    if (base === undefined) delete process.env.FASTAPI_BASE_URL; else process.env.FASTAPI_BASE_URL = base;
+    if (token === undefined) delete process.env.DEMO_ACCESS_TOKEN; else process.env.DEMO_ACCESS_TOKEN = token;
+  }
+});
+
+test("bad index falls back to the row name; unknown names stay rowless", async () => {
+  const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
+  const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
+  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
+  const previousFetch = global.fetch;
+  async function runWith(research: unknown) {
+    const muse = {...MUSE_RECIPE(research)};
+    global.fetch = (async (url: unknown) => {
+      if (String(url).includes("/v1/responses")) return Response.json(grounded([CANDIDATE]));
+      return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(muse)}}]});
+    }) as typeof fetch;
+    const res = await parseRecipe(authed("http://localhost/api/voice-recipe", {turns: ["pasta100g"]}));
+    expect(res.status).toBe(200);
+    return res.json();
+  }
+  try {
+    // Out-of-range index with an exact row name: the name still binds row 0.
+    const ranged = await runWith([{material_name: "pasta", material_index: 9, request: "r"}]);
+    expect(ranged.research_status[0].material_index).toBe(0);
+    expect(ranged.provisional_prices[0].material_name).toBe("pasta");
+    // Unknown name with a bad index: searched by name, but rowless, so no
+    // provisional can attach to a row it might miss.
+    const rowless = await runWith([{material_name: "quinoa", material_index: 5, request: "r"}]);
+    expect(rowless.research_status[0].material_index).toBe(-1);
+    expect(rowless.price_references[0].material_name).toBe("quinoa");
+    expect(rowless.provisional_prices).toEqual([null]);
+  } finally {
+    global.fetch = previousFetch;
+    if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
+    if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
+    if (base === undefined) delete process.env.FASTAPI_BASE_URL; else process.env.FASTAPI_BASE_URL = base;
+    if (token === undefined) delete process.env.DEMO_ACCESS_TOKEN; else process.env.DEMO_ACCESS_TOKEN = token;
+  }
+});
+
+test("applying a shown price is not a new search", () => {
+  const open = [{name: "pasta", price_jpy: "", price_quantity: "", price_unit: ""}];
+  const four = ["flour", "water", "salt", "saffron"].map(name =>
+    ({name, price_jpy: "", price_quantity: "", price_unit: ""}));
+  // 「その価格を使って」 answers a previous candidate: no research entry.
+  expect(detectPriceResearch(["その価格を使って"], open)).toEqual([]);
+  expect(detectPriceResearch(["その価格を使って"], four)).toEqual([]);
+  // Cheapest-supplier wording IS research, scoped to the named row.
+  expect(detectPriceResearch(["pastaの一番安い仕入先を探して"], open).map(o => o.material_name))
+    .toEqual(["pasta"]);
 });

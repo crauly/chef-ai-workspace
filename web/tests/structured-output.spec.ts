@@ -325,6 +325,21 @@ test("explicit price research resolves against the owned ledger, never model kno
     expect(fuzzyRef.status).toBe("available");
     expect(fuzzyRef.ingredient_name).toBe("豚ロース");
     expect(fuzzyRef.text).toContain("豚ロース");
+    // material_index is optional: well-formed indexes pass, bad shapes fail closed.
+    const indexed = (research: unknown) => {
+      global.fetch = (async (url: unknown) => {
+        if (String(url).includes("/demo/price-reference"))
+          return Response.json({query: "x", candidates: []});
+        return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
+          ...recipe, price_research: research})}}]});
+      }) as typeof fetch;
+      return parseRecipe(authed("http://localhost/api/voice-recipe",
+        {turns: ["豚バラ肉100g、相場で"]}));
+    };
+    expect((await indexed([{material_name: "豚バラ肉", request: "相場", material_index: 0}])).status).toBe(200);
+    expect((await indexed([{material_name: "豚バラ肉", request: "相場", material_index: "0"}])).status).toBe(502);
+    expect((await indexed([{material_name: "豚バラ肉", request: "相場", material_index: -1}])).status).toBe(502);
+    expect((await indexed([{material_name: "豚バラ肉", request: "相場", material_index: 1.5}])).status).toBe(502);
     // Malformed research entry (extra key) fails closed.
     global.fetch = (async (url: unknown) => {
       if (String(url).includes("/demo/price-reference"))
