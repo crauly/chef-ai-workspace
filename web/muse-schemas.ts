@@ -47,10 +47,12 @@ const PRICE_RESEARCH_SCHEMA = {
     // 0-based position of the ingredient in this response's materials
     // array. The app's canonical row key: it binds the researched price
     // to the right row even when the spoken product wording differs from
-    // the materials name. Omit only when no row applies.
-    material_index: { type: "integer", minimum: 0 },
+    // the materials name. Strict mode requires every property key in
+    // required, so this is null when no row applies; null never binds a
+    // row on its own.
+    material_index: { type: ["integer", "null"], minimum: 0 },
   },
-  required: ["material_name", "request"],
+  required: ["material_name", "request", "material_index"],
   additionalProperties: false,
 };
 
