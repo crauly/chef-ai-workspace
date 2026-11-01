@@ -1,99 +1,13 @@
 import {NextRequest, NextResponse} from "next/server";
 import {previewAuthorized} from "../../../preview-access";
 import {VOICE_RECIPE_SCHEMA,chatResponseFormat} from "../../../muse-schemas";
-import {runGroundedSearch} from "../../../price-web-search";
-import type {GroundedSample} from "../../../price-web-search";
-import {detectPriceResearch} from "../../../price-research-intent";
-import {backendUrl} from "../backend-url";
+import {assembleEntries,enrichEntries,provisionalFor} from "../../../price-enrichment";
 export const runtime="nodejs";
 // Backend origin allow-list lives in ../backend-url (shared SSOT): https,
 // loopback http, and the configured internal binding host over http.
-type ReferenceSummary={available:boolean;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null};
-type ReferenceCandidate={ingredient_id:string;ingredient_name:string;reference:ReferenceSummary;observations?:unknown[]};
-type LedgerLookup={kind:"ok";candidates:ReferenceCandidate[]}|{kind:"unavailable"|"unauthorized"|"invalid_response"};
-type ResearchStatus={material_name:string;material_index:number;request:string;trigger:"muse"|"heuristic";
- ledger:"available"|"none"|"unavailable"|"unauthorized"|"invalid_response";
- web:"not_attempted"|"available"|"empty"|"not_searched"|"provider_error"|"timeout"|"misconfigured";
- provisional:boolean};
-type ProvisionalPrice={material_index:number;material_name:string;origin:"ledger"|"external";
- price_jpy:string;price_quantity:string;price_unit:string;currency:string;observation_count:number;
- sources:{url:string;title:string}[];samples:GroundedSample[];fetched_at:string|null;
- status:"provisional";approval:"unapproved";text:string};
-// Row binding is index-based: refs carry the materials[] index resolved
-// at request time, and the provisional is labeled with the ROW name so the
-// UI row gate (index + name) holds even when the searched product wording
-// differs. The searched name survives in price_references/research_status.
-function provisionalFor(index:number,material:{name:string},refs:PriceReferenceEntry[]):ProvisionalPrice|null{
- const ref=refs.find(r=>r.material_index===index);
- if(!ref||ref.status!=="available"||typeof ref.average_unit_price!=="string"||
-  typeof ref.unit_basis!=="string"||typeof ref.currency!=="string"||typeof ref.observation_count!=="number")return null;
- return {material_index:index,material_name:(material.name||"").trim(),origin:ref.origin,
-  price_jpy:ref.average_unit_price,price_quantity:"1",price_unit:ref.unit_basis,currency:ref.currency,
-  observation_count:ref.observation_count,sources:ref.sources??[],samples:ref.samples??[],
-  fetched_at:ref.fetched_at??ref.observed_to??null,status:"provisional",approval:"unapproved",
-  text:`（未承認の仮設定候補）${ref.text}`};
-}
-type PriceReferenceEntry={material_name:string;material_index:number;status:"available"|"none"|"unavailable"|"unauthorized"|"invalid_response";origin:"ledger"|"external";ingredient_name:string|null;currency:string|null;unit_basis:string|null;average_unit_price:string|null;observation_count:number|null;observed_to:string|null;sources?:{url:string;title:string}[];fetched_at?:string;samples?:{name:string;seller:string;source:string;amount:string;package:string;url?:string;fetched_at?:string;tax_note?:string;shipping_note?:string;maker?:string;spec?:string}[];text:string};
-async function lookupCandidates(name:string):Promise<LedgerLookup>{
- const url=backendUrl(),token=process.env.DEMO_ACCESS_TOKEN;
- // No connection means configured: the ledger cannot be reached, which is
- // NOT the same as "no history". Never report this as not-found.
- if(!url||!token)return {kind:"unavailable"};
- try{
-  const target=new URL("/demo/price-reference",url);
-  target.searchParams.set("name",name);
-  const response=await fetch(target,{headers:{"X-Demo-Access":token},cache:"no-store",redirect:"error",signal:AbortSignal.timeout(15000)});
-  if(response.status===401||response.status===403)return {kind:"unauthorized"};
-  if(!response.ok)return response.status>=500?{kind:"unavailable"}:{kind:"invalid_response"};
-  const data:unknown=await response.json();
-  if(!data||typeof data!=="object"||!Array.isArray((data as {candidates?:unknown}).candidates))return {kind:"invalid_response"};
-  const list=(data as {candidates:unknown}).candidates as ReferenceCandidate[];
-  if(!list.every(c=>c&&typeof c==="object"&&typeof (c as ReferenceCandidate).ingredient_name==="string"&&
-    (c as ReferenceCandidate).reference&&typeof (c as ReferenceCandidate).reference==="object"&&
-    typeof (c as ReferenceCandidate).reference.available==="boolean"))return {kind:"invalid_response"};
-  return {kind:"ok",candidates:list};
- }catch{return {kind:"unavailable"};}
-}
-function formatAmount(average:string,basis:string,currency:string):string{
- // JPY contract only for yen; other currencies shown verbatim, never converted.
- return currency==="JPY"?`${basis}あたり平均${average}円`:`${basis}あたり平均${average} ${currency}`;
-}
-function lookupFailure(materialName:string,materialIndex:number,kind:"unavailable"|"unauthorized"|"invalid_response"):PriceReferenceEntry{
- // Failure states stay distinct from "no history" and never leak connection
- // or credential details. The draft path is unaffected: the chef can still
- // save with unconfirmed prices.
- const wanted=materialName.trim();
- const reason=kind==="unauthorized"?"認証に失敗したため":
-  kind==="invalid_response"?"応答が不正だったため":"接続・設定の問題で";
- return {material_name:wanted,material_index:materialIndex,status:kind,origin:"ledger",ingredient_name:null,currency:null,unit_basis:null,
-  average_unit_price:null,observation_count:null,observed_to:null,
-  text:`確認できません：${wanted}の仕入履歴は${reason}参照できませんでした（価格未確定のまま保存できます）`};
-}
-function selectReference(materialName:string,materialIndex:number,lookup:LedgerLookup):PriceReferenceEntry{
- if(lookup.kind!=="ok")return lookupFailure(materialName,materialIndex,lookup.kind);
- const wanted=materialName.trim();
- const available=lookup.candidates.filter(c=>c.reference.available);
- const exact=available.find(c=>c.ingredient_name.trim()===wanted);
- const chosen=exact||available[0];
- if(!chosen||typeof chosen.reference.average_unit_price!=="string"||
-    typeof chosen.reference.unit_basis!=="string"||typeof chosen.reference.currency!=="string"){
-  return {material_name:wanted,material_index:materialIndex,status:"none",origin:"ledger",ingredient_name:null,currency:null,unit_basis:null,
-   average_unit_price:null,observation_count:null,observed_to:null,
-   text:`参考価格なし：${wanted}の仕入履歴がありません（価格未確定のまま保存できます）`};
- }
- const ref=chosen.reference;
- const currency=ref.currency as string,basis=ref.unit_basis as string,average=ref.average_unit_price as string;
- const count=typeof ref.observation_count==="number"?ref.observation_count:0;
- const when=typeof ref.observed_to==="string"&&ref.observed_to?`・${ref.observed_to}時点`:"";
- // A non-exact candidate is only ever a named suggestion for the chef to
- // judge; its ingredient is stated explicitly, never merged silently.
- const prefix=chosen.ingredient_name.trim()===wanted?`参考価格：${chosen.ingredient_name}は`:
-  `参考価格（完全一致なし・${chosen.ingredient_name}の履歴を参考）：`;
- return {material_name:wanted,material_index:materialIndex,status:"available",origin:"ledger",ingredient_name:chosen.ingredient_name,
-  currency,unit_basis:basis,average_unit_price:average,
-  observation_count:count,observed_to:typeof ref.observed_to==="string"?ref.observed_to:null,
-  text:`${prefix}${formatAmount(average,basis,currency)}（あなたの仕入履歴${count}件${when}・推定・要確認）`};
-}
+// Row binding, ledger lookup, and enrichment live in ../../../price-enrichment
+// (shared with the deferred POST /api/voice-recipe/prices): this route keeps
+// only Muse parsing, Human Gate validation, and response shaping.
 const units=new Set(["g","kg","ml","L"]);
 const decimal=/^(?:0|[1-9]\d*)(?:\.\d+)?$/;
 const error=(status:number)=>NextResponse.json({error:"Voice recipe parsing failed"},{status,headers:{"Cache-Control":"no-store"}});
@@ -234,71 +148,34 @@ notes is ONLY for unresolved ambiguous/unsupported facts, not ordinary packaging
   if(typeof text!=="string"){console.error("voice-recipe stage=content_shape");return error(502);}
   let output:ReturnType<typeof parse>;try{output=parse(JSON.parse(text));}catch{console.error("voice-recipe stage=model_json");return error(502);}
   if(!output){console.error("voice-recipe stage=app_parse");return error(502);}
-  // Ledger-first price research: resolve each explicit request against the
-  // owned ledger, falling back to Meta Search Grounding (real web_search +
-  // url_citation only) when the ledger cannot serve, and report back in
-  // price_references. Prices stay empty
+  // Ledger-first price research: entries resolve against the owned
+  // ledger, falling back to Meta Search Grounding (real web_search +
+  // url_citation only) when the ledger cannot serve. Prices stay empty
   // (missing path); enrichment never invents, confirms, or saves anything,
-  // and its failure never fails the draft.
-  // Informational only: reported in price_references, never in notes, so the
-  // existing saveModeFor gate (notes non-empty blocks approval) is untouched
-  // and the unconfirmed-price save path stays available for research requests.
-  // Explicit research requests must reach grounding even when Muse omits
-  // price_research: Muse entries first, then a narrow heuristic gap-fill
-  // for still-unconfirmed lines (stated prices never match). Cap stays 3.
-  // Ledger-first per entry; grounding failures keep the ledger entry and
-  // are reported in research_status, so the draft never fails and the
-  // failure reason is never lost. Available references (ledger or web)
-  // additionally surface as unapproved provisional prices aligned to
-  // materials; materials themselves are untouched, so nothing provisional
+  // and its failure never fails the draft. Informational only: reported in
+  // price_references, never in notes, so the existing saveModeFor gate
+  // (notes non-empty blocks approval) is untouched. Entries run
+  // concurrently (cap 3); see ../../../price-enrichment.
+  const entries=assembleEntries(output.materials,output.priceResearch,turns);
+  // Deferred mode: return the draft right after Muse parsing so the chef
+  // sees it without waiting for ledger/grounding round-trips. The UI then
+  // calls POST /api/voice-recipe/prices with the CURRENT materials
+  // snapshot; that endpoint re-binds every entry against those fresh rows,
+  // so a stale index can never attach a price to the wrong row. Pending
+  // entries are 検索待ち; 検索中 is the in-flight prices call client-side;
+  // 完了/失敗 arrive per entry in that response (research_status ledger/web
+  // states). materials themselves are untouched, so nothing provisional
   // can flow into the save path without explicit chef approval in the UI.
-  // Canonical row key: each entry resolves to a materials[] index once.
-  // An exact row-name match beats a contradictory in-range material_index
-  // (the name is hard evidence against that pointer); otherwise a valid
-  // Muse-emitted material_index wins (it names the row even when the
-  // spoken product wording drifts); otherwise the entry stays rowless (-1)
-  // and is still searched by name but can never bind a provisional to a
-  // row it might miss.
-  const rowIndexFor=(name:string,idx:number|null|undefined)=>{
-   const at=output.materials.findIndex(m=>(m.name||"").trim()===name.trim());
-   const valid=typeof idx==="number"&&Number.isInteger(idx)&&idx>=0&&idx<output.materials.length?idx:-1;
-   if(at>=0&&valid>=0&&at!==valid)return at;
-   if(valid>=0)return valid;
-   return at;
-  };
-  const museEntries=output.priceResearch.map(e=>({...e,trigger:"muse" as const,
-   material_index:rowIndexFor(e.material_name,e.material_index)}));
-  const coveredNames=new Set(museEntries.map(e=>e.material_name.trim()));
-  const coveredRows=new Set(museEntries.map(e=>e.material_index).filter(i=>i>=0));
-  const heuristicEntries=detectPriceResearch(turns,output.materials)
-   .filter(h=>!coveredNames.has(h.material_name.trim())&&!coveredRows.has(h.material_index))
-   .map(h=>({...h,trigger:"heuristic" as const}));
-  const priceReferences:PriceReferenceEntry[]=[];
-  const researchStatus:ResearchStatus[]=[];
-  for(const entry of [...museEntries,...heuristicEntries].slice(0,3)){
-   const row=entry.material_index;
-   const ledgerEntry=selectReference(entry.material_name,row,await lookupCandidates(entry.material_name));
-   if(ledgerEntry.status==="available"){
-    // Owned ledger wins: no web search when usable history exists.
-    priceReferences.push(ledgerEntry);
-    researchStatus.push({material_name:entry.material_name,material_index:row,request:entry.request,
-     trigger:entry.trigger,ledger:ledgerEntry.status,web:"not_attempted",provisional:true});
-    continue;
-   }
-   const outcome=await runGroundedSearch({apiKey:key,materialName:entry.material_name,request:entry.request});
-   if(outcome.kind==="found"||outcome.kind==="empty"){
-    priceReferences.push({...outcome.entry,material_index:row});
-    researchStatus.push({material_name:entry.material_name,material_index:row,request:entry.request,
-     trigger:entry.trigger,ledger:ledgerEntry.status,web:outcome.kind==="found"?"available":"empty",
-     provisional:outcome.kind==="found"});
-   }else{
-    priceReferences.push(ledgerEntry);
-    researchStatus.push({material_name:entry.material_name,material_index:row,request:entry.request,
-     trigger:entry.trigger,ledger:ledgerEntry.status,web:outcome.kind,provisional:false});
-   }
+  if((input as {defer_prices?:unknown}).defer_prices===true){
+   return NextResponse.json({...output,price_references:[],research_status:[],
+    provisional_prices:output.materials.map(()=>null),research_state:"deferred",
+    pending_research:entries.map(e=>({material_name:e.material_name,material_index:e.material_index,
+     request:e.request,trigger:e.trigger}))},
+    {headers:{"Cache-Control":"no-store","Server-Timing":`muse;dur=${Math.round(performance.now()-started)}`}});
   }
+  const {priceReferences,researchStatus}=await enrichEntries(key,entries);
   const provisionalPrices=output.materials.map((m,i)=>provisionalFor(i,m,priceReferences));
   return NextResponse.json({...output,price_references:priceReferences,research_status:researchStatus,
-   provisional_prices:provisionalPrices},{headers:{"Cache-Control":"no-store","Server-Timing":`muse;dur=${Math.round(performance.now()-started)}`}});
+   provisional_prices:provisionalPrices,research_state:"complete"},{headers:{"Cache-Control":"no-store","Server-Timing":`muse;dur=${Math.round(performance.now()-started)}`}});
  }catch{console.error("voice-recipe stage=request");return error(502);}
 }
