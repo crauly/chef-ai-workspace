@@ -20,7 +20,7 @@ test("SSOT schemas mirror app-side validators and use strict JSON Schema", () =>
   expect([...INTENT_SCHEMA.required].sort()).toEqual(["intent", "target"]);
   expect(INTENT_SCHEMA.properties.intent.enum).toEqual(["create", "browse", "edit", "clarify"]);
   expect([...VOICE_RECIPE_SCHEMA.required].sort()).toEqual(
-    ["interpretations", "materials", "notes", "price_research", "selling_price_jpy", "title"]);
+    ["interpretations", "materials", "name_corrections", "notes", "price_research", "selling_price_jpy", "title"]);
   const fmt = chatResponseFormat("chef_intent", INTENT_SCHEMA) as {
     type: string; json_schema: {name: string; strict: boolean; schema: unknown}};
   expect(fmt.type).toBe("json_schema");
@@ -188,13 +188,18 @@ test("supplier is extracted without guessing; revision reuses the previous draft
     }) as typeof fetch;
     const previous = {title: "テスト", materials: [{name: "ディチェコ パスタ", quantity: "100",
       unit: "g", price_jpy: "350", price_quantity: "500", price_unit: "g", supplier: "築地場外"}],
-      selling_price_jpy: "", notes: [], interpretations: []};
+      selling_price_jpy: "", notes: [], interpretations: [],
+      nameCorrections: [{material_name: "ディチェコ パスタ", heard: "デチェコパスタ",
+        candidates: [{name: "ディチェコ パスタ", reason: "ASR phonetic match"}]}]};
     const revised = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["あと卵50g"], previous}));
     expect(revised.status).toBe(200);
     const sent = JSON.parse(sentBody).messages[1];
     expect(Object.keys(JSON.parse(sent.content)).sort()).toEqual(["new_turns", "previous_draft"]);
     expect(JSON.parse(sent.content).new_turns).toEqual(["あと卵50g"]);
+    // Unrelated follow-up keeps the unresolved correction context.
+    expect(JSON.parse(sent.content).previous_draft.name_corrections).toEqual(
+      previous.nameCorrections);
     expect((await revised.json()).materials).toHaveLength(2);
     // Malformed previous draft fails closed without calling the provider.
     global.fetch = (async () => Response.json({choices: []})) as typeof fetch;
@@ -245,6 +250,7 @@ test("explicit price research resolves against the owned ledger, never model kno
     expect(body.price_references[0].status).toBe("available");
     expect(body.price_references[0].text).toContain("平均");
     expect(body.price_references[0].currency).toBe("JPY");
+    expect(body.price_references[0].origin).toBe("ledger");
     // Prices stay empty: the missing path (unconfirmed save) is preserved.
     expect(body.materials[0].price_jpy).toBe("");
     expect(body.missing.join("")).toContain("仕入単価");
@@ -333,5 +339,49 @@ test("explicit price research resolves against the owned ledger, never model kno
     if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
     if (base === undefined) delete process.env.FASTAPI_BASE_URL; else process.env.FASTAPI_BASE_URL = base;
     if (token === undefined) delete process.env.DEMO_ACCESS_TOKEN; else process.env.DEMO_ACCESS_TOKEN = token;
+  }
+});
+
+test("ingredient name corrections stay informational and validate strictly", async () => {
+  const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
+  process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
+  const previousFetch = global.fetch;
+  try {
+    const recipe = {title: "テスト", materials: [{name: "片栗粉", quantity: "15", unit: "g",
+      price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+      selling_price_jpy: "", notes: [], interpretations: [], price_research: [],
+      name_corrections: [{material_name: "片栗粉", heard: "かたくりこ",
+        candidates: [{name: "片栗粉", reason: "一般的な調味料名の音誤認を料理文脈で補正"},
+          {name: "コーンスターチ", reason: "用途が近い代替の候補"}]}]};
+    global.fetch = (async () => Response.json({choices: [{finish_reason: "stop",
+      message: {content: JSON.stringify(recipe)}}]})) as typeof fetch;
+    const ok = await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["かたくりこ15g"]}));
+    expect(ok.status).toBe(200);
+    const body = await ok.json();
+    expect(body.nameCorrections).toHaveLength(1);
+    expect(body.nameCorrections[0].candidates).toHaveLength(2);
+    // Informational: notes and save-relevant fields untouched.
+    expect(body.notes).toEqual([]);
+    expect(body.materials[0].name).toBe("片栗粉");
+    // Four candidates exceed the 1-3 cap and fail closed.
+    const tooMany = {...recipe, name_corrections: [{material_name: "粉", heard: "こな",
+      candidates: [{name: "a", reason: "r"}, {name: "b", reason: "r"},
+        {name: "c", reason: "r"}, {name: "d", reason: "r"}]}]};
+    global.fetch = (async () => Response.json({choices: [{finish_reason: "stop",
+      message: {content: JSON.stringify(tooMany)}}]})) as typeof fetch;
+    expect((await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["こな"]})) ).status).toBe(502);
+    // Empty candidates fail closed instead of padding silently.
+    const emptyCands = {...recipe,
+      name_corrections: [{material_name: "粉", heard: "こな", candidates: []}]};
+    global.fetch = (async () => Response.json({choices: [{finish_reason: "stop",
+      message: {content: JSON.stringify(emptyCands)}}]})) as typeof fetch;
+    expect((await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["こな"]})) ).status).toBe(502);
+  } finally {
+    global.fetch = previousFetch;
+    if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
+    if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
   }
 });

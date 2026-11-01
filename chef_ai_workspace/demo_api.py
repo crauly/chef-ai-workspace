@@ -675,6 +675,7 @@ def reference_demo_price(name: str = Query(default="", max_length=200),
     so nothing here invents market prices: unknown terms stay unknown.
     Reads only; never adopts, confirms, or writes anything.
     """
+    from .external_reference import EXTERNAL_REFERENCE_STATUS
     from .price_history import summarize_reference_price
     owner, repository = ctx
     query = (name or "").strip()
@@ -735,7 +736,8 @@ def reference_demo_price(name: str = Query(default="", max_length=200),
             "ingredient_name": hit.get("name"),
             "reference": summarize_reference_price(observations),
             "observations": provenance})
-    return _json({"query": query, "candidates": candidates})
+    return _json({"query": query, "candidates": candidates,
+                 "external": dict(EXTERNAL_REFERENCE_STATUS)})
 
 
 # --- M6: price-change bell notifications (explicit confirmation only) ---

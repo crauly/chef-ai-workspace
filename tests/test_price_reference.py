@@ -102,6 +102,19 @@ class ReferenceEndpointTests(unittest.TestCase):
         self.assertEqual(ref["unit_basis"], "g")
         self.assertEqual(len(body["candidates"][0]["observations"]), 1)
 
+    def test_external_block_reports_unavailable_without_faking(self):
+        from chef_ai_workspace.external_reference import (
+            EXTERNAL_REFERENCE_STATUS, fetch_external_reference,
+            ExternalReferenceUnavailable)
+        self.assertFalse(EXTERNAL_REFERENCE_STATUS["available"])
+        with self.assertRaises(ExternalReferenceUnavailable):
+            fetch_external_reference("豚バラ肉")
+        res = self.client.get("/demo/price-reference", params={"name": "豚バラ"},
+                              headers=self.headers())
+        body = res.json()
+        self.assertFalse(body["external"]["available"])
+        self.assertIn("required", body["external"])
+
     def test_blank_name_rejected(self):
         res = self.client.get("/demo/price-reference", params={"name": " "},
                               headers=self.headers())
