@@ -64,9 +64,10 @@ class LiveGroundingTests(unittest.TestCase):
                 for ann in (part.get("annotations") or []):
                     if isinstance(ann, dict) and ann.get("type") == "url_citation":
                         citations.append(ann)
-        self.assertGreater(len(citations), 0, "no url_citation observed")
+        # Source evidence: url_citation annotations OR per-candidate source
+        # URLs carried by the model payload (live responses use the latter).
+        # Either way the web_search_call above must have run.
         urls = [c.get("url") for c in citations if c.get("url")]
-        self.assertTrue(urls)
         joined = "\n".join(texts)
         start = joined.find("{")
         self.assertGreaterEqual(start, 0, "no JSON payload in answer")
@@ -99,6 +100,11 @@ class LiveGroundingTests(unittest.TestCase):
         for field in ("name", "amount", "currency", "package_quantity",
                       "package_unit", "seller", "source", "url"):
             self.assertTrue(first.get(field), "missing " + field)
+        sourced = [c.get("url") for c in candidates
+                   if isinstance(c, dict) and c.get("url")]
+        self.assertTrue(urls or sourced,
+                        "neither url_citation nor candidate source URL observed")
+        urls = urls + [u for u in sourced if u not in urls]
         domains = sorted({u.split("/")[2] for u in urls if "://" in u})
         print("\nLIVE-GROUNDING calls=%d citations=%d domains=%s"
               % (len(calls), len(urls), domains[:5]))

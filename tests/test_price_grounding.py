@@ -47,6 +47,12 @@ class GroundingParseTests(unittest.TestCase):
         raw = _responses('{"candidates": []}', [])
         self.assertFalse(parse_responses_output(raw)["searched"])
 
+    def test_tool_ran_without_citation_is_strictly_not_searched(self):
+        raw = _responses('{"candidates": []}', [])
+        out = parse_responses_output(raw)
+        self.assertFalse(out["searched"])
+        self.assertTrue(out["tool_ran"])
+
     def test_message_without_call_is_not_searched(self):
         raw = _responses('{"candidates": []}', [CITATION], with_call=False)
         self.assertFalse(parse_responses_output(raw)["searched"])

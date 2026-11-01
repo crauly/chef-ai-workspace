@@ -1,7 +1,9 @@
 import {NextRequest, NextResponse} from "next/server";
 import {previewAuthorized} from "../../../preview-access";
 import {VOICE_RECIPE_SCHEMA,chatResponseFormat} from "../../../muse-schemas";
-import {searchGroundedPrices} from "../../../price-web-search";
+import {runGroundedSearch} from "../../../price-web-search";
+import type {GroundedSample} from "../../../price-web-search";
+import {detectPriceResearch} from "../../../price-research-intent";
 import {backendUrl} from "../backend-url";
 export const runtime="nodejs";
 // Backend origin allow-list lives in ../backend-url (shared SSOT): https,
@@ -9,6 +11,24 @@ export const runtime="nodejs";
 type ReferenceSummary={available:boolean;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null};
 type ReferenceCandidate={ingredient_id:string;ingredient_name:string;reference:ReferenceSummary;observations?:unknown[]};
 type LedgerLookup={kind:"ok";candidates:ReferenceCandidate[]}|{kind:"unavailable"|"unauthorized"|"invalid_response"};
+type ResearchStatus={material_name:string;trigger:"muse"|"heuristic";
+ ledger:"available"|"none"|"unavailable"|"unauthorized"|"invalid_response";
+ web:"not_attempted"|"available"|"empty"|"not_searched"|"provider_error"|"timeout"|"misconfigured";
+ provisional:boolean};
+type ProvisionalPrice={material_index:number;material_name:string;origin:"ledger"|"external";
+ price_jpy:string;price_quantity:string;price_unit:string;currency:string;observation_count:number;
+ sources:{url:string;title:string}[];samples:GroundedSample[];fetched_at:string|null;
+ status:"provisional";approval:"unapproved";text:string};
+function provisionalFor(index:number,material:{name:string},refs:PriceReferenceEntry[]):ProvisionalPrice|null{
+ const ref=refs.find(r=>r.material_name.trim()===(material.name||"").trim());
+ if(!ref||ref.status!=="available"||typeof ref.average_unit_price!=="string"||
+  typeof ref.unit_basis!=="string"||typeof ref.currency!=="string"||typeof ref.observation_count!=="number")return null;
+ return {material_index:index,material_name:ref.material_name,origin:ref.origin,
+  price_jpy:ref.average_unit_price,price_quantity:"1",price_unit:ref.unit_basis,currency:ref.currency,
+  observation_count:ref.observation_count,sources:ref.sources??[],samples:ref.samples??[],
+  fetched_at:ref.fetched_at??ref.observed_to??null,status:"provisional",approval:"unapproved",
+  text:`（未承認の仮設定候補）${ref.text}`};
+}
 type PriceReferenceEntry={material_name:string;status:"available"|"none"|"unavailable"|"unauthorized"|"invalid_response";origin:"ledger"|"external";ingredient_name:string|null;currency:string|null;unit_basis:string|null;average_unit_price:string|null;observation_count:number|null;observed_to:string|null;sources?:{url:string;title:string}[];fetched_at?:string;samples?:{name:string;seller:string;source:string;amount:string;package:string;url?:string;fetched_at?:string;tax_note?:string;shipping_note?:string;maker?:string;spec?:string}[];text:string};
 async function lookupCandidates(name:string):Promise<LedgerLookup>{
  const url=backendUrl(),token=process.env.DEMO_ACCESS_TOKEN;
@@ -206,19 +226,45 @@ notes is ONLY for unresolved ambiguous/unsupported facts, not ordinary packaging
   // Informational only: reported in price_references, never in notes, so the
   // existing saveModeFor gate (notes non-empty blocks approval) is untouched
   // and the unconfirmed-price save path stays available for research requests.
+  // Explicit research requests must reach grounding even when Muse omits
+  // price_research: Muse entries first, then a narrow heuristic gap-fill
+  // for still-unconfirmed lines (stated prices never match). Cap stays 3.
+  // Ledger-first per entry; grounding failures keep the ledger entry and
+  // are reported in research_status, so the draft never fails and the
+  // failure reason is never lost. Available references (ledger or web)
+  // additionally surface as unapproved provisional prices aligned to
+  // materials; materials themselves are untouched, so nothing provisional
+  // can flow into the save path without explicit chef approval in the UI.
+  const museEntries=output.priceResearch.map(e=>({...e,trigger:"muse" as const}));
+  const covered=new Set(museEntries.map(e=>e.material_name.trim()));
+  const heuristicEntries=detectPriceResearch(turns,output.materials)
+   .filter(h=>!covered.has(h.material_name.trim()))
+   .map(h=>({...h,trigger:"heuristic" as const}));
   const priceReferences:PriceReferenceEntry[]=[];
-  for(const entry of output.priceResearch.slice(0,3)){
+  const researchStatus:ResearchStatus[]=[];
+  for(const entry of [...museEntries,...heuristicEntries].slice(0,3)){
    const ledgerEntry=selectReference(entry.material_name,await lookupCandidates(entry.material_name));
    if(ledgerEntry.status==="available"){
     // Owned ledger wins: no web search when usable history exists.
     priceReferences.push(ledgerEntry);
+    researchStatus.push({material_name:entry.material_name,trigger:entry.trigger,
+     ledger:ledgerEntry.status,web:"not_attempted",provisional:true});
     continue;
    }
-   // Fallback only: real Search Grounding when the ledger cannot serve.
-   // Any grounding failure keeps the ledger entry; the draft never fails.
-   const grounded=await searchGroundedPrices({apiKey:key,materialName:entry.material_name,request:entry.request});
-   priceReferences.push(grounded??ledgerEntry);
+   const outcome=await runGroundedSearch({apiKey:key,materialName:entry.material_name,request:entry.request});
+   if(outcome.kind==="found"||outcome.kind==="empty"){
+    priceReferences.push(outcome.entry);
+    researchStatus.push({material_name:entry.material_name,trigger:entry.trigger,
+     ledger:ledgerEntry.status,web:outcome.kind==="found"?"available":"empty",
+     provisional:outcome.kind==="found"});
+   }else{
+    priceReferences.push(ledgerEntry);
+    researchStatus.push({material_name:entry.material_name,trigger:entry.trigger,
+     ledger:ledgerEntry.status,web:outcome.kind,provisional:false});
+   }
   }
-  return NextResponse.json({...output,price_references:priceReferences},{headers:{"Cache-Control":"no-store","Server-Timing":`muse;dur=${Math.round(performance.now()-started)}`}});
+  const provisionalPrices=output.materials.map((m,i)=>provisionalFor(i,m,priceReferences));
+  return NextResponse.json({...output,price_references:priceReferences,research_status:researchStatus,
+   provisional_prices:provisionalPrices},{headers:{"Cache-Control":"no-store","Server-Timing":`muse;dur=${Math.round(performance.now()-started)}`}});
  }catch{return error(502);}
 }

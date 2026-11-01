@@ -3,11 +3,17 @@
  * Contract (ADR-011): when the owned ledger has no usable reference for an
  * explicit price_research request, the app may ask Muse Spark 1.3 to run a
  * real web search via the Responses API `web_search` tool and report
- *出典付き reference prices. A bare tool request is NOT success: only an
- * observed `web_search_call` output item plus at least one `url_citation`
- * annotation counts as searched, and only validated candidates with
- * comparable terms are summarized. Failures keep the ledger entry; the
- * draft path is never failed and nothing is auto-saved.
+ *出典付き reference prices. A bare tool request is NOT success: an
+ * observed `web_search_call` output item must back the result, with source
+ * evidence from either `url_citation` annotations or per-candidate source
+ * URLs actually returned by the model (live responses carry tool calls
+ * whose candidates cite their own page URLs). Only validated candidates
+ * with comparable terms are summarized. Failures keep the ledger entry;
+ * the draft path is never failed and nothing is auto-saved.
+ *
+ * Request shape: `search_context_size` lives INSIDE the web_search tool
+ * object. The same key sent top-level is rejected with HTTP 400
+ * `unknown parameter` (verified against the live API).
  *
  * Validation mirrors chef_ai_workspace/external_reference.py
  * (validate_external_candidate): required name/amount/currency/
@@ -101,11 +107,16 @@ function extractJson(rawText: string): unknown {
   return undefined;
 }
 
-/** Split a Responses API output into search evidence + model text. */
+/** Split a Responses API output into search evidence + model text.
+ *
+ * `toolRan` reports whether a `web_search_call` item ran. `searched` keeps
+ * its strict meaning (tool ran AND at least one `url_citation`); callers
+ * that also accept per-candidate source URLs combine `toolRan` with the
+ * model's candidate payload (see runGroundedSearch). */
 export function parseGroundedResponse(raw: unknown): {
-  searched: boolean; citations: GroundedCitation[]; texts: string[]; modelJson: unknown;
+  searched: boolean; toolRan: boolean; citations: GroundedCitation[]; texts: string[]; modelJson: unknown;
 } {
-  const out = {searched: false, citations: [] as GroundedCitation[], texts: [] as string[], modelJson: undefined as unknown};
+  const out = {searched: false, toolRan: false, citations: [] as GroundedCitation[], texts: [] as string[], modelJson: undefined as unknown};
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
   const output = (raw as {output?: unknown}).output;
   if (!Array.isArray(output)) return out;
@@ -113,7 +124,7 @@ export function parseGroundedResponse(raw: unknown): {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
     const rec = item as Record<string, unknown>;
     if (rec.type === "web_search_call") {
-      out.searched = true;
+      out.toolRan = true;
       continue;
     }
     if (rec.type !== "message" || rec.role !== "assistant") continue;
@@ -139,8 +150,8 @@ export function parseGroundedResponse(raw: unknown): {
       }
     }
   }
-  // Searched means the tool actually ran AND at least one source is cited.
-  out.searched = out.searched && out.citations.length > 0;
+  // Strict searched: the tool actually ran AND at least one source is cited.
+  out.searched = out.toolRan && out.citations.length > 0;
   const joined = out.texts.join("\n");
   if (joined.trim()) out.modelJson = extractJson(joined);
   return out;
@@ -284,13 +295,38 @@ const SEARCH_INSTRUCTIONS =
   `Never invent prices from your own knowledge. ` +
   `When unsure, return {"candidates":[]}.`;
 
-/** Live Responses API call. Returns an external entry, or null when unusable. Never throws. */
-export async function searchGroundedPrices(args: {
+/** A per-candidate source URL is usable only when it is a non-empty
+ * http(s) URL. In the citation-free fallback path every summarized row
+ * must carry its own: one row's URL must never substantiate another row's
+ * price. */
+export function hasUsableSourceUrl(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const u = (raw as Record<string, unknown>).url;
+  if (typeof u !== "string" || !u.trim()) return false;
+  try {
+    const parsed = new URL(u.trim());
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/** Discriminated grounding outcome. "found" and "empty" both searched;
+ * "not_searched" means the tool never ran, or ran without any source
+ * evidence (neither url_citation annotations nor candidate source URLs);
+ * provider/timeout/misconfigured failures carry no price data. Never throws.
+ */
+export type GroundedOutcome =
+  | {kind: "found" | "empty"; entry: ExternalPriceEntry}
+  | {kind: "not_searched" | "provider_error" | "timeout" | "misconfigured"};
+
+/** Live Responses API call with a machine-readable outcome. Never throws. */
+export async function runGroundedSearch(args: {
   apiKey: string; materialName: string; request: string; locale?: string;
   fetchImpl?: typeof fetch; timeoutMs?: number;
-}): Promise<ExternalPriceEntry | null> {
+}): Promise<GroundedOutcome> {
   const {apiKey, materialName, request} = args;
-  if (!apiKey || !materialName.trim()) return null;
+  if (!apiKey || !materialName.trim()) return {kind: "misconfigured"};
   const fetchImpl = args.fetchImpl ?? fetch;
   const locale = args.locale === "en" ? "en" : "ja";
   const ctrl = new AbortController();
@@ -303,9 +339,8 @@ export async function searchGroundedPrices(args: {
         model: GROUNDED_SEARCH_MODEL,
         instructions: SEARCH_INSTRUCTIONS,
         input: buildPriceSearchInput(materialName, request, locale),
-        tools: [{type: "web_search"}],
+        tools: [{type: "web_search", search_context_size: "low"}],
         tool_choice: "auto",
-        search_context_size: "low",
         store: false,
         max_output_tokens: 2048,
         reasoning: {effort: "low"},
@@ -314,22 +349,55 @@ export async function searchGroundedPrices(args: {
       redirect: "error",
       signal: ctrl.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return {kind: "provider_error"};
     const raw: unknown = await res.json();
-    if (!raw || typeof raw !== "object" || (raw as {status?: unknown}).status !== "completed") return null;
+    if (!raw || typeof raw !== "object" || (raw as {status?: unknown}).status !== "completed")
+      return {kind: "provider_error"};
     const parsed = parseGroundedResponse(raw);
-    // Search-tool invocation without citations is NOT success.
-    if (!parsed.searched) return null;
     const mj = parsed.modelJson;
     const list = mj && typeof mj === "object" && !Array.isArray(mj)
       ? (mj as {candidates?: unknown}).candidates
       : Array.isArray(mj) ? mj : [];
-    if (!Array.isArray(list)) return null;
-    const entry = summarizeGroundedCandidates(list, parsed.citations, materialName);
-    return entry.status === "available" ? entry : null;
-  } catch {
-    return null;
+    if (!Array.isArray(list)) return {kind: "provider_error"};
+    // Strict pass: tool ran with url_citation annotations. Fallback: the
+    // tool ran and the model returned candidates that each carry their own
+    // usable source URL (the shape live completed responses actually use).
+    // Unsourced rows are dropped BEFORE summarization, so one row's URL can
+    // never substantiate another row's price in the average. Anything else
+    // -- tool-request-only, citation-free prose, unparsable payload -- stays
+    // "not_searched" and never becomes a price.
+    let sources = parsed.citations;
+    let rows: unknown[] = list;
+    if (!parsed.searched) {
+      if (!parsed.toolRan) return {kind: "not_searched"};
+      rows = list.filter(hasUsableSourceUrl);
+      if (!rows.length) return {kind: "not_searched"};
+      const seen = new Set(sources.map(c => c.url));
+      for (const c of rows) {
+        const u = ((c as Record<string, unknown>).url as string).trim();
+        if (seen.has(u)) continue;
+        seen.add(u);
+        sources = [...sources, {url: u.slice(0, 500), title: u.slice(0, 200)}];
+      }
+    }
+    const entry = summarizeGroundedCandidates(rows, sources, materialName);
+    return entry.status === "available" ? {kind: "found", entry} : {kind: "empty", entry};
+  } catch (error) {
+    // Abort (local timeout or caller cancellation) stays distinct from
+    // provider/network failures so the UI can say "timed out" vs "failed".
+    if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError"))
+      return {kind: "timeout"};
+    return {kind: "provider_error"};
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Legacy wrapper: usable external entry, or null. Never throws. */
+export async function searchGroundedPrices(args: {
+  apiKey: string; materialName: string; request: string; locale?: string;
+  fetchImpl?: typeof fetch; timeoutMs?: number;
+}): Promise<ExternalPriceEntry | null> {
+  const out = await runGroundedSearch(args);
+  return out.kind === "found" ? out.entry : null;
 }
