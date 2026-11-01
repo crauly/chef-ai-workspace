@@ -170,6 +170,7 @@ notes is ONLY for unresolved ambiguous/unsupported facts, not ordinary packaging
    return NextResponse.json({...output,price_references:[],research_status:[],
     provisional_prices:output.materials.map(()=>null),research_state:"deferred",
     pending_research:entries.map(e=>({material_name:e.material_name,material_index:e.material_index,
+     row_name:e.material_index>=0?(output.materials[e.material_index]?.name??null):null,
      request:e.request,trigger:e.trigger}))},
     {headers:{"Cache-Control":"no-store","Server-Timing":`muse;dur=${Math.round(performance.now()-started)}`}});
   }

@@ -30,6 +30,24 @@ export type DraftMaterial={name:string;price_jpy:string;price_quantity:string;pr
 // when the spoken product wording drifts); otherwise the entry stays
 // rowless (-1) and is still searched by name but can never bind a
 // provisional to a row it might miss.
+// Identity-checked binding for deferred entries: the caller echoes the
+// row name the entry was created against (row_name). A pointer is honored
+// only while the row still carries that name; a deletion, reorder, or
+// rename that moves another ingredient under the old number discards the
+// pointer and falls back to an exact searched-name match, else rowless.
+// Without a row_name (legacy callers) the historical rule applies.
+export function bindRow(materials:{name:string}[],materialName:string,
+ rowName:string|null|undefined,idx:number|null|undefined){
+ if(idx===-1)return -1;
+ if(typeof idx==="number"&&idx>=0&&idx<materials.length&&
+  typeof rowName==="string"&&rowName.trim()&&
+  (materials[idx].name||"").trim()===rowName.trim())return idx;
+ if(typeof rowName==="string"&&rowName.trim()){
+  return materials.findIndex(m=>(m.name||"").trim()===materialName.trim());
+ }
+ return rowIndexFor(materials,materialName,idx);
+}
+
 export function rowIndexFor(materials:{name:string}[],name:string,idx:number|null|undefined){
  const at=materials.findIndex(m=>(m.name||"").trim()===name.trim());
  const valid=typeof idx==="number"&&Number.isInteger(idx)&&idx>=0&&idx<materials.length?idx:-1;
