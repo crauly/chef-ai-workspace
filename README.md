@@ -79,6 +79,38 @@ Gate. Recordings are sent to Meta and are not stored by the application.
 
 Cost calculation and data validation remain deterministic application responsibilities.
 
+## Where Meta AI is used (implementation map)
+
+- **Voice transcription — Muse Voice Transcribe.** `POST /api/voice/transcribe`
+  sends recorded WAV from the server; the browser never holds the key. Returned
+  text becomes draft input only, never authorization
+  (`web/voice-transcription.ts`, [ADR-007](docs/ADR_007_MUSE_VOICE_INPUT_BOUNDARY.md)).
+- **Recipe interpretation — Muse Spark (`muse-spark-1.3`) with Structured Output.**
+  `POST /api/voice-recipe` parses turns against a strict JSON schema; unknown
+  values stay unresolved and block approval via `missing[]`
+  ([ADR-011](docs/ADR_011_STRUCTURED_OUTPUT.md)).
+- **Search Grounding — Responses `web_search`.** Price research is ledger-first;
+  grounding failures keep the ledger entry and stay labeled, never invented
+  (`web/price-web-search.ts`, `chef_ai_workspace/price_web_search.py`).
+- **Tool Calling — one read-only tool (Block 1, opt-in).**
+  `POST /demo/recipes/{id}/propose?tools=ledger` lets the model call
+  `search_owned_ingredients` (owner-scoped); the app validates arguments and
+  returned IDs fail-closed, and the result still needs explicit approval.
+  The default path is unchanged ([ADR-012](docs/ADR_012_TOOL_CALLING_BLOCK1.md)).
+- **Image Understanding — photo plus memo to draft (Block 2).**
+  `POST /api/image-recipe` (image-capable `muse-spark-1.3`); quantities, prices
+  and selling price read from the photo alone are reset server-side and only
+  memo-stated values are kept. The result lands on the same unsaved draft and
+  Human Gate ([ADR-013](docs/ADR_013_IMAGE_UNDERSTANDING_BLOCK2.md)).
+- **Muse Image — dish illustration preview (Block 3).**
+  `POST /api/dish-image` (`muse-image-1.0`, one image per explicit tap);
+  preview-only inside the draft card, never evidence for quantities, prices or
+  the finished dish, never auto-run, cleared on save and discard
+  ([ADR-014](docs/ADR_014_DISH_IMAGE_BLOCK3.md)).
+
+AI never saves or approves anything directly; prices and sources are never
+fabricated; any single-stage failure keeps the existing draft.
+
 See [ADR-007](docs/ADR_007_MUSE_VOICE_INPUT_BOUNDARY.md) for the verified API
 contract and limits. [Live Web acceptance](docs/VOICE_ACCEPTANCE.md) verified
 Japanese synthetic speech through actual Voice/Spark APIs, explicit approval,

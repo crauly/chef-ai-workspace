@@ -22,7 +22,8 @@ test("full recipe voice dialogue requires review before one atomic save",async({
  await entry.fill("カルボナーラ、卵100グラム、卵は50グラム60円、売価1800円");
  await page.getByRole("button",{name:"反映"}).click();
  await expect(page.getByText("未保存の下書き：カルボナーラ")).toBeVisible();
- await expect(page.getByText("卵: 100g ／ 仕入単価 ¥60 / 50g")).toBeVisible();
+ await expect(page.getByText("卵 — 100g")).toBeVisible();
+ await expect(page.getByText("仕入価格 ¥60 / 50g")).toBeVisible();
  await expect(page.getByRole("button",{name:"内容を承認して保存"})).toBeDisabled();
  expect(saved).toBe(0);
  await entry.fill("登録を確定");await page.getByRole("button",{name:"反映"}).click();
