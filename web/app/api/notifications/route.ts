@@ -1,24 +1,9 @@
 import {NextRequest,NextResponse} from "next/server";
 import {previewAuthorized} from "../../../preview-access";
+import {backendUrl} from "../backend-url";
 const fail=(status:number)=>NextResponse.json({error:"notifications_unavailable"},{status,headers:{"Cache-Control":"no-store"}});
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function backendBase():string|undefined{
- const internal=process.env.CHEF_FASTAPI_INTERNAL_URL;
- if(internal)return internal;
- const fallback=process.env.FASTAPI_BASE_URL;
- if(fallback&&(fallback.startsWith("http://127.0.0.1:")||fallback.startsWith("http://localhost:")))return fallback;
- return undefined;
-}
-function backendUrl():URL|undefined{
- const base=backendBase();
- if(!base)return undefined;
- try{
-  const url=new URL(base);
-  if(url.protocol!=="https:"&&!(url.protocol==="http:"&&["localhost","127.0.0.1","[::1]"].includes(url.hostname)))return undefined;
-  if(url.username||url.password)return undefined;
-  return url;
- }catch{return undefined;}
-}
+// Backend origin allow-list: shared SSOT in ../backend-url.
 export async function GET(req:NextRequest){
  if(!await previewAuthorized(req))return fail(403);
  const base=backendUrl(),token=process.env.DEMO_ACCESS_TOKEN;
