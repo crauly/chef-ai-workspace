@@ -96,6 +96,15 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  const reviewMode=useRef<SaveMode|null>(null);
  const inbox=useRef<Input[]>([]),draining=useRef(false),revision=useRef(0),epoch=useRef(0);
  const requestId=useRef<string|null>(null),semanticAbort=useRef<AbortController|null>(null),priceAbort=useRef<AbortController|null>(null),priceEpoch=useRef(0),alive=useRef(true);
+ const priceFlight=useRef<{key:string;rows:string[]} | null>(null);
+ type DonePrices=Pick<Draft,"price_references"|"research_status"|"provisional_prices"|"research_state">;
+ // Completed searches: fullKey -> response. A repeated identical request
+ // reuses the cached result instead of refetching, so it can never leave
+ // the row stuck in pending with no flight. Row names are part of the key,
+ // so renamed/reordered rows always miss and search fresh.
+ const priceDone=useRef<Map<string,DonePrices>>(new Map());
+ type StashedPrices={key:string;rows:string[];response:DonePrices};
+ const priceStash=useRef<StashedPrices | null>(null);
  const clearTrace=useRef("");
  const capture=useVoiceCapture(locale,enqueue,true);
  const voice={...capture,...sharedVoice};
@@ -108,7 +117,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  function say(text:string){if(alive.current)setMessage(ja?text:(englishMessages[text]??text));}
  function clear(){
   if(phaseRef.current==="saving")return;
-  epoch.current++;revision.current++;semanticAbort.current?.abort();priceAbort.current?.abort();priceEpoch.current++;setPriceLoading(false);voice.cancel();inbox.current=[];
+  epoch.current++;revision.current++;semanticAbort.current?.abort();priceAbort.current?.abort();priceEpoch.current++;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);voice.cancel();inbox.current=[];
   setCorrectionIndex(null);setPriceDetailIndex(null);setUnmatchedDetailIndex(null);dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);requestId.current=null;
   setStage("dictating");logVoiceEvent("draft.discarded.explicit","explicit cancel",clearTrace.current);clearTrace.current="";onDiscarded?.();say("下書きを破棄しました。新しいレシピを話してください。");
  }
@@ -117,6 +126,19 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  // dictation (approval can never commit it), but parseBase survives as Muse
  // revision context so follow-ups resend only unparsed turns, not history.
  const parseBase=useRef<Draft|null>(null);
+ function researchKey(entries:PendingResearch[]):string{
+  return [...entries].map(e=>`${e.material_name.trim()}|${e.material_index}|${e.row_name??""}|${e.request}`).sort().join(";");
+ }
+ function rowNamesOf(draft:Draft):string[]{
+  return draft.materials.map(m=>m.name.trim());
+ }
+ function flightMatches(flight:{key:string;rows:string[]},entries:PendingResearch[],draft:Draft):boolean{
+  if(flight.key!==researchKey(entries))return false;
+  const rows=rowNamesOf(draft);
+  // Every in-flight row must still exist by name+index; otherwise the
+  // request condition changed and the result must not be carried over.
+  return flight.rows.every((name,index)=>rows[index]===name);
+ }
  async function parse(next:string[],version:number,traceId=""){
   const current=epoch.current,aborter=new AbortController();semanticAbort.current=aborter;
   // Incremental revision: resend only turns not yet parsed, with the last
@@ -134,47 +156,146 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    parseBase.current=enriched;
    logVoiceEvent(draftRef.current?"draft.updated":"draft.created", "voice-recipe",traceId);
    setCorrectionIndex(null);setPriceDetailIndex(null);setUnmatchedDetailIndex(null);draftRef.current=enriched;setDraft(enriched);reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
-   if(out.research_state==="deferred"&&out.pending_research?.length){void enrichPrices(enriched,version,current,traceId);}
+   const pending=enriched.pending_research??[];
+   if(out.research_state==="deferred"&&pending.length){
+    const key=researchKey(pending);
+    const rows=rowNamesOf(enriched);
+    const stash=priceStash.current;
+    if(stash&&stash.key===key&&stash.rows.every((name,index)=>rows[index]===name)){
+     // A search that finished while this parse was in flight: apply it
+     // without refetching, so the result is neither lost nor duplicated.
+     const merged=applyFoundPrices({...enriched,...stash.response,pending_research:[]});
+     priceStash.current=null;priceFlight.current=null;priceAbort.current=null;setPriceLoading(false);
+     priceDone.current.set(key+"@"+rows.join("|"),stash.response);
+     draftRef.current=merged;parseBase.current=merged;setDraft(merged);
+     reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
+     logVoiceEvent("price.ok","stashed research applied",traceId);
+    }else{
+     priceStash.current=null;
+     const fullKey=key+"@"+rows.join("|");
+     const cached=priceDone.current.get(fullKey);
+     const flight=priceFlight.current;
+     if(cached){
+      // Identical request already completed: reapply the cached result so
+      // the row is never left pending with no search running.
+      const merged=applyFoundPrices({...enriched,...cached,pending_research:[]});
+      draftRef.current=merged;parseBase.current=merged;setDraft(merged);
+      reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
+      logVoiceEvent("price.ok","cached research reapplied",traceId);
+     }else if(flight&&flightMatches(flight,pending,enriched)&&priceAbort.current&&!priceAbort.current.signal.aborted){
+      // Unchanged ingredients: keep the running search, rebase its guard to
+      // the new draft so the result is merged instead of dropped.
+      priceFlight.current={key:flight.key,rows};
+      draftRef.current=enriched;parseBase.current=enriched;setDraft(enriched);
+     }else{
+      // New/changed condition: stop the stale search, start only what is new.
+      priceAbort.current?.abort();priceFlight.current=null;
+      draftRef.current=enriched;parseBase.current=enriched;setDraft(enriched);
+      void enrichPrices(enriched,version,current,traceId);
+     }
+    }
+   }else{
+    // No pending research: terminate any previous flight so unneeded prices
+    // can never land on this draft. Stale stash is discarded with it.
+    priceAbort.current?.abort();priceAbort.current=null;
+    priceFlight.current=null;priceStash.current=null;setPriceLoading(false);
+   }
    say(enriched.missing.length||enriched.notes.length?(ja?"確認が必要です："+[...enriched.missing,...enriched.notes].join("、"):"Needs review: "+[...enriched.missing,...enriched.notes].join(", ")):
     (ja?"下書きを更新しました。内容を確認し、「保存してください」と話すか、確認ボタンを押してください。":"Draft updated. Review it, then explicitly approve saving."));
   }catch{
    if(alive.current&&epoch.current===current&&revision.current===version&&!aborter.signal.aborted){
     logVoiceEvent("muse.fail","voice-recipe failed; draft kept",traceId);
     say("料理の解釈に失敗しました。保存していません。「解析を再試行」か補助入力で再開できます。");
+    const stash=priceStash.current;
+    const candidate=draftRef.current ?? parseBase.current;
+    if(stash&&candidate&&researchKey(candidate.pending_research??[])===stash.key&&
+       stash.rows.every((name,index)=>rowNamesOf(candidate)[index]===name)){
+     const merged=applyFoundPrices({...candidate,...stash.response,pending_research:[]});
+     priceDone.current.set(stash.key+"@"+rowNamesOf(candidate).join("|"),stash.response);
+     draftRef.current=merged;parseBase.current=merged;setDraft(merged);
+     reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
+     logVoiceEvent("price.ok","stashed research applied after parse failure",traceId);
+    }
+    if(stash||!(priceAbort.current&&!priceAbort.current.signal.aborted)){
+     // Clear only a finished flight/stash. A still-running search keeps its
+     // own flight and loading flag; its completion path owns the outcome.
+     priceStash.current=null;priceFlight.current=null;priceAbort.current=null;setPriceLoading(false);
+    }
    }
   }
  }
  async function enrichPrices(base:Draft,version:number,requestEpoch:number,traceId:string){
   const entries=base.pending_research??[];
   if(!entries.length)return;
+  const key=researchKey(entries);
+  const rows=rowNamesOf(base);
   const sequence=++priceEpoch.current;
   priceAbort.current?.abort();
   const controller=new AbortController();priceAbort.current=controller;
+  priceFlight.current={key,rows};
   setPriceLoading(true);
   logVoiceEvent("price.start",`${entries.length} entries`,traceId);
+  let stashed=false;
   try{
    const response=await request<Pick<Draft,"price_references"|"research_status"|"provisional_prices"|"research_state">>("/api/voice-recipe/prices",{
     method:"POST",body:JSON.stringify({materials:base.materials,entries:entries.map(e=>({...e,material_index:e.material_index===-1?null:e.material_index}))}),signal:controller.signal});
-   if(!alive.current||controller.signal.aborted||priceEpoch.current!==sequence||epoch.current!==requestEpoch||
-      revision.current!==version||draftRef.current!==base)return;
-   const merged=applyFoundPrices({...base,...response,pending_research:[]});
-   draftRef.current=merged;parseBase.current=merged;setDraft(merged);
-   reviewed.current=null;reviewMode.current=null;requestId.current=null;
-   setStage("dictating");logVoiceEvent("price.ok","research returned",traceId);
+   if(!alive.current||controller.signal.aborted||priceEpoch.current!==sequence||epoch.current!==requestEpoch)return;
+   if(phaseRef.current==="saving")return;
+   // Merge onto the latest draft when the searched rows are unchanged;
+   // never apply a stale result to a renamed/reordered/deleted row.
+   // A null live draft with a newer revision means a follow-up parse owns
+   // enrichment now: stash the response so parse() applies it without
+   // refetching, instead of dropping the result and searching twice.
+   const current=draftRef.current ?? (revision.current===version?base:null);
+   if(!current){
+    if(revision.current!==version&&draftRef.current===null){
+     priceStash.current={key,rows,response};stashed=true;
+     logVoiceEvent("price.ok","research finished during parse; stashed",traceId);
+    }else return;
+   }else{
+    const flight=priceFlight.current;
+    const currentRows=rowNamesOf(current);
+    const rowsKept=rows.every((name,index)=>currentRows[index]===name);
+    if(!rowsKept)return;
+    if(flight&&flight.key===key){
+     priceFlight.current={key,rows:currentRows};
+    }
+    const merged=applyFoundPrices({...current,...response,pending_research:[]});
+    priceDone.current.set(key+"@"+currentRows.join("|"),response);
+    draftRef.current=merged;parseBase.current=merged;setDraft(merged);
+    reviewed.current=null;reviewMode.current=null;requestId.current=null;
+    setStage("dictating");logVoiceEvent("price.ok","research returned",traceId);
+   }
   }catch{
    if(alive.current&&!controller.signal.aborted&&priceEpoch.current===sequence&&
-      epoch.current===requestEpoch&&revision.current===version&&draftRef.current===base){
-    const fallback={...base,research_state:"complete" as const,pending_research:[],
+      epoch.current===requestEpoch&&phaseRef.current!=="saving"){
+    const current=draftRef.current ?? (revision.current===version?base:null);
+    if(!current){
+     if(!(revision.current!==version&&draftRef.current===null))return;
+     // A follow-up parse is in flight: leave the outcome to it instead of
+     // publishing a failure over a draft that no longer exists.
+     return;
+    }
+    // Never stamp a stale failure over a newer pending condition; the fresh
+    // search owns the current rows.
+    if(researchKey(current.pending_research??[])!==key)return;
+    const fallback={...current,research_state:"complete" as const,pending_research:[],
       research_status:entries.map(e=>({...e,ledger:"unavailable",web:"provider_error" as const,provisional:false}))};
     draftRef.current=fallback;parseBase.current=fallback;setDraft(fallback);
+    // The approved content changed, so the old approval must not survive:
+    // same invalidation as the success path, otherwise save() would
+    // silently no-op with the approval button still enabled.
+    reviewed.current=null;reviewMode.current=null;requestId.current=null;
+    setStage("dictating");
     logVoiceEvent("price.fail","price research failed; draft retained",traceId);
    }
   }finally{
-   if(alive.current&&priceEpoch.current===sequence){setPriceLoading(false);priceAbort.current=null;}
+   if(stashed)return;
+   if(alive.current&&priceEpoch.current===sequence){setPriceLoading(false);priceAbort.current=null;priceFlight.current=null;}
   }
  }
  function showReview(traceId=""){
-  if(priceLoading){say(ja?"価格調査中です。完了後に内容を確認してください。":"Price research is running. Review after it finishes.");return;}
+  if(priceLoading){say(ja?"価格調査中ですが、下書きの確認は先にできます。検索結果は確定後に反映されます。":"Price research is running; you can still review the draft now.")} 
   const d=draftRef.current;
   if(!d){say(dataTurns.current.length?(ja?"最新の入力を解釈中、または解釈に失敗しています。解析が終わるまで保存しません。":"The latest input is processing or failed. Saving is blocked until analysis finishes."):(ja?"新しいレシピを登録します。料理名・食材・分量・仕入単価を話してください。":"Describe the dish, ingredients, quantities and purchase prices."));return;}
   const mode=saveModeFor(d);
@@ -190,7 +311,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  async function save(){
   const d=draftRef.current;
   const mode=reviewMode.current;
-  if(priceLoading||phaseRef.current!=="review"||!d||!mode||reviewed.current!==d||saveModeFor(d)!==mode)return;
+  if(phaseRef.current!=="review"||!d||!mode||reviewed.current!==d||saveModeFor(d)!==mode)return;
   voice.cancel();setStage("saving");if(!draining.current)setBusy(true);say("承認された内容を保存しています…");
   if(!requestId.current)requestId.current=crypto.randomUUID();
   try{
@@ -201,6 +322,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    // Spoken purchase sources travel with the save callback: the workspace
    // announces them after its browse transition (this panel hides then).
    const suppliers=[...new Set(d.materials.map(m=>(m.supplier||"").trim()).filter(Boolean))];
+   priceAbort.current?.abort();priceAbort.current=null;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);
    say(mode==="confirmed"?(sharedVoice?"保存済みです。":"レシピを保存しました。"):"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。");onCreated(recipe,mode,suppliers);
   }catch{setStage("review");say("保存結果を確認できませんでした。再送時も同じ登録IDを使います。一覧を確認してから再試行してください。");}
   finally{if(alive.current&&!draining.current)setBusy(false);}
@@ -237,7 +359,9 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   setTurns(previous=>[...previous,text].slice(-30));
   if(command==="data"){
    if(draftRef.current)parseBase.current=draftRef.current;
-   priceAbort.current?.abort();priceEpoch.current++;setPriceLoading(false);
+   // Keep a running price search alive across follow-up utterances; parse()
+   // adopts it when the searched rows are unchanged, or restarts it when the
+   // condition changed. Never abort here (avoids cancelling unchanged rows).
    revision.current++;reviewed.current=null;reviewMode.current=null;draftRef.current=null;requestId.current=null;setStage("dictating");
   }
   const afterReview=!meta||meta.reviewEpoch===approvalEpoch.current;
@@ -259,7 +383,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   const materialIndex=current.materials.findIndex(m=>m.name===entry.material_name);
   if(materialIndex<0)return;
   const previousName=current.materials[materialIndex].name;
-  priceAbort.current?.abort();priceEpoch.current++;setPriceLoading(false);
+  priceAbort.current?.abort();priceAbort.current=null;priceEpoch.current++;priceFlight.current=null;priceStash.current=null;setPriceLoading(false);
   const materials=current.materials.map((m,i)=>i===materialIndex?{...m,name}:m);
   const missing=current.missing.map(text=>text.startsWith(previousName+"の仕入単価")?name+text.slice(previousName.length):text);
   const nameCorrections=current.nameCorrections?.filter((_,i)=>i!==index);
@@ -312,7 +436,11 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   <button type="button" disabled={busy||!dataTurns.current.length||phase==="saving"} onClick={retry}>{ja?"解析を再試行":"Retry analysis"}</button>
 
   {draft&&<div id="draft" aria-label="未保存のレシピ下書き">
-   {priceLoading&&<p role="status" aria-live="polite">{ja?"価格を調査中です… 下書きは先に確認できます。":"Researching prices… You can inspect the draft now."}</p>}
+   {priceLoading&&<p role="status" aria-live="polite">{ja?"価格を検索しています… 下書きは先に確認できます。":"Searching prices… You can inspect the draft now."}</p>}
+   {!priceLoading&&(draft.research_status?.length??0)>0&&(()=>{
+    const hasResult=(draft.provisional_prices?.some(Boolean)??false)||(draft.research_status?.some(item=>item.provisional)??false);
+    return <p role="status" aria-live="polite">{hasResult?(ja?"検索結果を取得しました。価格の詳細・出典で内容を確認できます。":"Search results ready. Check price details and sources."):(ja?"価格を確認できませんでした。下書きは保持しています。":"Could not confirm prices. The draft is kept.")}</p>;
+   })()}
    <h3>{ja?"未保存の下書き：":"Unsaved draft: "}{draft.title||(ja?"料理名未設定":"Untitled recipe")}</h3>
    {draft.interpretations?.map((item,index)=><p key={index}>料理の文脈からの解釈案：{item.source} → {item.suggestion}（{item.reason}）</p>)}
    <p>{ja?"売価：":"Selling price: "}{draft.selling_price_jpy?("¥"+draft.selling_price_jpy):(ja?"未設定（売価なしでも保存できます）":"Not set (optional)")}</p>
@@ -400,8 +528,8 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    {draft.notes.length>0&&<p role="alert">要確認：{draft.notes.join("、")}</p>}
    <p>{phase==="review"?(reviewMode.current==="unconfirmed"?(ja?"確認待ち（価格未確定）：数量は確定、価格は未確定として保存します。よければ明示承認してください。":"Pending review: quantities are confirmed, but purchase prices are unconfirmed. Explicitly approve to save."):(ja?"確認待ち：内容が正しければ、保存を明示承認してください。":"Pending review: explicitly approve saving if the details are correct.")):(ja?"まだ保存されていません。":"Not saved yet.")}</p>
    {sharedVoice&&<><p role="status">{sharedVoice.captureMessage}</p><a href="#voice-controls">音声操作・再開へ戻る</a></>}
-   <button type="button" disabled={busy||priceLoading||!eligible||phase==="saving"} onClick={()=>showReview()}>{ja?"内容を確認":"Review draft"}</button>
-   <button type="button" disabled={busy||priceLoading||phase!=="review"||!eligible} onClick={()=>void save()}>{phase==="review"&&reviewMode.current==="unconfirmed"?(ja?"価格未確定として承認して保存":"Approve & save with unconfirmed prices"):(ja?"内容を承認して保存":"Approve & save")}</button>
+   <button type="button" disabled={busy||!eligible||phase==="saving"} onClick={()=>showReview()}>{ja?"内容を確認":"Review draft"}</button>
+   <button type="button" disabled={busy||phase!=="review"||!eligible} onClick={()=>void save()}>{phase==="review"&&reviewMode.current==="unconfirmed"?(ja?"価格未確定として承認して保存":"Approve & save with unconfirmed prices"):(ja?"内容を承認して保存":"Approve & save")}</button>
    <button type="button" disabled={phase==="saving"} onClick={clear}>{ja?"下書きを破棄":"Discard draft"}</button>
   </div>}
   <details className="voice-transcript"><summary>{ja?"認識した発話":"Recognized utterances"}（{turns.length}{ja?"件":" turns"}）</summary>{turns.length>0?<ol aria-label={ja?"認識した発話の一覧":"Recognized utterances"}>{[...turns].reverse().map((turn,index)=><li key={`${turns.length-index}`}>{turn}</li>)}</ol>:<p>{ja?"まだ発話はありません。":"No utterances yet."}</p>}</details>

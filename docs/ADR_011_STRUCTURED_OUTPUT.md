@@ -157,3 +157,66 @@ one entry's failure never fails the others. Fixture proof:
 `web/tests/voice-recipe-deferred.spec.ts` (mixed rowless/healthy,
 deletion/reorder/rename/drift, bad row_name and out-of-shape indexes fail
 closed).
+
+## Price-search lifecycle across follow-up utterances (P0 fix)
+Accepted. `VoiceRecipeRegistration.enqueue()` used to abort the running
+`POST /api/voice-recipe/prices` call on every new data utterance, so
+continuous speech always cancelled the search (`(canceled)` in
+production) and the reference price never arrived. The abort is removed,
+not merely deleted: a `priceFlight` ref (pending signature +
+creation row names) tracks the running search, and a finished-signature
+set suppresses duplicate calls for the same ingredient + request.
+- Unchanged rows: when the next parsed draft's `pending_research`
+  signature matches the flight and every in-flight row still exists at
+  the same index with the same name, the flight is rebased onto the new
+  draft and the single running request is kept (no second fetch); its
+  result merges onto the LATEST draft only if those rows are still
+  unchanged, otherwise it is discarded, never misapplied.
+- Changed rows (rename/reorder/delete/new request): the stale flight is
+  aborted and a fresh search starts for the new condition only.
+- Review/save are no longer blocked while searching: merging a price
+  result resets the review snapshot (`reviewed=null`, stage back to
+  dictating), so a search that lands after review can never be committed
+  under the old approval; merging is skipped while saving. Draft status
+  is always one of 価格を検索しています / 検索結果を取得しました /
+  価格を確認できませんでした (compact `role=status` line, per-row 検索中
+  kept), and failure keeps the draft with the loading flag cleared, so no
+  stuck "searching" remains. Internal terms (provisional/deferred/
+  pending) stay out of user-facing text.
+- Fixture proof: `web/tests/voice-price-lifecycle.spec.ts` (carry-over
+  with exactly 1 prices call, rename restarts without stale binding,
+  failure keeps draft and clears searching, bottom-mic recording state).
+
+## Price-search lifecycle follow-ups (PR #100 review)
+Three completions to the flight model, same guarantees (row identity,
+Human Gate, no misbinding):
+- Empty follow-up pending terminates the old flight: a parse result with
+  no `pending_research` aborts any running search and drops its stash, so
+  unneeded prices can never land and loading never sticks.
+- Discarding the draft resets search history: `clear()` and successful
+  save clear `priceDoneKeys` (plus flight/stash/loading), so the same
+  ingredient in a fresh registration is searched again.
+- Search finishing mid-parse is stashed, not lost: when the prices
+  response arrives while no live draft exists (a follow-up parse is in
+  flight), it is kept with its key/rows and applied by the completing
+  parse without refetching (exactly one prices call); a stale stash never
+  overwrites a changed draft, and a parse failure adopts a matching stash
+  onto the kept draft instead of stranding it.
+- Fixture proof: three added cases in
+  `web/tests/voice-price-lifecycle.spec.ts` (empty-pending termination,
+  discard-then-research, mid-parse completion without refetch).
+
+## Review follow-ups: result reuse and failure invalidation (PR #100)
+Two P2 findings on the flight model, fixed without touching row
+identity or the Human Gate:
+- Completed searches are cached per full key (entries signature + row
+  names) and reapplied to an identical repeated request, so a repeat is
+  served with zero fetches and no row is ever left pending with no
+  flight. Renamed/reordered rows miss the cache and search fresh; the
+  cache is cleared on discard/save alongside flight state.
+- The price-failure fallback now invalidates the review snapshot
+  (`reviewed=null`, back to dictating), exactly like the success path,
+  so an approval taken mid-search cannot linger enabled-yet-dead.
+- Fixture proof: two added cases in
+  `web/tests/voice-price-lifecycle.spec.ts` (identical-repeat reuse with
+  one fetch, review-invalidated-on-failure).

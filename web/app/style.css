@@ -111,7 +111,12 @@ a,.link{color:#b3d5ff}
  .bottom-nav a,.bottom-nav button:not(.bottom-nav-mic){flex:1;text-align:center;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:3px;background:transparent;border:0;padding:8px 2px;color:#b8b9bd;font-size:.75rem;font-weight:550;line-height:1.1;min-width:0;text-decoration:none}
  .bottom-nav a:hover,.bottom-nav button:not(.bottom-nav-mic):hover{color:#fff;background:#26282a}
  .bottom-nav .bottom-nav-mic{flex:0 0 68px;width:68px;height:68px;border-radius:50%;border:1px solid #3d4045;background:#292b2e;color:#fff;font-size:1.85rem;padding:0;display:grid;place-items:center;box-shadow:0 2px 14px #0005}
+ .bottom-nav .bottom-nav-mic{position:relative;isolation:isolate}
+ .bottom-nav .bottom-nav-mic::after{content:"";position:absolute;inset:-1px;border-radius:50%;border:2px solid transparent;pointer-events:none}
  .bottom-nav .bottom-nav-mic[aria-pressed="true"]{background:#155338;border-color:#238b5a}
+ .bottom-nav .bottom-nav-mic[aria-pressed="true"]::after{border-color:rgba(88,200,142,.55);animation:chef-mic-ring 1.8s ease-out infinite}
+ @keyframes chef-mic-ring{from{transform:scale(1);opacity:.7}to{transform:scale(1.22);opacity:0}}
+ @media(prefers-reduced-motion:reduce){.bottom-nav .bottom-nav-mic[aria-pressed="true"]::after{animation:none}}
  .bottom-nav .bottom-nav-mic:disabled{opacity:.55}
  .card{padding:18px}
 }
