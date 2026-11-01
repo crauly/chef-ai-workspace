@@ -9,7 +9,7 @@ import {logVoiceEvent} from "./voice-diagnostics";
 type Ingredient={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string;supplier:string};
 type Interpretation={source:string;suggestion:string;reason:string};
 type NameCorrection={material_name:string;heard:string;candidates:{name:string;reason:string}[]};
-type PriceReference={material_name:string;status:string;ingredient_name?:string;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null;text:string};
+type PriceReference={material_name:string;status:string;origin?:"ledger"|"external";ingredient_name?:string;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null;sources?:{url:string;title:string}[];fetched_at?:string;text:string};
 type Draft={title:string;materials:Ingredient[];selling_price_jpy:string;notes:string[];missing:string[];interpretations?:Interpretation[];price_references?:PriceReference[];nameCorrections?:NameCorrection[]};
 type Input={text:string;command:VoiceCommand;revision:number;approval:Draft|null;traceId:string};
 export type SaveMode="confirmed"|"unconfirmed";
@@ -245,6 +245,9 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     <ul>{draft.price_references?.map((ref,index)=><li key={`${ref.material_name}-${index}`}>
      <strong>{ref.material_name}</strong>{ref.ingredient_name&&ref.ingredient_name!==ref.material_name?` — ${ref.ingredient_name}`:""}
      <p>{ref.text}</p>
+     {ref.origin&&<p className="muted">{ref.origin==="external"?(ja?"Web調査による参考情報":"Web research reference"):(ja?"仕入台帳の履歴":"Purchase ledger history")}</p>}
+     {ref.origin==="external"&&ref.fetched_at&&<p className="muted">{ja?"調査日時":"Researched at"}: {ref.fetched_at}</p>}
+     {ref.origin==="external"&&Boolean(ref.sources?.length)&&<ul>{ref.sources?.filter(source=>{try{return new URL(source.url).protocol==="https:";}catch{return false;}}).map((source,i)=><li key={`${source.url}-${i}`}><a href={source.url} target="_blank" rel="noopener noreferrer">{source.title||source.url}</a></li>)}</ul>}
     </li>)}</ul>
     <p className="muted">{ja?"参考情報です。正式な仕入価格には自動反映しません。実際の価格を確認できた場合は音声で価格・数量・単位を伝えてください。不明な場合は価格未確定として確認できます。":"For reference only; not applied as a confirmed purchase price. To set a known price, dictate its amount, quantity and unit. Otherwise review and save with unconfirmed prices."}</p>
    </section>}
