@@ -17,6 +17,8 @@ HELPER = ROOT / "web/app/api/backend-url.ts"
 COLLECTION = ROOT / "web/app/api/notifications/route.ts"
 MEMBER = ROOT / "web/app/api/notifications/[id]/route.ts"
 VOICE_RECIPE = ROOT / "web/app/api/voice-recipe/route.ts"
+VOICE_PRICES = ROOT / "web/app/api/voice-recipe/prices/route.ts"
+ENRICHMENT = ROOT / "web/price-enrichment.ts"
 
 
 class NotificationsBackendBindingTests(unittest.TestCase):
@@ -32,14 +34,23 @@ class NotificationsBackendBindingTests(unittest.TestCase):
         self.assertIn("username", src)
 
     def test_routes_reuse_the_shared_helper(self):
-        for path in (COLLECTION, MEMBER, VOICE_RECIPE):
+        for path in (COLLECTION, MEMBER):
             with self.subTest(path=str(path)):
                 src = self.read(path)
                 self.assertIn("backend-url", src)
                 self.assertIn("backendUrl", src)
+        # voice-recipe reaches the backend only through the shared
+        # enrichment module (inline + deferred prices routes): that module
+        # must reuse the same helper instead of carrying its own allow-list.
+        for path in (VOICE_RECIPE, VOICE_PRICES):
+            with self.subTest(path=str(path)):
+                self.assertIn("price-enrichment", self.read(path))
+        src = self.read(ENRICHMENT)
+        self.assertIn("backend-url", src)
+        self.assertIn("backendUrl", src)
 
     def test_no_duplicate_allow_list_in_routes(self):
-        for path in (COLLECTION, MEMBER, VOICE_RECIPE):
+        for path in (COLLECTION, MEMBER, VOICE_RECIPE, VOICE_PRICES, ENRICHMENT):
             with self.subTest(path=str(path)):
                 src = self.read(path)
                 self.assertNotIn("127.0.0.1", src)

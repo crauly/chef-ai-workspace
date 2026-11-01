@@ -112,3 +112,32 @@ longer singles out any cuisine in dish-title normalization examples.
   one low-context search asserting `web_search_call` + (`url_citation`
   OR candidate-carried source URLs) + priced candidates; read-only,
   no DB).
+
+## Deferred price enrichment (latency split)
+Accepted. `/api/voice-recipe` used to hold the draft until ledger
+lookups (15s timeout each, sequential, up to 3 entries) and Search
+Grounding (45s timeout each, sequential, up to 3) all finished -- up to
+~180s of price phase blocking the draft after the Muse call (25s
+timeout). Two changes, no new job infra, no new external service:
+- Entries now enrich concurrently (`Promise.all`, cap 3 bounds the
+  fan-out; result order follows entry order, never completion order).
+  Ledger-first per entry, validation, row binding, and Human Gate are
+  unchanged.
+- `defer_prices: true` returns the parsed draft right after Muse with
+  `research_state: "deferred"`, `pending_research[]` (検索待ち per row:
+  material_name/material_index/request/trigger), and empty
+  price_references/research_status/provisional_prices. The UI then calls
+  stateless `POST /api/voice-recipe/prices` with the CURRENT materials
+  snapshot; every entry is re-bound there against those fresh rows, so a
+  stale index can never attach a price to the wrong row (検索中 is the
+  in-flight prices call client-side; 完了/失敗 arrive per entry via the
+  existing research_status ledger/web states). Default responses carry
+  `research_state: "complete"` and are otherwise shape-compatible.
+- Shared SSOT: `web/price-enrichment.ts` (row binding, lookup, selection,
+  provisional shaping, entry assembly, parallel enrich). Both routes
+  import it; no duplicated binding logic.
+- Fixture proof: `web/tests/voice-recipe-deferred.spec.ts` (deferred
+  makes zero ledger/grounding calls; 400ms+400ms mocked enrichment
+  measured deferred=3ms vs full=813ms; out-of-order latency keeps entry
+  order; contradictory/stale indexes never misbind; bad shapes fail
+  closed). Production wall-clock gains vary by backend/search latency.
