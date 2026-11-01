@@ -96,6 +96,32 @@ def _owned_candidates(owner, repository, recipe, name):
     return pool
 
 
+def _tool_search(owner, repository, recipe):
+    """Owner-scoped search callable for the Block 1 ledger tool.
+
+    Uses repository.search_owned_ingredients (the same owner-scoped method as
+    _owned_candidates), never the recipe-costing catalog that only holds
+    already-linked IDs. Repositories without that method fall back to a
+    substring search over the recipe catalog.
+    """
+    searcher = getattr(repository, "search_owned_ingredients", None)
+    if callable(searcher):
+        def _search(query, limit):
+            rows = searcher(owner, query, limit) or []
+            return [row for row in rows] if isinstance(rows, (list, tuple)) else []
+        return _search
+
+    def _fallback(query, limit):
+        from .ingredient_assist import search_owned_ingredients as _substring
+        try:
+            catalog = repository.load_owned_catalog(owner, recipe) or {}
+        except (ValueError, TypeError, AttributeError):
+            return []
+        return [{"id": g.id, "name": g.name}
+                for g in _substring(query, catalog)][:limit]
+    return _fallback
+
+
 class AssistRequestBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     material_id: UUID
@@ -356,8 +382,8 @@ def propose_demo_change(recipe_id: UUID, body: AIProposalBody,
             run_tools = getattr(provider, "propose_with_tools", None)
             if run_tools is None:
                 raise HTTPException(503, "Tool path requires the Meta provider")
-            catalog = repository.load_owned_catalog(owner, recipe)
-            operations = run_tools(body.instruction, context, catalog)
+            operations = run_tools(body.instruction, context,
+                                   _tool_search(owner, repository, recipe))
         else:
             operations = provider.propose(body.instruction, context)
     except ProposalProviderError as exc:
@@ -367,6 +393,17 @@ def propose_demo_change(recipe_id: UUID, body: AIProposalBody,
         try:
             catalog = (repository.load_owned_catalog(owner, recipe)
                        if any(m.price_mode == "inherit" for m in recipe.materials) else {})
+            if tools == "ledger":
+                # Tool-resolved links reference owned ingredients the
+                # recipe-costing catalog does not contain yet. Load exactly
+                # those IDs owner-scoped (same pattern as save_recipe_with_ledger
+                # explicit IDs); ownership is enforced by the repository.
+                loader = getattr(repository, "load_owned_ingredients", None)
+                linked = {op["ingredient_id"] for op in operations
+                          if isinstance(op, dict) and op.get("op") == "link_ingredient"
+                          and isinstance(op.get("ingredient_id"), str)}
+                if linked and callable(loader):
+                    catalog = {**(catalog or {}), **(loader(owner, sorted(linked)) or {})}
             prepare_mutation(recipe, Proposal(str(recipe_id), recipe.revision,
                              str(uuid4()), tuple(operations)), user_confirmed=False,
                              catalog=catalog)

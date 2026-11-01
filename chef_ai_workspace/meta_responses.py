@@ -3,7 +3,7 @@ import json
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Callable
 
 from .ai_provider import ProposalProviderError
 
@@ -114,27 +114,29 @@ class MetaResponsesProvider:
         return parse_response(raw)
 
     def propose_with_tools(self, instruction: str, recipe_context: dict,
-                             catalog: Mapping, max_tool_turns: int = 2) -> list[dict]:
+                             search: Callable, max_tool_turns: int = 2) -> list[dict]:
         """Proposal with owned-ledger function tools (Block 1, opt-in only).
 
         The default propose() path is untouched. When the model emits
-        function_call items, the app executes them against the owned catalog
-        (read-only; IDs validated against that catalog) and returns the
-        results as function_call_output with manual stateless history
-        (store=false, no previous_response_id chaining). The final turn is
-        parsed by the strict parse_response: any tool-call, refusal,
-        incomplete, timeout, invalid-argument-flood, or loop-exhaustion
-        state fails closed with ProposalProviderError, and the downstream
-        mutation validator plus human approval still apply. A final
-        link_ingredient whose ingredient_id was not returned by a tool call
-        in this session is rejected here (provenance only; ownership and
-        approval stay downstream).
+        function_call items, the app executes them through the owner-scoped
+        search callable (read-only; only well-formed id/name rows from that
+        search reach the model) and returns the results as function_call_output
+        with manual stateless history (store=false, no previous_response_id
+        chaining). Every turn's assistant messages are strictly validated, so
+        refusals and incomplete messages fail closed on intermediate turns as
+        well as final ones. The final turn is parsed by the strict
+        parse_response: any tool-call, refusal, incomplete, timeout,
+        invalid-argument-flood, or loop-exhaustion state fails closed with
+        ProposalProviderError, and the downstream mutation validator plus human
+        approval still apply. A final link_ingredient whose ingredient_id was
+        not returned by a tool call in this session is rejected here
+        (provenance only; ownership and approval stay downstream).
         """
         from .tool_ledger import LEDGER_TOOLS, ToolLedgerError, execute_tool
         if not instruction.strip() or len(instruction) > 4000:
             raise ValueError("Instruction length invalid")
-        if not isinstance(catalog, Mapping):
-            raise ValueError("Owned catalog mapping required")
+        if not callable(search):
+            raise ValueError("Owner-scoped search callable required")
         if not isinstance(max_tool_turns, int) or max_tool_turns < 0 or max_tool_turns > 2:
             raise ValueError("max_tool_turns must be 0-2")
         user_text = json.dumps({"instruction": instruction, "recipe": recipe_context}, ensure_ascii=False)
@@ -188,7 +190,7 @@ class MetaResponsesProvider:
                 history.append({"type": "function_call", "call_id": call["call_id"],
                                 "name": call["name"], "arguments": call["arguments"]})
                 try:
-                    result = execute_tool(call["name"], json.loads(call["arguments"]), catalog)
+                    result = execute_tool(call["name"], json.loads(call["arguments"]), search)
                 except ToolLedgerError:
                     raise ProposalProviderError("Unknown tool requested") from None
                 except (ValueError, TypeError):
@@ -238,8 +240,16 @@ class MetaResponsesProvider:
                     raise ProposalProviderError("Invalid function call")
                 calls.append({"call_id": call_id, "name": name, "arguments": arguments})
                 continue
-            if item.get("type") != "message" or item.get("role") != "assistant":
+            if (item.get("type") != "message" or item.get("role") != "assistant"
+                    or item.get("status") != "completed"):
                 raise ProposalProviderError("Unexpected Meta output item")
+            content = item.get("content")
+            if not isinstance(content, list):
+                raise ProposalProviderError("Invalid Meta content")
+            for part in content:
+                if (not isinstance(part, dict) or part.get("type") != "output_text"
+                        or not isinstance(part.get("text"), str)):
+                    raise ProposalProviderError("Meta output is not text")
         return calls
 
     def classify_intent(self, utterance: str, current_mode: str = "idle") -> dict:

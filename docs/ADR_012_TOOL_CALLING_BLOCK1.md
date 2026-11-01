@@ -23,10 +23,14 @@ tool for that gap. No existing orchestration is duplicated or replaced.
 
 ## Decision
 - New tool `search_owned_ingredients{query, limit?}` (`chef_ai_workspace/tool_ledger.py`).
-  Executor runs `ingredient_assist.search_owned_ingredients` against the supplied
-  owned catalog; every returned ID is validated against that catalog. Read-only:
-  no create/modify/delete/persist. Unknown tool names raise `ToolLedgerError`
-  (fail closed); invalid arguments return `{"error": ...}` to the model (recoverable).
+  The executor takes an owner-scoped `search(query, limit)` callable (the
+  repository's `search_owned_ingredients`, same method `_owned_candidates`
+  uses) — never the recipe-costing catalog, which only holds already-linked
+  IDs and is empty for unlinked recipes. Only well-formed id/name rows from
+  that search reach the model. Read-only: no create/modify/delete/persist.
+  Unknown tool names raise `ToolLedgerError` (fail closed); invalid arguments
+  return `{"error": ...}` to the model (recoverable); search failures return
+  `{"error": "search_failed"}`.
 - New `MetaResponsesProvider.propose_with_tools(instruction, ctx, catalog,
   max_tool_turns=0..2)` (`meta_responses.py`). Manual-history loop; final turn
   parsed by the untouched strict `parse_response` (which still rejects tool
@@ -35,7 +39,16 @@ tool for that gap. No existing orchestration is duplicated or replaced.
   `classify_intent()` are byte-identical paths, untouched.
 - New opt-in endpoint flag `POST /demo/.../propose?tools=ledger` (`demo_api.py`).
   Default `""` keeps the legacy path; other values → 422; non-Meta provider →
-  503. Downstream mutation validation and the Human Gate are unchanged.
+  503. The tool search is built by `_tool_search` (owner-scoped repository
+  search; substring fallback over the recipe catalog only when the repository
+  lacks that method). Tool-resolved link IDs are merged into the validation
+  catalog via owner-scoped `load_owned_ingredients` — the same explicit-ID
+  pattern as `save_recipe_with_ledger` — so `prepare_mutation` ownership
+  checks pass without weakening them. Downstream mutation validation and the
+  Human Gate are unchanged.
+- Every turn's assistant messages are strictly validated (`_tool_calls`):
+  role/status/content-shape, so refusals and incomplete messages fail closed
+  on intermediate tool turns as well as final ones.
 - Muse decides *when* to look up; the app executes, validates, and still
   requires explicit chef approval before anything persists. AI never saves.
 - Provenance check (follow-up): a final `link_ingredient` whose string
@@ -56,7 +69,8 @@ max_tool_turns ≤ 2, ≤ 4 calls/turn, 25s/turn timeout, strict final parse,
 existing 40-operation limit. No unbounded retry.
 
 ## Verification
-- `tests/test_tool_ledger.py` (25 tests, offline): executor units, happy-path
+- `tests/test_tool_ledger.py` (34 tests, offline, incl. `IntermediateMessageTests`
+  and `ToolEndpointWiringTests` for both review findings): executor units, happy-path
   loop, invalid-args recovery, unknown-tool/timeout/HTTP/refusal/loop-exhaustion
   fail-closed, no-call passthrough, per-turn cap, legacy `propose()` sends no
   `tools`, endpoint `tools=bogus` → 422, plus `LinkProvenanceTests` (7 tests):

@@ -22,7 +22,12 @@ class LiveToolLedgerTests(unittest.TestCase):
             {"id": "mat-1", "material_id": "mat-1", "name": marker + "トマト",
              "quantity": {"value": "200", "unit": "g"},
              "price_mode": "inherit", "linked_ingredient_id": None}]}
-        catalog = {owned_id: Ingredient(owned_id, marker + "トマト", None)}
+        owned = Ingredient(owned_id, marker + "トマト", None)
+        def search(query, limit):
+            needle = "".join(query.split()).lower()
+            if needle in "".join(owned.name.split()).lower():
+                return [{"id": owned.id, "name": owned.name}]
+            return []
         # Live sampling is nondeterministic: the model occasionally abstains
         # without calling the tool. Retry boundedly; the assertion itself is
         # not relaxed (the final attempt must still prove tool use).
@@ -32,7 +37,7 @@ class LiveToolLedgerTests(unittest.TestCase):
             operations = provider.propose_with_tools(
                 f"材料mat-1（{marker}トマト）を所有カタログにリンクして。"
                 "IDが不明ならsearch_owned_ingredientsツールで検索し、"
-                "link_ingredient操作でprice_modeはinheritとして。", recipe, catalog)
+                "link_ingredient操作でprice_modeはinheritとして。", recipe, search)
             links = [op for op in operations if op.get("op") == "link_ingredient"]
             if links:
                 break
