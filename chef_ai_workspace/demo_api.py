@@ -327,13 +327,21 @@ class AIProposalBody(BaseModel):
 
 @router.post("/recipes/{recipe_id}/propose")
 def propose_demo_change(recipe_id: UUID, body: AIProposalBody,
-                        request: Request, ctx=Depends(demo_context)):
-    """Untrusted suggestion only. Never commit or confirm AI output here."""
+                        request: Request, ctx=Depends(demo_context),
+                        tools: str = ""):
+    """Untrusted suggestion only. Never commit or confirm AI output here.
+
+    tools="" (default) keeps the exact legacy path. tools="ledger" enables
+    the Block 1 owned-ledger function loop (read-only ingredient-ID search);
+    anything else is rejected. The tool path needs a MetaResponsesProvider.
+    """
     from .ai_provider import ProposalProviderError
     owner, repository = ctx
     provider = getattr(request.app.state, "ai_provider", None)
     if provider is None:
         raise HTTPException(503, "AI provider not configured")
+    if tools not in ("", "ledger"):
+        raise HTTPException(422, "Unknown tools option")
     try:
         recipe = repository.load_owned_recipe(owner, str(recipe_id))
     except ValueError as exc:
@@ -344,7 +352,14 @@ def propose_demo_change(recipe_id: UUID, body: AIProposalBody,
         context = asdict(recipe)
         if suggestions:
             context["correction_suggestions"] = suggestions
-        operations = provider.propose(body.instruction, context)
+        if tools == "ledger":
+            run_tools = getattr(provider, "propose_with_tools", None)
+            if run_tools is None:
+                raise HTTPException(503, "Tool path requires the Meta provider")
+            catalog = repository.load_owned_catalog(owner, recipe)
+            operations = run_tools(body.instruction, context, catalog)
+        else:
+            operations = provider.propose(body.instruction, context)
     except ProposalProviderError as exc:
         raise HTTPException(502, "AI provider unavailable or invalid response") from exc
     # Pure validation on a copy: reject malformed/unknown edits before showing a diff.

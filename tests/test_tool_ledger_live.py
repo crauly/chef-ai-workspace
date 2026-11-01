@@ -1,0 +1,36 @@
+"""Opt-in live Meta tool-calling acceptance. Never runs in CI by default.
+
+Requires CHEF_LIVE_META=1 and MODEL_API_KEY in the backend environment.
+Uses random UUID ingredient IDs the model cannot guess, proving the
+link_ingredient reference came from the tool result, not pretraining.
+"""
+import os
+import unittest
+from uuid import uuid4
+
+from chef_ai_workspace.meta_responses import MetaResponsesProvider
+from chef_ai_workspace.models import Ingredient
+
+
+@unittest.skipUnless(os.environ.get("CHEF_LIVE_META") == "1", "Opt-in real Meta inference")
+class LiveToolLedgerTests(unittest.TestCase):
+    def test_tool_resolved_id_used_for_link(self):
+        provider = MetaResponsesProvider(os.environ["MODEL_API_KEY"])
+        owned_id = str(uuid4())  # Valid UUID, but random: un-guessable without the tool.
+        marker = "Zzxq" + uuid4().hex[:8]
+        recipe = {"revision": 0, "materials": [
+            {"id": "mat-1", "material_id": "mat-1", "name": marker + "トマト",
+             "quantity": {"value": "200", "unit": "g"},
+             "price_mode": "inherit", "linked_ingredient_id": None}]}
+        catalog = {owned_id: Ingredient(owned_id, marker + "トマト", None)}
+        operations = provider.propose_with_tools(
+            f"材料mat-1（{marker}トマト）を所有カタログにリンクして。"
+            "IDが不明ならsearch_owned_ingredientsツールで検索し、"
+            "link_ingredient操作でprice_modeはinheritとして。", recipe, catalog)
+        links = [op for op in operations if op.get("op") == "link_ingredient"]
+        self.assertTrue(links, operations)
+        self.assertEqual(links[0].get("ingredient_id"), owned_id)
+
+
+if __name__ == "__main__":
+    unittest.main()
