@@ -21,6 +21,21 @@ test("SSOT schemas mirror app-side validators and use strict JSON Schema", () =>
   expect(INTENT_SCHEMA.properties.intent.enum).toEqual(["create", "browse", "edit", "clarify"]);
   expect([...VOICE_RECIPE_SCHEMA.required].sort()).toEqual(
     ["interpretations", "materials", "name_corrections", "notes", "price_research", "selling_price_jpy", "title"]);
+  // Strict-mode contract: every object schema lists all its property
+  // keys in required (Meta rejects otherwise with 400 -> app 502).
+  const assertStrict = (node: unknown, path: string) => {
+    if (!node || typeof node !== "object") return;
+    const rec = node as Record<string, unknown>;
+    if (rec.type === "object" && rec.properties && typeof rec.properties === "object") {
+      const props = Object.keys(rec.properties as object).sort();
+      const req = [...((rec.required as string[]) ?? [])].sort();
+      expect(req, path).toEqual(props);
+      for (const [k, v] of Object.entries(rec.properties as object)) assertStrict(v, `${path}.${k}`);
+    }
+    if (rec.type === "array" && rec.items) assertStrict(rec.items, `${path}[]`);
+  };
+  assertStrict(VOICE_RECIPE_SCHEMA, "VOICE_RECIPE_SCHEMA");
+  assertStrict(INTENT_SCHEMA, "INTENT_SCHEMA");
   const fmt = chatResponseFormat("chef_intent", INTENT_SCHEMA) as {
     type: string; json_schema: {name: string; strict: boolean; schema: unknown}};
   expect(fmt.type).toBe("json_schema");
@@ -325,7 +340,8 @@ test("explicit price research resolves against the owned ledger, never model kno
     expect(fuzzyRef.status).toBe("available");
     expect(fuzzyRef.ingredient_name).toBe("豚ロース");
     expect(fuzzyRef.text).toContain("豚ロース");
-    // material_index is optional: well-formed indexes pass, bad shapes fail closed.
+    // material_index is strict-required (null when rowless); legacy
+    // 2-key entries stay accepted for old fixtures. Bad shapes fail closed.
     const indexed = (research: unknown) => {
       global.fetch = (async (url: unknown) => {
         if (String(url).includes("/demo/price-reference"))
@@ -337,6 +353,8 @@ test("explicit price research resolves against the owned ledger, never model kno
         {turns: ["豚バラ肉100g、相場で"]}));
     };
     expect((await indexed([{material_name: "豚バラ肉", request: "相場", material_index: 0}])).status).toBe(200);
+    expect((await indexed([{material_name: "豚バラ肉", request: "相場", material_index: null}])).status).toBe(200);
+    expect((await indexed([{material_name: "豚バラ肉", request: "相場"}])).status).toBe(200);
     expect((await indexed([{material_name: "豚バラ肉", request: "相場", material_index: "0"}])).status).toBe(502);
     expect((await indexed([{material_name: "豚バラ肉", request: "相場", material_index: -1}])).status).toBe(502);
     expect((await indexed([{material_name: "豚バラ肉", request: "相場", material_index: 1.5}])).status).toBe(502);
