@@ -130,7 +130,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  function setStage(next:"dictating"|"review"|"saving"){phaseRef.current=next;setPhase(next);}
  const englishMessages:Record<string,string>={"下書きを破棄しました。新しいレシピを話してください。":"Draft discarded. Describe a new recipe.","Museが料理の文脈・数量・価格を解釈しています…":"Muse is interpreting the dish, quantities and prices…","料理の解釈に失敗しました。保存していません。「解析を再試行」か補助入力で再開できます。":"Could not interpret the recipe. Nothing was saved. Retry analysis or use manual input.","確認用の下書きを表示しました。料理名・食材・数量・価格を確認し、正しければもう一度「保存してください」と話すか、承認して保存を押してください。":"Draft ready to review. Check the dish, ingredients, quantities and prices, then explicitly approve saving.","承認された内容を保存しています…":"Saving approved recipe…","保存済みです。":"Already saved.","レシピを保存しました。":"Recipe saved.","価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"Saved with unconfirmed purchase prices. Unknown prices are not set to zero; only partial costs are shown.","保存結果を確認できませんでした。再送時も同じ登録IDを使います。一覧を確認してから再試行してください。":"Could not confirm the save result. The same request ID is used for retries; check the recipe list first.","保存せず、下書きを保持します。":"Not saved. Draft preserved."};
  function say(text:string){if(alive.current)setMessage(ja?text:(englishMessages[text]??text));}
- const photoMessages:Record<string,string>={"既存の下書きがあります。破棄してから写真を解析してください。":"A draft already exists. Discard it before analyzing a photo.","写真を選択してください。":"Choose a photo first.","写真の解析に失敗しました。下書きは作成していません。":"Photo analysis failed. No draft was created."};
+ const photoMessages:Record<string,string>={"既存の下書きがあります。破棄してから写真を解析してください。":"A draft already exists. Discard it before analyzing a photo.","写真を選択してください。":"Choose a photo first.","写真の解析に失敗しました。下書きは作成していません。":"Photo analysis failed. No draft was created.","解析中に音声の下書きが作成されたため、写真の結果は破棄しました。下書きは保持しています。":"A voice draft was created during photo analysis, so the photo result was discarded. The draft is kept."};
  function sayPhoto(text:string){if(alive.current)setMessage(ja?text:(photoMessages[text]??text));}
  function clear(){
   if(phaseRef.current==="saving")return;
@@ -431,6 +431,19 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    const controller=new AbortController();photoAbort.current=controller;
    const out=await request<Draft>("/api/image-recipe",{method:"POST",body:JSON.stringify(memo?{image:dataUrl,text:memo}:{image:dataUrl}),signal:controller.signal});
    if(!alive.current||controller.signal.aborted)return;
+   // Completion guard (mirrors the start guard): a voice draft created
+   // while the photo was in flight wins. Applying the photo here would
+   // clobber spoken turns the chef already banked, so the photo result
+   // is discarded with an explicit message and no revision/epoch bump.
+   // Unparsed voice turns are untouched; only this photo response is lost.
+   // NOTE: the "saving" read needs a widening cast: the start guard above
+   // narrows phaseRef.current for the rest of this closure, so a direct
+   // === "saving" comparison looks unintentional to tsc (TS2367).
+   if(draftRef.current||(phaseRef.current as "dictating"|"review"|"saving")==="saving"){
+    logVoiceEvent("draft.kept","photo result discarded; voice draft present",traceId);
+    sayPhoto("解析中に音声の下書きが作成されたため、写真の結果は破棄しました。下書きは保持しています。");
+    return;
+   }
    // New revision source: invalidate in-flight voice parse/enrichment so a
    // stale voice result can never overwrite the photo draft. Still-unparsed
    // voice turns are not dropped; they re-parse against this draft later.

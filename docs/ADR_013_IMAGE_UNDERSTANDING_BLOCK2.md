@@ -89,15 +89,42 @@ confirmation without an image-capable path.
   422 vs 502 distinction; no draft on failure; provenance: photo-only
   guesses blanked (+server note), memo-stated values kept, memo without
   numbers keeps nothing, "2000g" never confirms "200".
-- `web/tests/image-photo.spec.ts` (3 browser tests): photo -> existing
+- `web/tests/image-photo.spec.ts` (4 browser tests): photo -> existing
   draft card with the Human Gate closed (review/approve disabled, no
   save call); existing draft never overwritten (no request sent);
-  failure creates no draft and retry succeeds.
+  failure creates no draft and retry succeeds; voice draft created
+  while the photo is in flight wins — the late photo result is
+  discarded with an explicit message, never silently, and no
+  revision/epoch bump is applied.
+- `web/tests/image-recipe.spec.ts` (+1, now 9): unrelated same numbers
+  in the memo are not provenance — "200円" never confirms quantity
+  "200", "200グラム" confirms "200"+"g" via unit alias, bare "1200円"
+  never confirms a selling price without a selling-price mention.
 - Regression: `voice-recipe-deferred` (9), `structured-output` (8),
   `voice-price-lifecycle` + `voice-conversation` (17/18) pass.
 - Known pre-existing failure (not this change): 
   `voice-conversation.spec.ts:80` "queued fragments coalesce …" fails
   identically on clean `main@40f7a80` (verified via `git stash -u`).
+
+## Follow-up review fixes (same branch)
+1. Photo/voice race: `analyzePhoto()` had a start guard only. A voice
+   draft created while the photo request was in flight was overwritten
+   by the late photo response. Added a completion guard after the
+   `alive`/abort check: if `draftRef.current` exists or saving started,
+   the photo result is discarded with an explicit message
+   ("解析中に音声の下書きが作成されたため…"), `draft.kept` is logged,
+   and no revision/epoch bump is applied. Voice-first ordering holds in
+   both directions: photo-first still bumps revision/epoch so a stale
+   voice parse cannot overwrite the photo draft, while unparsed voice
+   turns re-parse later and are never dropped silently.
+2. Provenance correspondence: the old `stated()` check accepted any bare
+   numeric coincidence in the memo ("200円" confirmed quantity "200").
+   Replaced with row + item correspondence: the memo must mention the
+   ingredient row (full name or a len>=2 name token) AND the number must
+   sit adjacent to its item marker (quantity unit for quantities and
+   price bases, yen for purchase prices, yen + selling-price mention for
+   selling prices). Left token boundaries still reject "2000g" ⇒ "200".
+   Supplier/name stay untouched (identification hints, not measurements).
 
 ## Open / verify on device
 - Large phone photos (multi-MB data URLs) against the body ceiling and

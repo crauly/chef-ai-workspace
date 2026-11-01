@@ -62,17 +62,42 @@ Output only JSON with exactly title, materials, selling_price_jpy, notes, interp
   if(!output){console.error("image-recipe stage=app_parse");return error(502,"app_parse");}
   // Provenance enforcement (server-side, never prompt-only): a quantity,
   // unit, purchase price, or selling price counts as confirmed only when
-  // the user's memo states that exact value. Anything the model filled in
-  // from the photo alone is reset to "" and recomputed into missing[], so
-  // a guessed number can never reach the save path as a confirmed fact.
-  // Units ride with their sibling number: a unit without its quantity or
-  // price basis is meaningless and is reset as well. Matching uses token
-  // boundaries, so memo "2000g" never confirms a guessed "200".
+  // the user's memo states that value for that ingredient row with its
+  // item marker adjacent (quantity unit, yen, selling-price mention).
+  // Anything the model filled in from the photo alone is reset to "" and
+  // recomputed into missing[], so a guessed number can never reach the
+  // save path as a confirmed fact. A bare numeric coincidence is not
+  // evidence: memo "ホールトマト200円" never confirms quantity "200",
+  // and "1200円" alone never confirms a selling price without a
+  // selling-price mention. Units ride with their sibling number: a unit
+  // without its quantity or price basis is meaningless and is reset as
+  // well. Matching uses left token boundaries, so memo "2000g" never
+  // confirms a guessed "200".
   const esc=(v:string)=>v.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-  const stated=(value:string)=>value!==""&&hint!==""&&new RegExp(`(^|[^\\d.])${esc(value)}(?![\\d.])`).test(hint);
+  const QTY_UNIT="(?:g|kg|ml|l|L|グラム|キログラム|キロ|ミリリットル|リットル)";
+  const YEN="(?:円|¥)";
+  // Row correspondence: the memo must mention the ingredient row, either
+  // by full name or by a name token (len>=2) split on common delimiters.
+  const rowMentioned=(name:string)=>{
+   if(hint===""||name==="")return false;
+   if(hint.includes(name))return true;
+   return name.split(/[\s　・（）()\[\]「」『』〈〉／\/,，、。·]+/).some(t=>t.length>=2&&hint.includes(t));
+  };
+  // Item correspondence: the number must appear with its item marker
+  // adjacent on the right (allowing whitespace), with a left token
+  // boundary so "2000g" cannot confirm "200".
+  const numBefore=(value:string,marker:string)=>{
+   if(value===""||hint==="")return false;
+   return new RegExp(`(^|[^\\d.])${esc(value)}\\s*${marker}`).test(hint);
+  };
+  const qtyStated=(name:string,value:string)=>rowMentioned(name)&&numBefore(value,QTY_UNIT);
+  const priceStated=(name:string,value:string)=>rowMentioned(name)&&numBefore(value,YEN);
+  const priceQtyStated=(name:string,value:string)=>rowMentioned(name)&&numBefore(value,QTY_UNIT);
+  const sellingStated=(value:string)=>value!==""&&hint!==""&&numBefore(value,YEN)&&/(売価|売値)/.test(hint);
   let stripped=false;
   const materials=output.materials.map(m=>{
-   const keepQty=stated(m.quantity),keepPrice=stated(m.price_jpy)&&stated(m.price_quantity);
+   const keepQty=qtyStated(m.name,m.quantity);
+   const keepPrice=priceStated(m.name,m.price_jpy)&&priceQtyStated(m.name,m.price_quantity);
    const next={...m,
     quantity:keepQty?m.quantity:"",
     unit:keepQty?m.unit:"",
@@ -83,7 +108,7 @@ Output only JSON with exactly title, materials, selling_price_jpy, notes, interp
       next.price_quantity!==m.price_quantity||next.price_unit!==m.price_unit)stripped=true;
    return next;
   });
-  const selling=stated(output.selling_price_jpy)?output.selling_price_jpy:"";
+  const selling=sellingStated(output.selling_price_jpy)?output.selling_price_jpy:"";
   if(selling!==output.selling_price_jpy)stripped=true;
   const notes=output.notes.slice();
   if(stripped&&notes.length<30)notes.push("写真のみで推測された数量・価格・売価は未確定に戻しました。メモに明記された値のみ採用しています。");

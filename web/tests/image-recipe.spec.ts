@@ -188,3 +188,30 @@ test("memo without the guessed numbers keeps nothing; token boundaries apply", a
     expect(body2.materials[0].unit).toBe("");
   } finally { restore(); restoreFetch(); }
 });
+
+test("unrelated same numbers in the memo are not provenance evidence", async () => {
+  const restore = withEnv();
+  const restoreFetch = upstreamProposal(MUSE_GUESSED);
+  try {
+    // "200円" is a price context, not a quantity: quantity must stay unresolved.
+    const res = await proposeImage(authed("http://localhost/api/image-recipe",
+      {image: PNG, text: "ホールトマト200円"}));
+    const body = await res.json();
+    expect(body.materials[0].quantity).toBe("");
+    expect(body.materials[0].unit).toBe("");
+    // Unit alias still counts when row + quantity-unit correspondence holds.
+    const res2 = await proposeImage(authed("http://localhost/api/image-recipe",
+      {image: PNG, text: "ホールトマト200グラム"}));
+    const body2 = await res2.json();
+    expect(body2.materials[0].quantity).toBe("200");
+    expect(body2.materials[0].unit).toBe("g");
+    // Bare "1200円" without a selling-price mention never confirms selling price.
+    const res3 = await proposeImage(authed("http://localhost/api/image-recipe",
+      {image: PNG, text: "ホールトマト200グラム、1200円"}));
+    expect((await res3.json()).selling_price_jpy).toBe("");
+    // With the mention, the same number confirms.
+    const res4 = await proposeImage(authed("http://localhost/api/image-recipe",
+      {image: PNG, text: "ホールトマト200グラム、売価1200円"}));
+    expect((await res4.json()).selling_price_jpy).toBe("1200");
+  } finally { restore(); restoreFetch(); }
+});

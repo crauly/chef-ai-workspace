@@ -96,3 +96,33 @@ test("photo failure creates no draft and keeps the panel usable", async ({page})
   await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("トマトパスタ");
   expect(calls).toBe(2);
 });
+
+test("voice draft created during photo analysis wins; photo result is discarded", async ({page}) => {
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  let photoCalls = 0;
+  await page.route("**/api/voice-recipe", async route => {
+    await route.fulfill({json: voiceDraft});
+  });
+  await page.route("**/api/image-recipe", async route => {
+    photoCalls++;
+    await blocked;
+    await route.fulfill({json: photoDraft});
+  });
+  await enterCreate(page);
+  await page.getByLabel("解析する写真").setInputFiles(pngFile);
+  // Start photo analysis first (no draft yet, so the request is sent)...
+  await page.getByRole("button", {name: "写真を解析", exact: true}).click();
+  await expect(page.getByText("写真を解析中…")).toBeVisible();
+  // ...then a voice turn completes while the photo is still in flight.
+  await page.getByLabel("音声認識できない場合の入力").fill("パスタ100g");
+  await page.getByRole("button", {name: "反映", exact: true}).click();
+  await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("ペペロンチーノ");
+  // Photo arrives late: it must not clobber the voice draft, and the
+  // discard must be explicit, never silent.
+  release();
+  await expect(page.getByText("解析中に音声の下書きが作成されたため")).toBeVisible();
+  await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("ペペロンチーノ");
+  await expect(page.getByLabel("未保存のレシピ下書き")).not.toContainText("トマトパスタ");
+  expect(photoCalls).toBe(1);
+});
