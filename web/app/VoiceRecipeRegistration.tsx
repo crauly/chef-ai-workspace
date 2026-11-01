@@ -11,7 +11,7 @@ type Interpretation={source:string;suggestion:string;reason:string};
 type NameCorrection={material_name:string;heard:string;candidates:{name:string;reason:string}[]};
 type PriceReference={material_name:string;status:string;origin?:"ledger"|"external";ingredient_name?:string;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null;sources?:{url:string;title:string}[];fetched_at?:string;text:string};
 type ProvisionalPrice={material_index:number;material_name:string;origin:"ledger"|"external";price_jpy:string;price_quantity:string;price_unit:string;currency:string;observation_count:number;sources:{url:string;title:string}[];fetched_at:string|null;status:"provisional";approval:"unapproved";text:string};
-type ResearchStatus={material_name:string;trigger:"muse"|"heuristic";ledger:string;web:"not_attempted"|"available"|"empty"|"not_searched"|"provider_error"|"timeout"|"misconfigured";provisional:boolean};
+type ResearchStatus={material_name:string;material_index:number;request:string;trigger:"muse"|"heuristic";ledger:string;web:"not_attempted"|"available"|"empty"|"not_searched"|"provider_error"|"timeout"|"misconfigured";provisional:boolean};
 type Draft={title:string;materials:Ingredient[];selling_price_jpy:string;notes:string[];missing:string[];interpretations?:Interpretation[];price_references?:PriceReference[];provisional_prices?:Array<ProvisionalPrice|null>;research_status?:ResearchStatus[];nameCorrections?:NameCorrection[]};
 const validPrice=/^(?:0|[1-9]\d*)(?:\.\d+)?$/;
 function sourceUrl(url:string){try{const parsed=new URL(url);return parsed.protocol==="https:"?parsed.href:null;}catch{return null;}}
@@ -229,7 +229,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   // A price lookup for the old ingredient name cannot safely be carried over.
   const price_references=name===previousName?current.price_references:current.price_references?.filter(ref=>ref.material_name!==previousName);
   const provisional_prices=current.provisional_prices?.map((p,i)=>i===materialIndex&&name!==previousName?null:p);
-  const research_status=name===previousName?current.research_status:current.research_status?.filter(item=>item.material_name!==previousName);
+  const research_status=name===previousName?current.research_status:current.research_status?.filter(item=>item.material_index!==materialIndex);
   const next={...current,materials,missing,nameCorrections,price_references,provisional_prices,research_status};
   draftRef.current=next;parseBase.current=next;setDraft(next);
   reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");setCorrectionIndex(null);
@@ -277,7 +277,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    <p>{ja?"売価：":"Selling price: "}{draft.selling_price_jpy?("¥"+draft.selling_price_jpy):(ja?"未設定（売価なしでも保存できます）":"Not set (optional)")}</p>
    <ul>{draft.materials.map((material,index)=>{const priced=Boolean(material.price_jpy&&material.price_quantity&&material.price_unit);
     const provisional=draft.provisional_prices?.[index];
-    const status=draft.research_status?.find(item=>item.material_name===material.name);
+    const status=draft.research_status?.find(item=>item.material_index===index);
     const canApply=provisional&&provisional.material_index===index&&provisional.material_name.trim()===material.name.trim()&&
      provisional.currency==="JPY"&&provisional.price_quantity==="1"&&["g","ml"].includes(provisional.price_unit)&&
      validPrice.test(provisional.price_jpy)&&Number(provisional.price_jpy)>0;
