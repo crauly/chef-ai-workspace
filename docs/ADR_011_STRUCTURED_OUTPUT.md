@@ -74,14 +74,19 @@ longer singles out any cuisine in dish-title normalization examples.
   `web/price-web-search.ts` calls the Responses endpoint with
   `tools: [{type: "web_search", search_context_size: "low"}]` (context size
   lives INSIDE the tool object; a top-level value is rejected with 400).
-  Search evidence is strict: an observed `web_search_call` AND at least one
-  `url_citation` annotation -- tool-request-only or citation-free answers
-  are "not searched" and never become prices. JSON-only instructions
-  suppress citations, so the call asks for one prose bullet per candidate
-  after the JSON to carry the citations. Verified live 2026-11-01: status
-  completed, 5 web_search_call (search + open_page), 6 url_citation
-  annotations, 3 JPY candidates (500g packs 920/1080/1200 yen with source
-  URLs) all passing the shared validation. The route tries the owned ledger
+  Search evidence requires an observed `web_search_call` plus source
+  evidence: `url_citation` annotations when present, or per-candidate
+  source URLs actually returned by the model (verified live 2026-11-01:
+  completed responses carried `web_search_call` items with zero
+  `url_citation` annotations while candidates cited their own page URLs).
+  Tool-request-only, citation-free prose, or unparsable payloads are
+  "not searched" and never become prices. JSON-only instructions suppress
+  annotations, so the call asks for one prose bullet per candidate after
+  the JSON plus a `url` field on every candidate to carry the sources.
+  First verified live 2026-11-01: status completed, 5 web_search_call
+  (search + open_page), 6 url_citation annotations, 3 JPY candidates
+  (500g packs 920/1080/1200 yen with source URLs) all passing the shared
+  validation. The route tries the owned ledger
   first and only falls back to grounding per entry (max 3); ledger hits
   never search, and any grounding failure keeps the ledger entry -- the
   draft never fails and nothing is auto-saved. `external_reference.py`
@@ -104,5 +109,6 @@ longer singles out any cuisine in dish-title normalization examples.
   ledger-first fallback, real-shape parse),
   `tests/test_price_grounding.py` (fixture: parse + contract),
   `tests/test_price_grounding_live.py` (opt-in `CHEF_LIVE_GROUNDING=1`:
-  one low-context search asserting `web_search_call` + `url_citation`
-  + priced candidates; read-only, no DB).
+  one low-context search asserting `web_search_call` + (`url_citation`
+  OR candidate-carried source URLs) + priced candidates; read-only,
+  no DB).

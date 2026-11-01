@@ -1,8 +1,10 @@
 """Meta Search Grounding response seam (Responses API web_search only).
 
-Mirrors web/price-web-search.ts: only an observed ``web_search_call``
-output item plus at least one ``url_citation`` annotation counts as a
-real search. Tool-request-only, citation-free, or unparsable answers are
+Mirrors web/price-web-search.ts: an observed ``web_search_call``
+output item must back the result, with source evidence from either
+``url_citation`` annotations or per-candidate source URLs actually
+returned by the model (the shape live completed responses use).
+Tool-request-only, citation-free, or unparsable answers are
 "not searched" and never become prices. Candidate validation reuses
 :mod:`chef_ai_workspace.external_reference` (the SSOT); this module only
 detects search evidence and extracts the model's JSON payload.
@@ -65,13 +67,16 @@ def _extract_json(text):
 
 
 def parse_responses_output(raw):
-    """Return {searched, citations, texts, payload}.
+    """Return {searched, tool_ran, citations, texts, payload}.
 
-    searched is True only when a web_search_call item ran AND at least
-    one url_citation annotation is present. payload is the model's JSON
-    (or None); citations are [{url, title}].
+    searched keeps its strict meaning (a web_search_call item ran AND at
+    least one url_citation annotation is present); tool_ran reports the
+    tool call alone so callers can also accept per-candidate source URLs
+    (the shape live completed responses actually use). payload is the
+    model's JSON (or None); citations are [{url, title}].
     """
-    out = {"searched": False, "citations": [], "texts": [], "payload": None}
+    out = {"searched": False, "tool_ran": False, "citations": [],
+           "texts": [], "payload": None}
     if not isinstance(raw, dict):
         return out
     output = raw.get("output")
@@ -83,6 +88,7 @@ def parse_responses_output(raw):
             continue
         if item.get("type") == "web_search_call":
             saw_call = True
+            out["tool_ran"] = True
             continue
         if item.get("type") != "message" or item.get("role") != "assistant":
             continue
