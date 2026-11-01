@@ -23,6 +23,17 @@ Target: **Vercel** for `web/` (Next.js), **Render Free** for FastAPI, and **only
 - **Do not set** any of the above with `NEXT_PUBLIC_`. Do not expose Supabase or Meta keys in Vercel.
 - HTTPS and the existing HTTP Basic preview gate remain mandatory.
 
+## Backend origin contract (server routes)
+- `CHEF_FASTAPI_INTERNAL_URL` may be an HTTPS public origin (Render) or an
+  HTTP-only internal address (Render private address / Vercel service mesh).
+- `web/app/api/backend-url.ts` is the shared allow-list: https anywhere,
+  loopback http for local mocks, and http solely for the configured internal
+  binding host. Arbitrary HTTP hosts and URL-embedded credentials are rejected.
+- `backend-health` has no scheme guard (liveness only); price-reference and
+  notifications enforce the allow-list, so a healthy backend with an HTTP
+  internal binding previously showed `backend_ready` while price lookups
+  reported unavailable. Keep the three in sync via the shared helper.
+
 ## Cold start / verification
 Render Free may sleep between requests. The initial library GET now performs bounded retries when the Next proxy reports 502/503/504, and displays a waiting status. The backend proxy has a 30s timeout per attempt. This is intentionally **GET-only**: create, confirm, AI-propose and correction POSTs must not replay automatically after an uncertain response.
 - Validate `/health` for liveness but do not confuse it with authenticated DB connectivity.
