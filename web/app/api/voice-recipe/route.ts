@@ -247,13 +247,17 @@ notes is ONLY for unresolved ambiguous/unsupported facts, not ordinary packaging
   // materials; materials themselves are untouched, so nothing provisional
   // can flow into the save path without explicit chef approval in the UI.
   // Canonical row key: each entry resolves to a materials[] index once.
-  // A valid Muse-emitted material_index wins (it names the row even when
-  // the spoken product wording drifts); otherwise the exact row name
-  // matches; otherwise the entry stays rowless (-1) and is still searched
-  // by name but can never bind a provisional to a row it might miss.
+  // An exact row-name match beats a contradictory in-range material_index
+  // (the name is hard evidence against that pointer); otherwise a valid
+  // Muse-emitted material_index wins (it names the row even when the
+  // spoken product wording drifts); otherwise the entry stays rowless (-1)
+  // and is still searched by name but can never bind a provisional to a
+  // row it might miss.
   const rowIndexFor=(name:string,idx:number|undefined)=>{
-   if(typeof idx==="number"&&Number.isInteger(idx)&&idx>=0&&idx<output.materials.length)return idx;
    const at=output.materials.findIndex(m=>(m.name||"").trim()===name.trim());
+   const valid=typeof idx==="number"&&Number.isInteger(idx)&&idx>=0&&idx<output.materials.length?idx:-1;
+   if(at>=0&&valid>=0&&at!==valid)return at;
+   if(valid>=0)return valid;
    return at;
   };
   const museEntries=output.priceResearch.map(e=>({...e,trigger:"muse" as const,

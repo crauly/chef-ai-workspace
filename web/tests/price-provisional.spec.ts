@@ -374,6 +374,43 @@ test("drifted Muse name with material_index still binds the right row", async ()
   }
 });
 
+test("contradictory index loses to an exact row-name match", async () => {
+  const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
+  const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
+  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
+  const previousFetch = global.fetch;
+  try {
+    // Row 0 is pasta, row 1 is tomato; the entry names tomato exactly but
+    // carries material_index 0. Trusting the pointer would misbind pasta.
+    const muse = {title: "t",
+      materials: [
+        {name: "pasta", quantity: "100", unit: "g",
+          price_jpy: "", price_quantity: "", price_unit: "", supplier: ""},
+        {name: "tomato", quantity: "200", unit: "g",
+          price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+      selling_price_jpy: "", notes: [], interpretations: [],
+      price_research: [{material_name: "tomato", material_index: 0, request: "r"}]};
+    global.fetch = (async (url: unknown) => {
+      if (String(url).includes("/v1/responses")) return Response.json(grounded([CANDIDATE]));
+      return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(muse)}}]});
+    }) as typeof fetch;
+    const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["tomato"]}));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.research_status[0].material_index).toBe(1);
+    expect(body.provisional_prices[0]).toBeNull();
+    expect(body.provisional_prices[1].material_name).toBe("tomato");
+  } finally {
+    global.fetch = previousFetch;
+    if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
+    if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
+    if (base === undefined) delete process.env.FASTAPI_BASE_URL; else process.env.FASTAPI_BASE_URL = base;
+    if (token === undefined) delete process.env.DEMO_ACCESS_TOKEN; else process.env.DEMO_ACCESS_TOKEN = token;
+  }
+});
+
 test("bad index falls back to the row name; unknown names stay rowless", async () => {
   const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
   const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
