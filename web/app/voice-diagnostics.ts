@@ -7,6 +7,7 @@ export type VoiceDiagKind =
   | "capture.start" | "capture.stop" | "capture.pause" | "capture.resume"
   | "capture.backlog" | "capture.backlog.drop"
   | "capture.disconnect" | "capture.error"
+  | "capture.endpoint.deferred" | "capture.endpoint.forced"
   | "transcribe.ok" | "transcribe.nospeech" | "transcribe.fail"
   | "muse.start" | "muse.ok" | "muse.fail"
   | "price.start" | "price.ok" | "price.fail"

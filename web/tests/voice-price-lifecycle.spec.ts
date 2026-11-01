@@ -321,3 +321,122 @@ test("review during search is invalidated when the search fails", async ({page})
   await expect(page.getByRole("button", {name: "内容を承認して保存"})).toBeDisabled();
   await expect(page.getByRole("button", {name: "内容を確認"})).toBeEnabled();
 });
+
+// A new parse that supersedes the failed research clears the obsolete failure:
+// manual prices need no search, so the old warning must go and completion shows.
+test("superseding parse clears the obsolete price failure", async ({page}) => {
+  const deferred = {
+    title: "パスタ", selling_price_jpy: "", notes: [], missing: [],
+    materials: [{name: "パスタ", quantity: "100", unit: "g", price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+    research_state: "deferred",
+    pending_research: [{material_name: "パスタ", material_index: 0, row_name: "パスタ", request: "平均価格を調べて", trigger: "muse"}],
+    price_references: [], research_status: [], provisional_prices: [null],
+  };
+  const manual = {
+    title: "パスタ", selling_price_jpy: "", notes: [], missing: [],
+    materials: [{name: "パスタ", quantity: "100", unit: "g", price_jpy: "350", price_quantity: "500", price_unit: "g", supplier: ""}],
+    research_state: "complete",
+    price_references: [], research_status: [], provisional_prices: [null],
+  };
+  let n = 0;
+  await page.route("**/api/voice-recipe/prices", async route => {
+    await route.abort("failed");
+  });
+  await page.route(/\/api\/voice-recipe(\?.*)?$/, async route => {
+    n++;
+    await route.fulfill({status: 200, contentType: "application/json", body: JSON.stringify(n === 1 ? deferred : manual)});
+  });
+  await page.goto("/");
+  const entry = page.getByLabel("音声認識できない場合の入力");
+  const reflect = page.getByRole("button", {name: "反映"});
+  await entry.fill("パスタ100グラム、平均価格を調べて");
+  await reflect.click();
+  await expect(page.getByText("未保存の下書き：パスタ")).toBeVisible();
+  await expect(page.getByText("価格検索に失敗しました")).toBeVisible({timeout: 8000});
+  await expect(page.getByText("処理完了")).toBeHidden();
+  // Manual prices supersede the failed research: no pending, no new search.
+  await entry.fill("パスタは500グラム350円で買った");
+  await reflect.click();
+  await expect(page.getByText("価格検索に失敗しました")).toBeHidden({timeout: 8000});
+  await expect(page.getByText("処理完了")).toBeVisible();
+});
+
+// A successful save must not carry the failure into the next recipe: the next
+// registration starts with no price warning.
+test("successful save clears the price failure for the next recipe", async ({page}) => {
+  const deferred = {
+    title: "パスタ", selling_price_jpy: "", notes: [], missing: [],
+    materials: [{name: "パスタ", quantity: "100", unit: "g", price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+    research_state: "deferred",
+    pending_research: [{material_name: "パスタ", material_index: 0, row_name: "パスタ", request: "平均価格を調べて", trigger: "muse"}],
+    price_references: [], research_status: [], provisional_prices: [null],
+  };
+  const fresh = {
+    title: "うどん", selling_price_jpy: "", notes: [], missing: [],
+    materials: [{name: "うどん", quantity: "100", unit: "g", price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+    research_state: "complete",
+    price_references: [], research_status: [], provisional_prices: [null],
+  };
+  let n = 0;
+  await page.route("**/api/voice-recipe/prices", async route => {
+    await route.abort("failed");
+  });
+  await page.route(/\/api\/voice-recipe(\?.*)?$/, async route => {
+    n++;
+    await route.fulfill({status: 200, contentType: "application/json", body: JSON.stringify(n === 1 ? deferred : fresh)});
+  });
+  await page.route("**/api/recipes/full", async route => {
+    const body = route.request().postDataJSON();
+    await route.fulfill({status: 201, json: {id: body.request_id, title: {value: body.title}, revision: 0, materials: [], selling_price_jpy: {value: null}}});
+  });
+  await page.goto("/");
+  const entry = page.getByLabel("音声認識できない場合の入力");
+  const reflect = page.getByRole("button", {name: "反映"});
+  await entry.fill("パスタ100グラム、平均価格を調べて");
+  await reflect.click();
+  await expect(page.getByText("未保存の下書き：パスタ")).toBeVisible();
+  await expect(page.getByText("価格検索に失敗しました")).toBeVisible({timeout: 8000});
+  await page.getByRole("button", {name: "内容を確認"}).click();
+  await expect(page.getByRole("button", {name: "内容を承認して保存"})).toBeEnabled();
+  await page.getByRole("button", {name: "内容を承認して保存"}).click();
+  await expect(page.getByText("レシピを保存しました。")).toBeVisible({timeout: 8000});
+  // Next recipe with no research inherits no failure from the previous one.
+  // Saving leaves registration mode, so return via the Create tab first.
+  await page.getByRole("button", {name: "登録"}).click();
+  await entry.fill("うどん100グラム");
+  await reflect.click();
+  await expect(page.getByText("未保存の下書き：うどん")).toBeVisible({timeout: 8000});
+  await expect(page.getByText("価格検索に失敗しました")).toBeHidden();
+  await expect(page.getByText("処理完了")).toBeVisible();
+});
+
+// A genuine failure with no superseding parse or save must stay visible:
+// review commands and unrelated activity never clear it silently.
+test("genuine price failure survives review without a new parse", async ({page}) => {
+  const deferred = {
+    title: "パスタ", selling_price_jpy: "", notes: [], missing: [],
+    materials: [{name: "パスタ", quantity: "100", unit: "g", price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+    research_state: "deferred",
+    pending_research: [{material_name: "パスタ", material_index: 0, row_name: "パスタ", request: "平均価格を調べて", trigger: "muse"}],
+    price_references: [], research_status: [], provisional_prices: [null],
+  };
+  await page.route("**/api/voice-recipe/prices", async route => {
+    await route.abort("failed");
+  });
+  await page.route(/\/api\/voice-recipe(\?.*)?$/, async route => {
+    await route.fulfill({status: 200, contentType: "application/json", body: JSON.stringify(deferred)});
+  });
+  await page.goto("/");
+  const entry = page.getByLabel("音声認識できない場合の入力");
+  const reflect = page.getByRole("button", {name: "反映"});
+  await entry.fill("パスタ100グラム、平均価格を調べて");
+  await reflect.click();
+  await expect(page.getByText("未保存の下書き：パスタ")).toBeVisible();
+  await expect(page.getByText("価格検索に失敗しました")).toBeVisible({timeout: 8000});
+  // Review is a command, not a new parse: the failure must persist.
+  await entry.fill("内容を確認");
+  await reflect.click();
+  await expect(page.getByText("価格検索に失敗しました")).toBeVisible({timeout: 8000});
+  await expect(page.getByText("未保存の下書き：パスタ")).toBeVisible();
+  await expect(page.getByText("処理完了")).toBeHidden();
+});

@@ -226,3 +226,10 @@ a,.link{color:#b3d5ff}
 .name-choice-options button{display:block;width:100%;text-align:left;padding:12px;border:1px solid currentColor;border-radius:10px;background:transparent;color:inherit;overflow-wrap:anywhere}
 .name-choice-options button:hover{background:rgba(128,144,138,.15)}
 .name-choice-options small{display:block;margin-top:5px;opacity:.75}
+
+/* Voice pipeline status list: one row per live stage, spinner only while running. */
+.voice-status-list{list-style:none;margin:12px 0;padding:0;display:grid;gap:6px}
+.voice-status-list li{display:flex;align-items:center;gap:8px;color:#4bde8d;font-weight:600}
+.voice-spin{display:inline-block;width:.9em;height:.9em;flex:none;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:voice-spin .8s linear infinite}
+@keyframes voice-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.voice-spin{animation:none}}
