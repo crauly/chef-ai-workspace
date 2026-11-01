@@ -2,86 +2,15 @@ import {NextRequest, NextResponse} from "next/server";
 import {previewAuthorized} from "../../../preview-access";
 import {VOICE_RECIPE_SCHEMA,chatResponseFormat} from "../../../muse-schemas";
 import {assembleEntries,enrichEntries,provisionalFor} from "../../../price-enrichment";
+import {parseRecipeDraft} from "../../../recipe-draft-parse";
+const error=(status:number)=>NextResponse.json({error:"Voice recipe parsing failed"},{status,headers:{"Cache-Control":"no-store"}});
 export const runtime="nodejs";
 // Backend origin allow-list lives in ../backend-url (shared SSOT): https,
 // loopback http, and the configured internal binding host over http.
 // Row binding, ledger lookup, and enrichment live in ../../../price-enrichment
 // (shared with the deferred POST /api/voice-recipe/prices): this route keeps
 // only Muse parsing, Human Gate validation, and response shaping.
-const units=new Set(["g","kg","ml","L"]);
-const decimal=/^(?:0|[1-9]\d*)(?:\.\d+)?$/;
-const error=(status:number)=>NextResponse.json({error:"Voice recipe parsing failed"},{status,headers:{"Cache-Control":"no-store"}});
-type Material={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string;supplier:string};
-function parse(raw:unknown) {
- if(!raw||typeof raw!=="object"||Array.isArray(raw))return null;
- const o=raw as Record<string,unknown>;
- const optionalKeys=new Set(["interpretations","price_research","name_corrections"]);
- const coreKeys=Object.keys(o).sort().filter(k=>!optionalKeys.has(k)).join("|");
- if(coreKeys!=="materials|notes|selling_price_jpy|title")return null;
- if(typeof o.title!=="string"||o.title.length>200||typeof o.selling_price_jpy!=="string"||o.selling_price_jpy.length>30||
-    !Array.isArray(o.materials)||o.materials.length>40||!Array.isArray(o.notes)||o.notes.length>30||
-    !o.notes.every(n=>typeof n==="string"&&n.length<=200))return null;
- const materials:Material[]=[];
- const nameCorrections=o.name_corrections===undefined?[]:o.name_corrections;
- if(!Array.isArray(nameCorrections)||nameCorrections.length>40||!nameCorrections.every(value=>{
-  if(!value||typeof value!=="object"||Array.isArray(value))return false;
-  const item=value as Record<string,unknown>;
-  if(Object.keys(item).sort().join("|")!=="candidates|heard|material_name")return false;
-  if(typeof item.material_name!=="string"||!item.material_name.trim()||item.material_name.length>200)return false;
-  if(typeof item.heard!=="string"||item.heard.length>200)return false;
-  const list=item.candidates;
-  return Array.isArray(list)&&list.length>=1&&list.length<=3&&list.every(c=>{
-   if(!c||typeof c!=="object"||Array.isArray(c))return false;
-   const cand=c as Record<string,unknown>;
-   return Object.keys(cand).sort().join("|")==="name|reason"&&
-    typeof cand.name==="string"&&cand.name.trim().length>0&&cand.name.length<=200&&
-    typeof cand.reason==="string"&&cand.reason.trim().length>0&&cand.reason.length<=200;
-  });
- }))return null;
- const priceResearch=o.price_research===undefined?[]:o.price_research;
- if(!Array.isArray(priceResearch)||priceResearch.length>10||!priceResearch.every(value=>{
-  if(!value||typeof value!=="object"||Array.isArray(value))return false;
-  const item=value as Record<string,unknown>;
-  const keys=Object.keys(item).sort().join("|");
-  // Strict mode always sends all three keys with null when no row
-  // applies; the 2-key shape stays accepted for legacy fixtures only.
-  if(keys!=="material_name|request"&&keys!=="material_index|material_name|request")return false;
-  if(typeof item.material_name!=="string"||!item.material_name.trim()||item.material_name.length>200)return false;
-  if(typeof item.request!=="string"||!item.request.trim()||item.request.length>200)return false;
-  // material_index is Muse's row pointer; null/omitted means rowless and
-  // never binds a row on its own. Range is checked against materials at
-  // bind time, so only the integer-or-null shape is pinned here.
-  if(!("material_index" in item))return true;
-  if(item.material_index===null)return true;
-  if(!(typeof item.material_index==="number"&&
-   Number.isInteger(item.material_index)&&item.material_index>=0&&item.material_index<=40))return false;
-  return true;
- }))return null;
- const interpretations=o.interpretations===undefined?[]:o.interpretations;
- if(!Array.isArray(interpretations)||interpretations.length>10||!interpretations.every(value=>{
-  if(!value||typeof value!=="object"||Array.isArray(value))return false;
-  const item=value as Record<string,unknown>;
-  return Object.keys(item).sort().join("|")==="reason|source|suggestion"&&
-   Object.values(item).every(text=>typeof text==="string"&&text.trim().length>0&&text.length<=200);
- }))return null;
- for(const x of o.materials){
-  if(!x||typeof x!=="object"||Array.isArray(x))return null;
-  const m=x as Record<string,unknown>;
-  if(Object.keys(m).sort().join("|")!=="name|price_jpy|price_quantity|price_unit|quantity|supplier|unit"||
-    !Object.values(m).every(v=>typeof v==="string"&&v.length<=200))return null;
-  materials.push(m as Material);
- }
- const missing:string[]=[];
- if(!o.title.trim())missing.push("料理名");
- if(o.selling_price_jpy&&!decimal.test(o.selling_price_jpy as string))missing.push("売価の数値");
- for(const [i,m] of materials.entries()){
-  if(!m.name.trim())missing.push(`食材${i+1}の名前`);
-  if(!decimal.test(m.quantity)||!units.has(m.unit))missing.push(`${m.name||"食材"}の数量・単位`);
-  if(!decimal.test(m.price_jpy)||!decimal.test(m.price_quantity)||Number(m.price_quantity)<=0||!units.has(m.price_unit))
-   missing.push(`${m.name||"食材"}の仕入単価・基準数量・単位`);
- }
- return {title:o.title.trim(),materials,selling_price_jpy:o.selling_price_jpy,notes:o.notes,missing,interpretations,priceResearch:priceResearch as {material_name:string;request:string;material_index?:number|null}[],nameCorrections:nameCorrections as {material_name:string;heard:string;candidates:{name:string;reason:string}[]}[]};
-}
+
 export async function POST(req:NextRequest){
  if(!await previewAuthorized(req))return error(403);
  if(req.headers.get("origin")!==req.nextUrl.origin)return error(403);
@@ -95,7 +24,7 @@ export async function POST(req:NextRequest){
      !turns.every(t=>typeof t==="string"&&t.trim().length>0&&t.length<=1000))return error(400);
   // Incremental revision: new spoken turns plus the last confirmed draft, so
   // follow-up utterances do not resend the whole history. The previous draft
-  // is Muse context only; the returned draft still passes parse() below.
+  // is Muse context only; the returned draft still passes parseRecipeDraft() below.
   const rawPrevious=(input as {previous?:unknown}).previous;
   let previous:unknown=null;
   if(rawPrevious!==undefined){
@@ -146,7 +75,7 @@ notes is ONLY for unresolved ambiguous/unsupported facts, not ordinary packaging
   const message=choice&&typeof choice==="object"?(choice as {message?:unknown}).message:null;
   const text=message&&typeof message==="object"?(message as {content?:unknown}).content:null;
   if(typeof text!=="string"){console.error("voice-recipe stage=content_shape");return error(502);}
-  let output:ReturnType<typeof parse>;try{output=parse(JSON.parse(text));}catch{console.error("voice-recipe stage=model_json");return error(502);}
+  let output:ReturnType<typeof parseRecipeDraft>;try{output=parseRecipeDraft(JSON.parse(text));}catch{console.error("voice-recipe stage=model_json");return error(502);}
   if(!output){console.error("voice-recipe stage=app_parse");return error(502);}
   // Ledger-first price research: entries resolve against the owned
   // ledger, falling back to Meta Search Grounding (real web_search +
