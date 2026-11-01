@@ -70,11 +70,16 @@ Output only JSON with exactly title, materials, selling_price_jpy, notes, interp
   // A bare numeric coincidence is not evidence: memo "ホールトマト200円"
   // never confirms quantity "200", and memo "トマト200g、オイル20g"
   // never confirms a guessed トマト "20g" — that number belongs to
-  // オイル. "1200円" alone never confirms a selling price without a
-  // selling-price mention. Units ride with their sibling number: a unit
-  // without its quantity or price basis is meaningless and is reset as
-  // well. Matching uses left token boundaries, so memo "2000g" never
-  // confirms a guessed "200".
+  // オイル. The number alone is not enough either: memo "トマト200g"
+  // never confirms a guessed トマト "200kg" — the memo's marker must
+  // match the model's unit (with Japanese aliases: グラム counts for g,
+  // キログラム/キロ for kg, ミリリットル for ml, リットル for l/L).
+  // "1200円" alone never confirms a selling price: the amount must sit
+  // next to a selling-price mention in the same segment, so memo
+  // "トマト300円、売価1200円" rejects a guessed selling price of "300".
+  // Units ride with their sibling number: a unit without its quantity or
+  // price basis is meaningless and is reset as well. Matching uses left
+  // token boundaries, so memo "2000g" never confirms a guessed "200".
   const esc=(v:string)=>v.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
   const QTY_UNIT="(?:g|kg|ml|l|L|グラム|キログラム|キロ|ミリリットル|リットル)";
   const YEN="(?:円|¥)";
@@ -114,20 +119,27 @@ Output only JSON with exactly title, materials, selling_price_jpy, notes, interp
    }
    return false;
   };
-  const qtyStated=(name:string,value:string)=>attributed(name,value,QTY_UNIT);
+  // The memo's unit marker must match the model's unit, not just any
+  // quantity unit. Unknown/empty model units fall back to any marker
+  // (the model asserted no unit to contradict).
+  const UNIT_ALIAS:Record<string,string>={g:"(?:g|グラム)",kg:"(?:kg|キログラム|キロ)",
+   ml:"(?:ml|ミリリットル)",l:"(?:l|L|リットル)",L:"(?:l|L|リットル)"};
+  const unitMarker=(unit:string)=>UNIT_ALIAS[unit]??QTY_UNIT;
+  const qtyStated=(name:string,value:string,unit:string)=>attributed(name,value,unitMarker(unit));
   const priceStated=(name:string,value:string)=>attributed(name,value,YEN);
-  const priceQtyStated=(name:string,value:string)=>attributed(name,value,QTY_UNIT);
+  const priceQtyStated=(name:string,value:string,unit:string)=>attributed(name,value,unitMarker(unit));
   const sellingStated=(value:string)=>{
    if(value===""||hint==="")return false;
-   if(!/(売価|売値)/.test(hint))return false;
-   // Selling price is its own item, not an ingredient row: any
-   // yen-marked occurrence counts, independent of row attribution.
-   return new RegExp(`(^|[^\\d.])${esc(value)}\\s*${YEN}`).test(hint);
+   // Selling price is its own item, not an ingredient row — but the
+   // amount and the selling-price mention must share one segment.
+   // A distant "売価" plus an unrelated yen amount confirms nothing.
+   const re=new RegExp(`(^|[^\\d.])${esc(value)}\\s*${YEN}`);
+   return hint.split(SEG_BOUNDARY).some(seg=>/(売価|売値)/.test(seg)&&re.test(seg));
   };
   let stripped=false;
   const materials=output.materials.map(m=>{
-   const keepQty=qtyStated(m.name,m.quantity);
-   const keepPrice=priceStated(m.name,m.price_jpy)&&priceQtyStated(m.name,m.price_quantity);
+   const keepQty=qtyStated(m.name,m.quantity,m.unit);
+   const keepPrice=priceStated(m.name,m.price_jpy)&&priceQtyStated(m.name,m.price_quantity,m.price_unit);
    const next={...m,
     quantity:keepQty?m.quantity:"",
     unit:keepQty?m.unit:"",

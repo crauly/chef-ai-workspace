@@ -252,3 +252,53 @@ test("numbers are attributed to their own row, never borrowed across rows", asyn
     expect(body3.materials[0].quantity).toBe("");
   } finally { restore(); restoreFetch(); }
 });
+
+const MUSE_UNIT = (unit: string) => ({title: "トマトパスタ",
+  materials: [
+    {name: "トマト", quantity: "200", unit, price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+  selling_price_jpy: "", notes: [], interpretations: [], price_research: [],
+  name_corrections: []});
+
+test("the memo unit must match the model's unit, not just the number", async () => {
+  const restore = withEnv();
+  let restoreFetch = upstreamProposal(MUSE_UNIT("kg"));
+  try {
+    // Memo "トマト200g" never confirms a guessed "200kg".
+    const res = await proposeImage(authed("http://localhost/api/image-recipe",
+      {image: PNG, text: "トマト200g"}));
+    const body = await res.json();
+    expect(body.materials[0].quantity).toBe("");
+    expect(body.materials[0].unit).toBe("");
+    restoreFetch();
+    // Same number and memo with a matching unit stays confirmed.
+    restoreFetch = upstreamProposal(MUSE_UNIT("g"));
+    const res2 = await proposeImage(authed("http://localhost/api/image-recipe",
+      {image: PNG, text: "トマト200g"}));
+    const body2 = await res2.json();
+    expect(body2.materials[0].quantity).toBe("200");
+    expect(body2.materials[0].unit).toBe("g");
+  } finally { restore(); restoreFetch(); }
+});
+
+const MUSE_SELLING = (selling: string) => ({title: "トマトパスタ",
+  materials: [
+    {name: "トマト", quantity: "", unit: "", price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+  selling_price_jpy: selling, notes: [], interpretations: [], price_research: [],
+  name_corrections: []});
+
+test("selling price needs its mention next to the amount", async () => {
+  const restore = withEnv();
+  let restoreFetch = upstreamProposal(MUSE_SELLING("300"));
+  try {
+    // Memo "トマト300円、売価1200円": the 売価 mention belongs to 1200,
+    // so a guessed selling price of "300" is rejected.
+    const res = await proposeImage(authed("http://localhost/api/image-recipe",
+      {image: PNG, text: "トマト300円、売価1200円"}));
+    expect((await res.json()).selling_price_jpy).toBe("");
+    restoreFetch();
+    restoreFetch = upstreamProposal(MUSE_SELLING("1200"));
+    const res2 = await proposeImage(authed("http://localhost/api/image-recipe",
+      {image: PNG, text: "トマト300円、売価1200円"}));
+    expect((await res2.json()).selling_price_jpy).toBe("1200");
+  } finally { restore(); restoreFetch(); }
+});

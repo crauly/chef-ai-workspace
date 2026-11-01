@@ -100,6 +100,10 @@ confirmation without an image-capable path.
   rejected ("トマト200g、オリーブオイル20g" strips トマト "20g",
   keeps オイル "20g"); same number on two rows confirms each owner;
   ambiguous "各20g" stays fail-closed for the non-owner.
+- `web/tests/image-recipe.spec.ts` (+2, now 12): memo unit must match
+  the model unit ("トマト200g" strips "200kg", keeps "200g"); selling
+  amount must share its mention's segment ("トマト300円、売価1200円"
+  strips selling "300", keeps "1200").
 - `web/tests/image-recipe.spec.ts` (+1, now 9): unrelated same numbers
   in the memo are not provenance — "200円" never confirms quantity
   "200", "200グラム" confirms "200"+"g" via unit alias, bare "1200円"
@@ -138,6 +142,12 @@ confirmation without an image-capable path.
    same segment). Only an occurrence owned by the row confirms it;
    ambiguous or foreign numbers stay unresolved. Selling price remains a
    standalone item (yen + selling-price mention, no row binding).
+4. Unit match + selling adjacency: the memo's marker must match the
+   model's unit ("トマト200g" rejects a guessed "200kg"; グラム counts
+   for g, キログラム/キロ for kg, ミリリットル for ml, リットル for
+   l/L; empty/unknown model units fall back to any marker). The selling
+   amount and its mention must share one memo segment ("トマト300円、
+   売価1200円" rejects a guessed selling price of "300").
 
 ## Open / verify on device
 - Large phone photos (multi-MB data URLs) against the body ceiling and
