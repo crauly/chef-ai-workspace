@@ -266,8 +266,9 @@ test("explicit price research resolves against the owned ledger, never model kno
     expect(degraded.status).toBe(200);
     const degradedBody = await degraded.json();
     expect(degradedBody.notes).toEqual([]);
-    expect(degradedBody.price_references[0].status).toBe("none");
-    expect(degradedBody.price_references[0].text).toContain("参考価格なし");
+    // Backend failure is reported as unavailable, never disguised as "no history".
+    expect(degradedBody.price_references[0].status).toBe("unavailable");
+    expect(degradedBody.price_references[0].text).toContain("確認できません");
     // Non-JPY history is shown verbatim, never labeled yen, never converted.
     global.fetch = (async (url: unknown) => {
       if (String(url).includes("/demo/price-reference"))
@@ -333,6 +334,64 @@ test("explicit price research resolves against the owned ledger, never model kno
     }) as typeof fetch;
     expect((await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["豚バラ肉100g、相場で"]})) ).status).toBe(502);
+  } finally {
+    global.fetch = previousFetch;
+    if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
+    if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
+    if (base === undefined) delete process.env.FASTAPI_BASE_URL; else process.env.FASTAPI_BASE_URL = base;
+    if (token === undefined) delete process.env.DEMO_ACCESS_TOKEN; else process.env.DEMO_ACCESS_TOKEN = token;
+  }
+});
+
+test("ledger lookup failures stay distinct from no-history and never fail the draft", async () => {
+  const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
+  const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
+  process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
+  process.env.FASTAPI_BASE_URL = "http://127.0.0.1:8100"; process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
+  const previousFetch = global.fetch;
+  const recipe = {title: "テスト", materials: [{name: "豚バラ肉", quantity: "100", unit: "g",
+    price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+    selling_price_jpy: "", notes: [], interpretations: [],
+    price_research: [{material_name: "豚バラ肉", request: "Check the average market price."}]};
+  const museOk = async () => Response.json({choices: [{finish_reason: "stop",
+    message: {content: JSON.stringify(recipe)}}]});
+  async function draftWithLedger(ledger: (url: unknown) => Promise<Response>) {
+    global.fetch = (async (url: unknown, init?: {body?: unknown}) => {
+      if (String(url).includes("/demo/price-reference")) return ledger(url);
+      return museOk();
+    }) as typeof fetch;
+    const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["豚バラ肉100g、平均価格を調べて"]}));
+    expect(res.status).toBe(200);
+    return (await res.json()).price_references[0];
+  }
+  try {
+    // 401/403 -> unauthorized, never "no history".
+    let ref = await draftWithLedger(async () => Response.json({}, {status: 401}));
+    expect(ref.status).toBe("unauthorized");
+    expect(ref.text).toContain("認証");
+    // 503 / backend down -> unavailable.
+    ref = await draftWithLedger(async () => Response.json({}, {status: 503}));
+    expect(ref.status).toBe("unavailable");
+    // 200 with a contract-breaking shape -> invalid_response.
+    ref = await draftWithLedger(async () => Response.json({candidates: [{id: 1}]}));
+    expect(ref.status).toBe("invalid_response");
+    // 200 with genuinely empty history -> none.
+    ref = await draftWithLedger(async () => Response.json({query: "豚バラ肉", candidates: []}));
+    expect(ref.status).toBe("none");
+    expect(ref.text).toContain("仕入履歴がありません");
+    // Missing connection config -> unavailable, and the model call still runs.
+    delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+    let museCalled = false;
+    global.fetch = (async () => { museCalled = true; return museOk(); }) as typeof fetch;
+    const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["豚バラ肉100g、平均価格を調べて"]}));
+    expect(res.status).toBe(200);
+    expect(museCalled).toBe(true);
+    expect((await res.json()).price_references[0].status).toBe("unavailable");
+    // Failure entries carry no prices and block nothing: notes stay empty.
+    expect((await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["豚バラ肉100g"]})) ).status).toBe(200);
   } finally {
     global.fetch = previousFetch;
     if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
