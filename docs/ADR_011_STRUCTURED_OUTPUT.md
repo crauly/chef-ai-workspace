@@ -157,3 +157,32 @@ one entry's failure never fails the others. Fixture proof:
 `web/tests/voice-recipe-deferred.spec.ts` (mixed rowless/healthy,
 deletion/reorder/rename/drift, bad row_name and out-of-shape indexes fail
 closed).
+
+## Price-search lifecycle across follow-up utterances (P0 fix)
+Accepted. `VoiceRecipeRegistration.enqueue()` used to abort the running
+`POST /api/voice-recipe/prices` call on every new data utterance, so
+continuous speech always cancelled the search (`(canceled)` in
+production) and the reference price never arrived. The abort is removed,
+not merely deleted: a `priceFlight` ref (pending signature +
+creation row names) tracks the running search, and a finished-signature
+set suppresses duplicate calls for the same ingredient + request.
+- Unchanged rows: when the next parsed draft's `pending_research`
+  signature matches the flight and every in-flight row still exists at
+  the same index with the same name, the flight is rebased onto the new
+  draft and the single running request is kept (no second fetch); its
+  result merges onto the LATEST draft only if those rows are still
+  unchanged, otherwise it is discarded, never misapplied.
+- Changed rows (rename/reorder/delete/new request): the stale flight is
+  aborted and a fresh search starts for the new condition only.
+- Review/save are no longer blocked while searching: merging a price
+  result resets the review snapshot (`reviewed=null`, stage back to
+  dictating), so a search that lands after review can never be committed
+  under the old approval; merging is skipped while saving. Draft status
+  is always one of 価格を検索しています / 検索結果を取得しました /
+  価格を確認できませんでした (compact `role=status` line, per-row 検索中
+  kept), and failure keeps the draft with the loading flag cleared, so no
+  stuck "searching" remains. Internal terms (provisional/deferred/
+  pending) stay out of user-facing text.
+- Fixture proof: `web/tests/voice-price-lifecycle.spec.ts` (carry-over
+  with exactly 1 prices call, rename restarts without stale binding,
+  failure keeps draft and clears searching, bottom-mic recording state).

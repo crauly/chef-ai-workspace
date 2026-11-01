@@ -1,0 +1,121 @@
+import {test, expect} from "@playwright/test";
+
+// NOTE: "**/api/voice-recipe" glob also matches ".../prices", so the prices
+// handler must be registered first (first match wins in Playwright).
+async function mockParse(page: any, handler: (route: any) => Promise<void>) {
+  await page.route(/\/api\/voice-recipe(\?.*)?$/, handler);
+}
+
+// Price search must survive follow-up utterances for unchanged ingredients.
+test("follow-up utterance keeps the running price search (no cancel)", async ({page}) => {
+  let priceCalls = 0;
+  const deferred = {
+    title: "パスタ", selling_price_jpy: "", notes: [], missing: [],
+    materials: [{name: "パスタ", quantity: "100", unit: "g", price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+    research_state: "deferred",
+    pending_research: [{material_name: "パスタ", material_index: 0, row_name: "パスタ", request: "平均価格を調べて", trigger: "muse"}],
+    price_references: [], research_status: [], provisional_prices: [null],
+  };
+  await page.route("**/api/voice-recipe/prices", async route => {
+    priceCalls++;
+    await new Promise(r => setTimeout(r, 600));
+    await route.fulfill({status: 200, contentType: "application/json", body: JSON.stringify({
+      research_state: "complete",
+      price_references: [{material_name: "パスタ", material_index: 0, status: "available", origin: "external", currency: "JPY", text: "参考価格あり"}],
+      research_status: [{material_name: "パスタ", material_index: 0, request: "平均価格を調べて", trigger: "muse", ledger: "not_found", web: "available", provisional: true}],
+      provisional_prices: [{material_index: 0, material_name: "パスタ", origin: "external", price_jpy: "120", price_quantity: "1", price_unit: "g", currency: "JPY", observation_count: 2, sources: [{url: "https://shop.example/p", title: "Shop"}], fetched_at: "2026-11-01T00:00:00Z", status: "provisional", approval: "unapproved", text: "参考価格"}],
+    })});
+  });
+  await mockParse(page, async route => {
+    await route.fulfill({status: 200, contentType: "application/json", body: JSON.stringify(deferred)});
+  });
+  await page.goto("/");
+  const entry = page.getByLabel("音声認識できない場合の入力");
+  const reflect = page.getByRole("button", {name: "反映"});
+  await entry.fill("パスタ100グラム、平均価格を調べて");
+  await reflect.click();
+  await expect(page.getByText("未保存の下書き：パスタ")).toBeVisible();
+  await expect(page.getByText("価格を検索しています")).toBeVisible();
+  await entry.fill("パスタ100グラム、平均価格を調べて");
+  await reflect.click();
+  await expect(page.getByText("検索結果を取得しました")).toBeVisible({timeout: 8000});
+  expect(priceCalls).toBe(1);
+  await expect(page.getByText("未保存の下書き：パスタ")).toBeVisible();
+  await expect(page.getByRole("button", {name: "価格の詳細・出典"})).toBeVisible();
+});
+
+// Changed ingredient must not receive the stale price.
+test("renamed ingredient does not inherit the stale price search", async ({page}) => {
+  let calls = 0;
+  const first = {
+    title: "パスタ", selling_price_jpy: "", notes: [], missing: [],
+    materials: [{name: "パスタ", quantity: "100", unit: "g", price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+    research_state: "deferred",
+    pending_research: [{material_name: "パスタ", material_index: 0, row_name: "パスタ", request: "平均価格を調べて", trigger: "muse"}],
+    price_references: [], research_status: [], provisional_prices: [null],
+  };
+  const second = {
+    title: "うどん", selling_price_jpy: "", notes: [], missing: [],
+    materials: [{name: "うどん", quantity: "100", unit: "g", price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+    research_state: "deferred",
+    pending_research: [{material_name: "うどん", material_index: 0, row_name: "うどん", request: "平均価格を調べて", trigger: "muse"}],
+    price_references: [], research_status: [], provisional_prices: [null],
+  };
+  let n = 0;
+  await page.route("**/api/voice-recipe/prices", async route => {
+    calls++;
+    await route.fulfill({status: 200, contentType: "application/json", body: JSON.stringify({
+      research_state: "complete", price_references: [], research_status: [],
+      provisional_prices: [null],
+    })});
+  });
+  await mockParse(page, async route => {
+    n++;
+    await route.fulfill({status: 200, contentType: "application/json", body: JSON.stringify(n === 1 ? first : second)});
+  });
+  await page.goto("/");
+  const entry = page.getByLabel("音声認識できない場合の入力");
+  const reflect = page.getByRole("button", {name: "反映"});
+  await entry.fill("パスタ100グラム、平均価格を調べて");
+  await reflect.click();
+  await expect(page.getByText("未保存の下書き：パスタ")).toBeVisible();
+  await entry.fill("うどんに変更");
+  await reflect.click();
+  await expect(page.getByText("未保存の下書き：うどん")).toBeVisible({timeout: 8000});
+  await expect.poll(() => calls, {timeout: 8000}).toBeGreaterThanOrEqual(2);
+  // No stale provisional from パスタ may appear on the うどん row.
+  await expect(page.getByRole("button", {name: "この価格を使う"})).toBeHidden();
+});
+
+// Failure keeps the draft and never leaves "searching" stuck on.
+test("price failure keeps the draft and clears the searching status", async ({page}) => {
+  const deferred = {
+    title: "パスタ", selling_price_jpy: "", notes: [], missing: [],
+    materials: [{name: "パスタ", quantity: "100", unit: "g", price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+    research_state: "deferred",
+    pending_research: [{material_name: "パスタ", material_index: 0, row_name: "パスタ", request: "平均価格を調べて", trigger: "muse"}],
+    price_references: [], research_status: [], provisional_prices: [null],
+  };
+  await page.route("**/api/voice-recipe/prices", async route => {
+    await route.abort("failed");
+  });
+  await mockParse(page, async route => {
+    await route.fulfill({status: 200, contentType: "application/json", body: JSON.stringify(deferred)});
+  });
+  await page.goto("/");
+  const entry = page.getByLabel("音声認識できない場合の入力");
+  await entry.fill("パスタ100グラム、平均価格を調べて");
+  await page.getByRole("button", {name: "反映"}).click();
+  await expect(page.getByText("未保存の下書き：パスタ")).toBeVisible();
+  await expect(page.getByText("価格を確認できませんでした")).toBeVisible({timeout: 8000});
+  await expect(page.getByText("価格を検索しています")).toBeHidden();
+});
+
+// Bottom mic keeps a single recording source of truth for animation.
+test("bottom mic exposes recording state for animation", async ({page}) => {
+  await page.setViewportSize({width: 390, height: 844});
+  await page.goto("/");
+  const mic = page.locator(".bottom-nav-mic");
+  await expect(mic).toBeVisible();
+  await expect(mic).toHaveAttribute("aria-pressed", "false");
+});
