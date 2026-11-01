@@ -210,9 +210,14 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     }
    }else{
     // No pending research: terminate any previous flight so unneeded prices
-    // can never land on this draft. Stale stash is discarded with it.
+    // can never land on this draft. Stale stash is discarded with it, and a
+    // previous failure is cleared with the research it belonged to: the new
+    // draft needs no search, so the old warning must not linger (or suppress
+    // the completion row). A still-running search cannot exist here because
+    // its flight is aborted above; its late failure is suppressed by the
+    // abort/epoch guards in enrichPrices.
     priceAbort.current?.abort();priceAbort.current=null;
-    priceFlight.current=null;priceStash.current=null;setPriceLoading(false);
+    priceFlight.current=null;priceStash.current=null;setPriceLoading(false);setPriceFailed(false);
    }
    say(enriched.missing.length||enriched.notes.length?(ja?"確認が必要です："+[...enriched.missing,...enriched.notes].join("、"):"Needs review: "+[...enriched.missing,...enriched.notes].join(", ")):
     (ja?"下書きを更新しました。内容を確認し、「保存してください」と話すか、確認ボタンを押してください。":"Draft updated. Review it, then explicitly approve saving."));
@@ -340,7 +345,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    // Spoken purchase sources travel with the save callback: the workspace
    // announces them after its browse transition (this panel hides then).
    const suppliers=[...new Set(d.materials.map(m=>(m.supplier||"").trim()).filter(Boolean))];
-   priceAbort.current?.abort();priceAbort.current=null;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);
+   priceAbort.current?.abort();priceAbort.current=null;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);setPriceFailed(false);
    say(mode==="confirmed"?(sharedVoice?"保存済みです。":"レシピを保存しました。"):"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。");onCreated(recipe,mode,suppliers);
   }catch{setStage("review");say("保存結果を確認できませんでした。再送時も同じ登録IDを使います。一覧を確認してから再試行してください。");}
   finally{if(alive.current&&!draining.current)setBusy(false);}
