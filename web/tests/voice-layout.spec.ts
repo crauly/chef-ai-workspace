@@ -146,3 +146,22 @@ test("reference prices are informative, remain unconfirmed, and do not block rev
   await draft.getByRole("button",{name:"内容を確認"}).click();
   await expect(draft.getByRole("button",{name:"価格未確定として承認して保存"})).toBeEnabled();
 });
+
+test("chef can choose recognized ingredient name or AI correction without saving",async ({page})=>{
+ await page.route("**/api/voice-recipe",route=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({
+  title:"煮物",materials:[{name:"濃口醤油",quantity:"10",unit:"g",price_jpy:"",price_quantity:"",price_unit:"",supplier:""}],
+  notes:[],missing:["濃口醤油の仕入単価・基準数量・単位"],selling_price_jpy:"",
+  nameCorrections:[{material_name:"濃口醤油",heard:"小口醤油",candidates:[{name:"濃口醤油",reason:"料理の調味料"}]}]
+ })}));
+ await page.goto("/");
+ await page.getByLabel("音声認識できない場合の入力").fill("小口醤油10グラム");
+ await page.getByRole("button",{name:"反映"}).click();
+ await page.getByRole("button",{name:"候補を選択"}).click();
+ const dialog=page.getByRole("dialog",{name:"食材名を選択"});
+ await expect(dialog).toBeVisible();
+ await dialog.getByRole("button",{name:/音声認識の原文: 小口醤油/}).click();
+ const draft=page.locator("#draft");
+ await expect(draft).toContainText("小口醤油: 10g");
+ await expect(draft).not.toContainText("濃口醤油: 10g");
+ await expect(draft.getByRole("button",{name:"内容を確認"})).toBeEnabled();
+});
