@@ -36,9 +36,31 @@ VOICE_RECIPE_SCHEMA_PY = {
                 "suggestion": {"type": "string"},
                 "reason": {"type": "string"}},
             "required": ["source", "suggestion", "reason"],
+            "additionalProperties": False}},
+        "price_research": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "material_name": {"type": "string"},
+                "request": {"type": "string"}},
+            "required": ["material_name", "request"],
+            "additionalProperties": False}},
+        "name_corrections": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "material_name": {"type": "string"},
+                "heard": {"type": "string"},
+                "candidates": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "reason": {"type": "string"}},
+                    "required": ["name", "reason"],
+                    "additionalProperties": False}}},
+            "required": ["material_name", "heard", "candidates"],
             "additionalProperties": False}}},
     "required": ["title", "materials", "selling_price_jpy",
-                 "notes", "interpretations"],
+                 "notes", "interpretations", "price_research",
+                 "name_corrections"],
     "additionalProperties": False}
 
 
@@ -106,7 +128,8 @@ class LiveStructuredOutputTests(unittest.TestCase):
         # fixture spec, not in this live probe.
         self.assertEqual(set(parsed),
                          {"title", "materials", "selling_price_jpy",
-                          "notes", "interpretations"})
+                          "notes", "interpretations", "price_research",
+                          "name_corrections"})
         self.assertIsInstance(parsed["title"], str)
         self.assertIsInstance(parsed["notes"], list)
         self.assertTrue(all(isinstance(n, str) for n in parsed["notes"]))

@@ -226,3 +226,57 @@ def assess_impact(recipes: tuple[Recipe, ...],
             recipe.id, recipe.title.value, current_total, hypo_total, diff,
             current.partial, hypo.partial, tuple(affected), tuple(unchanged)))
     return tuple(out)
+
+
+def summarize_reference_price(observations: list[PriceObservation]) -> dict:
+    """Ledger-grounded reference price for natural-language research requests.
+
+    Pure function: averages per-base-unit prices over the largest group of
+    mutually comparable owned observations (same currency, tax/shipping
+    terms, interconvertible package units, reusing the compare_observations
+    rules). Never invents prices, never fetches the web. Returns provenance
+    (count, terms, observed range) so callers can mark the value estimated.
+    """
+    groups: dict[tuple[str, str, str, str], list[tuple[PriceObservation, Decimal]]] = {}
+    invalid = 0
+    for obs in observations or []:
+        try:
+            amount = decimal(obs.amount)
+            amounts_ok = amount >= 0
+        except (ValueError, TypeError):
+            amounts_ok = False
+        qty = _positive(obs.package_quantity)
+        if not amounts_ok or qty is None:
+            invalid += 1
+            continue
+        dim, base_qty = _to_base(qty, obs.package_unit or "")
+        if base_qty is None or base_qty <= 0:
+            invalid += 1
+            continue
+        key = (obs.currency or "", _terms(obs.tax_note),
+               _terms(obs.shipping_note), dim)
+        groups.setdefault(key, []).append((obs, amount / base_qty))
+    if not groups:
+        return {"available": False,
+                "reason": "no comparable observations",
+                "observation_count": 0, "excluded_count": invalid}
+    # Largest evidence group wins; ties broken deterministically so the
+    # same ledger always yields the same reference.
+    ranked = sorted(groups.items(),
+                    key=lambda item: (-len(item[1]), item[0]))
+    (currency, _tax, _ship, dim), members = ranked[0]
+    total = sum(unit for _, unit in members)
+    average = (total / len(members)).quantize(
+        Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    stamps = sorted(str(obs.observed_at or "") for obs, _ in members)
+    used_ids = [str(obs.id) for obs, _ in members]
+    return {"available": True,
+            "currency": currency, "unit_basis": dim,
+            "average_unit_price": str(average),
+            "observation_count": len(members),
+            "excluded_count": sum(len(v) for v in groups.values()) - len(members) + invalid,
+            "observation_ids": used_ids,
+            "observed_from": stamps[0] if stamps else None,
+            "observed_to": stamps[-1] if stamps else None,
+            "method": ("single observation" if len(members) == 1
+                       else f"average of {len(members)} comparable observations")}

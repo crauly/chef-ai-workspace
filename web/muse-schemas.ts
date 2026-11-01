@@ -35,6 +35,20 @@ const MATERIAL_SCHEMA = {
   additionalProperties: false,
 };
 
+const PRICE_RESEARCH_SCHEMA = {
+  type: "object",
+  properties: {
+    // Ingredient name as spoken in the price-research request.
+    material_name: { type: "string" },
+    // Chef's request in their own words: average, market quote, cheaper
+    // supplier, named maker or shop. Recorded only; the app resolves it
+    // against the owned ledger, never against model knowledge.
+    request: { type: "string" },
+  },
+  required: ["material_name", "request"],
+  additionalProperties: false,
+};
+
 const INTERPRETATION_SCHEMA = {
   type: "object",
   properties: {
@@ -46,6 +60,30 @@ const INTERPRETATION_SCHEMA = {
   additionalProperties: false,
 };
 
+const NAME_CANDIDATE_SCHEMA = {
+  type: "object",
+  properties: {
+    name: { type: "string" },
+    reason: { type: "string" },
+  },
+  required: ["name", "reason"],
+  additionalProperties: false,
+};
+
+const NAME_CORRECTION_SCHEMA = {
+  type: "object",
+  properties: {
+    // Draft material name this entry belongs to.
+    material_name: { type: "string" },
+    // Verbatim ASR span behind the name, or "" when identical/unknown.
+    heard: { type: "string" },
+    // 1-3 chef-selectable candidates, never padded. Omitted entries mean confident.
+    candidates: { type: "array", items: NAME_CANDIDATE_SCHEMA },
+  },
+  required: ["material_name", "heard", "candidates"],
+  additionalProperties: false,
+};
+
 export const VOICE_RECIPE_SCHEMA = {
   type: "object",
   properties: {
@@ -54,8 +92,16 @@ export const VOICE_RECIPE_SCHEMA = {
     selling_price_jpy: { type: "string" },
     notes: { type: "array", items: { type: "string" } },
     interpretations: { type: "array", items: INTERPRETATION_SCHEMA },
+    // Explicit price-research requests only (average, market quote, cheaper
+    // supplier, named maker/shop). [] otherwise. The app resolves each entry
+    // against the owned ledger and reports back in notes; prices from model
+    // knowledge are never filled in.
+    price_research: { type: "array", items: PRICE_RESEARCH_SCHEMA },
+    // Ingredient-name correction candidates for explicit user choice.
+    // [] when confident. Informational only, never auto-applied.
+    name_corrections: { type: "array", items: NAME_CORRECTION_SCHEMA },
   },
-  required: ["title", "materials", "selling_price_jpy", "notes", "interpretations"],
+  required: ["title", "materials", "selling_price_jpy", "notes", "interpretations", "price_research", "name_corrections"],
   additionalProperties: false,
 } as const;
 
