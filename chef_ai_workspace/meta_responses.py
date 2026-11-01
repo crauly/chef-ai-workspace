@@ -125,7 +125,10 @@ class MetaResponsesProvider:
         parsed by the strict parse_response: any tool-call, refusal,
         incomplete, timeout, invalid-argument-flood, or loop-exhaustion
         state fails closed with ProposalProviderError, and the downstream
-        mutation validator plus human approval still apply.
+        mutation validator plus human approval still apply. A final
+        link_ingredient whose ingredient_id was not returned by a tool call
+        in this session is rejected here (provenance only; ownership and
+        approval stay downstream).
         """
         from .tool_ledger import LEDGER_TOOLS, ToolLedgerError, execute_tool
         if not instruction.strip() or len(instruction) > 4000:
@@ -149,6 +152,7 @@ class MetaResponsesProvider:
         history: list[dict] = [
             {"type": "message", "role": "user",
              "content": [{"type": "input_text", "text": user_text}]}]
+        seen_ids: set[str] = set()
         first = True
         for _ in range(max_tool_turns + 1):
             payload = json.dumps({
@@ -175,7 +179,9 @@ class MetaResponsesProvider:
                 raise ProposalProviderError("Meta Responses request or response failed") from None
             calls = self._tool_calls(raw)
             if not calls:
-                return parse_response(raw)
+                operations = parse_response(raw)
+                self._check_link_provenance(operations, seen_ids)
+                return operations
             if len(calls) > 4:
                 raise ProposalProviderError("Too many tool calls in one turn")
             for call in calls:
@@ -187,9 +193,25 @@ class MetaResponsesProvider:
                     raise ProposalProviderError("Unknown tool requested") from None
                 except (ValueError, TypeError):
                     raise ProposalProviderError("Invalid tool arguments") from None
+                for item in result.get("ingredients", []):
+                    if isinstance(item, dict) and isinstance(item.get("id"), str):
+                        seen_ids.add(item["id"])
                 history.append({"type": "function_call_output", "call_id": call["call_id"],
                                 "output": json.dumps(result, ensure_ascii=False)})
         raise ProposalProviderError("Tool loop did not converge")
+
+    @staticmethod
+    def _check_link_provenance(operations: list[dict], seen_ids: set[str]) -> None:
+        """Fail closed when a link references an ID no tool call returned.
+
+        Provenance only: shape/ownership/approval stay with the downstream
+        mutation validator and the Human Gate. Non-string or missing IDs are
+        left to that validator (HTTP 422), not rejected here."""
+        for op in operations:
+            if isinstance(op, dict) and op.get("op") == "link_ingredient":
+                ingredient_id = op.get("ingredient_id")
+                if isinstance(ingredient_id, str) and ingredient_id not in seen_ids:
+                    raise ProposalProviderError("Unresolved ingredient link")
 
     @staticmethod
     def _tool_calls(raw: object) -> list[dict]:

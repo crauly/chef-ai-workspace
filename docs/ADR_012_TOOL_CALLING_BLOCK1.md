@@ -38,6 +38,11 @@ tool for that gap. No existing orchestration is duplicated or replaced.
   503. Downstream mutation validation and the Human Gate are unchanged.
 - Muse decides *when* to look up; the app executes, validates, and still
   requires explicit chef approval before anything persists. AI never saves.
+- Provenance check (follow-up): a final `link_ingredient` whose string
+  `ingredient_id` was not returned by a tool call in the same session is
+  rejected with `ProposalProviderError` (fail closed, app-side, not prompt).
+  Non-string/missing IDs stay with the downstream validator (422); ownership
+  and approval stay downstream. `propose()` has no such check.
 
 ## Search Grounding relationship: kept independent, not replaced
 Grounding (`web_search` + evidence-anchored ledger flow) is a server-side
@@ -51,14 +56,18 @@ max_tool_turns ≤ 2, ≤ 4 calls/turn, 25s/turn timeout, strict final parse,
 existing 40-operation limit. No unbounded retry.
 
 ## Verification
-- `tests/test_tool_ledger.py` (18 tests, offline): executor units, happy-path
+- `tests/test_tool_ledger.py` (25 tests, offline): executor units, happy-path
   loop, invalid-args recovery, unknown-tool/timeout/HTTP/refusal/loop-exhaustion
   fail-closed, no-call passthrough, per-turn cap, legacy `propose()` sends no
-  `tools`, endpoint `tools=bogus` → 422.
+  `tools`, endpoint `tools=bogus` → 422, plus `LinkProvenanceTests` (7 tests):
+  tool-returned ID accepted, forged ID / link-without-tool-call fail closed,
+  error results contribute no IDs, non-link ops and malformed link shapes pass
+  through to the existing downstream validator, legacy `propose()` unchecked.
 - `tests/test_tool_ledger_live.py` (opt-in `CHEF_LIVE_META=1`): random-UUID
   catalog proves the model used the tool-returned ID in `link_ingredient`.
-  Passed 2026-11-02.
-- Full suite 410 tests OK; `npx tsc --noEmit` clean; `npm run build` clean.
+  Passed 2026-11-02 (bounded retry x3: live sampling occasionally abstains
+  without calling the tool; the assertion itself is unchanged).
+- Full suite 417 tests OK; `npx tsc --noEmit` clean; `npm run build` clean.
 
 ## Remaining
 - Block 2+ candidates (e.g. price-history lookup tool) need their own contract

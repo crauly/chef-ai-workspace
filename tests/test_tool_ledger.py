@@ -180,3 +180,47 @@ class EndpointGuardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+LINK_OP = {"op": "link_ingredient", "material_id": "mat-1",
+           "ingredient_id": "ing-tomato", "price_mode": "inherit"}
+
+
+class LinkProvenanceTests(unittest.TestCase):
+    def _run(self, turns):
+        provider = MetaResponsesProvider("k")
+        with _queued(turns):
+            return provider.propose_with_tools("link tomato", {}, _catalog())
+
+    def test_tool_returned_id_is_accepted(self):
+        ops = self._run([_call_turn(), _msg(json.dumps({"operations": [LINK_OP]}))])
+        self.assertEqual(ops, [LINK_OP])
+
+    def test_invented_id_fails_closed(self):
+        forged = dict(LINK_OP, ingredient_id="ing-forged-by-model")
+        with self.assertRaises(ProposalProviderError):
+            self._run([_call_turn(), _msg(json.dumps({"operations": [forged]}))])
+
+    def test_link_without_any_tool_call_fails_closed(self):
+        with self.assertRaises(ProposalProviderError):
+            self._run([_msg(json.dumps({"operations": [LINK_OP]}))])
+
+    def test_error_result_contributes_no_ids(self):
+        bad = _call_turn(arguments='{"query":""}')
+        forged = dict(LINK_OP, ingredient_id="ing-tomato")
+        with self.assertRaises(ProposalProviderError):
+            self._run([bad, _msg(json.dumps({"operations": [forged]}))])
+
+    def test_non_link_operations_need_no_provenance(self):
+        body = {"operations": [{"op": "set_selling_price", "value_jpy": "1800"}]}
+        self.assertEqual(self._run([_msg(json.dumps(body))]), body["operations"])
+
+    def test_malformed_link_shape_left_to_downstream_validator(self):
+        body = {"operations": [{"op": "link_ingredient", "material_id": "mat-1"}]}
+        self.assertEqual(self._run([_msg(json.dumps(body))]), body["operations"])
+
+    def test_legacy_propose_is_not_provenance_checked(self):
+        provider = MetaResponsesProvider("k")
+        forged = dict(LINK_OP, ingredient_id="ing-forged-by-model")
+        with _queued([_msg(json.dumps({"operations": [forged]}))]):
+            self.assertEqual(provider.propose("x", {}), [forged])
