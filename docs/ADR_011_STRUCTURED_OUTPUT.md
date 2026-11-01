@@ -205,3 +205,18 @@ Human Gate, no misbinding):
 - Fixture proof: three added cases in
   `web/tests/voice-price-lifecycle.spec.ts` (empty-pending termination,
   discard-then-research, mid-parse completion without refetch).
+
+## Review follow-ups: result reuse and failure invalidation (PR #100)
+Two P2 findings on the flight model, fixed without touching row
+identity or the Human Gate:
+- Completed searches are cached per full key (entries signature + row
+  names) and reapplied to an identical repeated request, so a repeat is
+  served with zero fetches and no row is ever left pending with no
+  flight. Renamed/reordered rows miss the cache and search fresh; the
+  cache is cleared on discard/save alongside flight state.
+- The price-failure fallback now invalidates the review snapshot
+  (`reviewed=null`, back to dictating), exactly like the success path,
+  so an approval taken mid-search cannot linger enabled-yet-dead.
+- Fixture proof: two added cases in
+  `web/tests/voice-price-lifecycle.spec.ts` (identical-repeat reuse with
+  one fetch, review-invalidated-on-failure).

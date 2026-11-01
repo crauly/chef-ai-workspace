@@ -97,8 +97,13 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  const inbox=useRef<Input[]>([]),draining=useRef(false),revision=useRef(0),epoch=useRef(0);
  const requestId=useRef<string|null>(null),semanticAbort=useRef<AbortController|null>(null),priceAbort=useRef<AbortController|null>(null),priceEpoch=useRef(0),alive=useRef(true);
  const priceFlight=useRef<{key:string;rows:string[]} | null>(null);
- const priceDoneKeys=useRef<Set<string>>(new Set());
- type StashedPrices={key:string;rows:string[];response:Pick<Draft,"price_references"|"research_status"|"provisional_prices"|"research_state">};
+ type DonePrices=Pick<Draft,"price_references"|"research_status"|"provisional_prices"|"research_state">;
+ // Completed searches: fullKey -> response. A repeated identical request
+ // reuses the cached result instead of refetching, so it can never leave
+ // the row stuck in pending with no flight. Row names are part of the key,
+ // so renamed/reordered rows always miss and search fresh.
+ const priceDone=useRef<Map<string,DonePrices>>(new Map());
+ type StashedPrices={key:string;rows:string[];response:DonePrices};
  const priceStash=useRef<StashedPrices | null>(null);
  const clearTrace=useRef("");
  const capture=useVoiceCapture(locale,enqueue,true);
@@ -112,7 +117,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  function say(text:string){if(alive.current)setMessage(ja?text:(englishMessages[text]??text));}
  function clear(){
   if(phaseRef.current==="saving")return;
-  epoch.current++;revision.current++;semanticAbort.current?.abort();priceAbort.current?.abort();priceEpoch.current++;priceFlight.current=null;priceStash.current=null;priceDoneKeys.current.clear();setPriceLoading(false);voice.cancel();inbox.current=[];
+  epoch.current++;revision.current++;semanticAbort.current?.abort();priceAbort.current?.abort();priceEpoch.current++;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);voice.cancel();inbox.current=[];
   setCorrectionIndex(null);setPriceDetailIndex(null);setUnmatchedDetailIndex(null);dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);requestId.current=null;
   setStage("dictating");logVoiceEvent("draft.discarded.explicit","explicit cancel",clearTrace.current);clearTrace.current="";onDiscarded?.();say("下書きを破棄しました。新しいレシピを話してください。");
  }
@@ -161,14 +166,23 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
      // without refetching, so the result is neither lost nor duplicated.
      const merged=applyFoundPrices({...enriched,...stash.response,pending_research:[]});
      priceStash.current=null;priceFlight.current=null;priceAbort.current=null;setPriceLoading(false);
-     priceDoneKeys.current.add(key+"@"+rows.join("|"));
+     priceDone.current.set(key+"@"+rows.join("|"),stash.response);
      draftRef.current=merged;parseBase.current=merged;setDraft(merged);
      reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
      logVoiceEvent("price.ok","stashed research applied",traceId);
     }else{
      priceStash.current=null;
+     const fullKey=key+"@"+rows.join("|");
+     const cached=priceDone.current.get(fullKey);
      const flight=priceFlight.current;
-     if(flight&&flightMatches(flight,pending,enriched)&&priceAbort.current&&!priceAbort.current.signal.aborted){
+     if(cached){
+      // Identical request already completed: reapply the cached result so
+      // the row is never left pending with no search running.
+      const merged=applyFoundPrices({...enriched,...cached,pending_research:[]});
+      draftRef.current=merged;parseBase.current=merged;setDraft(merged);
+      reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
+      logVoiceEvent("price.ok","cached research reapplied",traceId);
+     }else if(flight&&flightMatches(flight,pending,enriched)&&priceAbort.current&&!priceAbort.current.signal.aborted){
       // Unchanged ingredients: keep the running search, rebase its guard to
       // the new draft so the result is merged instead of dropped.
       priceFlight.current={key:flight.key,rows};
@@ -177,7 +191,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
       // New/changed condition: stop the stale search, start only what is new.
       priceAbort.current?.abort();priceFlight.current=null;
       draftRef.current=enriched;parseBase.current=enriched;setDraft(enriched);
-      if(!priceDoneKeys.current.has(key+"@"+rows.join("|"))){void enrichPrices(enriched,version,current,traceId);}
+      void enrichPrices(enriched,version,current,traceId);
      }
     }
    }else{
@@ -197,7 +211,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     if(stash&&candidate&&researchKey(candidate.pending_research??[])===stash.key&&
        stash.rows.every((name,index)=>rowNamesOf(candidate)[index]===name)){
      const merged=applyFoundPrices({...candidate,...stash.response,pending_research:[]});
-     priceDoneKeys.current.add(stash.key+"@"+rowNamesOf(candidate).join("|"));
+     priceDone.current.set(stash.key+"@"+rowNamesOf(candidate).join("|"),stash.response);
      draftRef.current=merged;parseBase.current=merged;setDraft(merged);
      reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
      logVoiceEvent("price.ok","stashed research applied after parse failure",traceId);
@@ -247,7 +261,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
      priceFlight.current={key,rows:currentRows};
     }
     const merged=applyFoundPrices({...current,...response,pending_research:[]});
-    priceDoneKeys.current.add(key+"@"+currentRows.join("|"));
+    priceDone.current.set(key+"@"+currentRows.join("|"),response);
     draftRef.current=merged;parseBase.current=merged;setDraft(merged);
     reviewed.current=null;reviewMode.current=null;requestId.current=null;
     setStage("dictating");logVoiceEvent("price.ok","research returned",traceId);
@@ -268,6 +282,11 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     const fallback={...current,research_state:"complete" as const,pending_research:[],
       research_status:entries.map(e=>({...e,ledger:"unavailable",web:"provider_error" as const,provisional:false}))};
     draftRef.current=fallback;parseBase.current=fallback;setDraft(fallback);
+    // The approved content changed, so the old approval must not survive:
+    // same invalidation as the success path, otherwise save() would
+    // silently no-op with the approval button still enabled.
+    reviewed.current=null;reviewMode.current=null;requestId.current=null;
+    setStage("dictating");
     logVoiceEvent("price.fail","price research failed; draft retained",traceId);
    }
   }finally{
@@ -303,7 +322,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    // Spoken purchase sources travel with the save callback: the workspace
    // announces them after its browse transition (this panel hides then).
    const suppliers=[...new Set(d.materials.map(m=>(m.supplier||"").trim()).filter(Boolean))];
-   priceAbort.current?.abort();priceAbort.current=null;priceFlight.current=null;priceStash.current=null;priceDoneKeys.current.clear();setPriceLoading(false);
+   priceAbort.current?.abort();priceAbort.current=null;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);
    say(mode==="confirmed"?(sharedVoice?"保存済みです。":"レシピを保存しました。"):"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。");onCreated(recipe,mode,suppliers);
   }catch{setStage("review");say("保存結果を確認できませんでした。再送時も同じ登録IDを使います。一覧を確認してから再試行してください。");}
   finally{if(alive.current&&!draining.current)setBusy(false);}
