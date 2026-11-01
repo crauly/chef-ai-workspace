@@ -1,21 +1,11 @@
-"""External (web) reference-price seam.
+"""External (web) reference-price contract: validation SSOT.
 
-Live web retrieval is NOT configured in this runtime: only the Meta model
-API and the Chef Supabase project are wired, so no search/fetch
-credentials, cost cap, or terms clearance exists. This module therefore
-provides the read-only provider contract -- query building, candidate
-validation, and comparability grouping -- with a stub-tested
-implementation, while live fetching stays disabled and never fakes prices.
-
-Enabling live lookup requires, at minimum:
-  1. a search/fetch provider with credentials (env-gated, e.g.
-     EXTERNAL_PRICE_PROVIDER + provider API key),
-  2. a per-request cost cap and rate limit,
-  3. terms clearance for the target source(s) (no scraping of sources
-     that forbid it; no EC-site-specific code lives here),
-  4. provenance-preserving fetch (origin, fetched_at, URL, package terms,
-     currency, tax/shipping notes).
-None of the above exists in this runtime.
+Live web retrieval runs in the Next.js voice-recipe route via Meta Search
+Grounding (Responses API web_search; see web/price-web-search.ts), never
+here: this runtime keeps no search session. This module therefore stays
+the validation/grouping SSOT (query building, candidate validation,
+comparability grouping) shared conceptually with the TS mirror, while the
+Python live seam below stays disabled and never fakes prices.
 """
 
 from datetime import datetime, timezone

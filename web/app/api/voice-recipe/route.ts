@@ -1,6 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {previewAuthorized} from "../../../preview-access";
 import {VOICE_RECIPE_SCHEMA,chatResponseFormat} from "../../../muse-schemas";
+import {searchGroundedPrices} from "../../../price-web-search";
 export const runtime="nodejs";
 function backendBase():string|undefined{
  const internal=process.env.CHEF_FASTAPI_INTERNAL_URL;
@@ -12,7 +13,7 @@ function backendBase():string|undefined{
 type ReferenceSummary={available:boolean;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null};
 type ReferenceCandidate={ingredient_id:string;ingredient_name:string;reference:ReferenceSummary;observations?:unknown[]};
 type LedgerLookup={kind:"ok";candidates:ReferenceCandidate[]}|{kind:"unavailable"|"unauthorized"|"invalid_response"};
-type PriceReferenceEntry={material_name:string;status:"available"|"none"|"unavailable"|"unauthorized"|"invalid_response";origin:"ledger"|"external";ingredient_name:string|null;currency:string|null;unit_basis:string|null;average_unit_price:string|null;observation_count:number|null;observed_to:string|null;text:string};
+type PriceReferenceEntry={material_name:string;status:"available"|"none"|"unavailable"|"unauthorized"|"invalid_response";origin:"ledger"|"external";ingredient_name:string|null;currency:string|null;unit_basis:string|null;average_unit_price:string|null;observation_count:number|null;observed_to:string|null;sources?:{url:string;title:string}[];fetched_at?:string;text:string};
 async function lookupCandidates(name:string):Promise<LedgerLookup>{
  const base=backendBase(),token=process.env.DEMO_ACCESS_TOKEN;
  // No connection means configured: the ledger cannot be reached, which is
@@ -204,8 +205,10 @@ notes is ONLY for unresolved ambiguous/unsupported facts, not ordinary packaging
   const text=message&&typeof message==="object"?(message as {content?:unknown}).content:null;
   if(typeof text!=="string")return error(502);
   const output=parse(JSON.parse(text));if(!output)return error(502);
-  // Ledger-grounded price research: resolve each explicit request against the
-  // owned ledger and report back in price_references. Prices stay empty
+  // Ledger-first price research: resolve each explicit request against the
+  // owned ledger, falling back to Meta Search Grounding (real web_search +
+  // url_citation only) when the ledger cannot serve, and report back in
+  // price_references. Prices stay empty
   // (missing path); enrichment never invents, confirms, or saves anything,
   // and its failure never fails the draft.
   // Informational only: reported in price_references, never in notes, so the
@@ -213,8 +216,16 @@ notes is ONLY for unresolved ambiguous/unsupported facts, not ordinary packaging
   // and the unconfirmed-price save path stays available for research requests.
   const priceReferences:PriceReferenceEntry[]=[];
   for(const entry of output.priceResearch.slice(0,3)){
-   const lookup=await lookupCandidates(entry.material_name);
-   priceReferences.push(selectReference(entry.material_name,lookup));
+   const ledgerEntry=selectReference(entry.material_name,await lookupCandidates(entry.material_name));
+   if(ledgerEntry.status==="available"){
+    // Owned ledger wins: no web search when usable history exists.
+    priceReferences.push(ledgerEntry);
+    continue;
+   }
+   // Fallback only: real Search Grounding when the ledger cannot serve.
+   // Any grounding failure keeps the ledger entry; the draft never fails.
+   const grounded=await searchGroundedPrices({apiKey:key,materialName:entry.material_name,request:entry.request});
+   priceReferences.push(grounded??ledgerEntry);
   }
   return NextResponse.json({...output,price_references:priceReferences},{headers:{"Cache-Control":"no-store","Server-Timing":`muse;dur=${Math.round(performance.now()-started)}`}});
  }catch{return error(502);}
