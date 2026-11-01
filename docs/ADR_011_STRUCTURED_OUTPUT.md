@@ -141,3 +141,19 @@ timeout). Two changes, no new job infra, no new external service:
   measured deferred=3ms vs full=813ms; out-of-order latency keeps entry
   order; contradictory/stale indexes never misbind; bad shapes fail
   closed). Production wall-clock gains vary by backend/search latency.
+
+## Deferred row identity (P2 fix)
+`pending_research[]` carries `row_name` (the materials[] row name the
+entry was bound against, null when rowless) alongside `material_index`.
+`POST /api/voice-recipe/prices` accepts entries with `material_index: -1`
+(this API's own rowless marker; null/omitted also rowless) and an optional
+`row_name`, and binds via `bindRow` (`web/price-enrichment.ts`): a pointer
+is honored only while the current row still carries its creation name, so
+a deletion/reorder/rename that moves another ingredient under the old
+number discards the pointer and falls back to an exact searched-name
+match, else rowless (searched by name, never bound). Without a row_name
+the historical rule applies. A rowless AVAILABLE price binds nowhere, and
+one entry's failure never fails the others. Fixture proof:
+`web/tests/voice-recipe-deferred.spec.ts` (mixed rowless/healthy,
+deletion/reorder/rename/drift, bad row_name and out-of-shape indexes fail
+closed).

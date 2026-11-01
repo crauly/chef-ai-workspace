@@ -63,7 +63,7 @@ test("defer_prices returns the draft without ledger or grounding calls", async (
     expect(body.materials.length).toBe(2);
     expect(body.research_state).toBe("deferred");
     expect(body.pending_research).toEqual([{material_name: "pasta", material_index: 0,
-      request: "相場", trigger: "muse"}]);
+      row_name: "pasta", request: "相場", trigger: "muse"}]);
     expect(body.price_references).toEqual([]);
     expect(body.research_status).toEqual([]);
     expect(body.provisional_prices).toEqual([null, null]);
@@ -210,9 +210,100 @@ test("prices endpoint fails closed on bad shapes", async () => {
     expect((await bad({materials: [{name: "pasta"}],
       entries: [{material_name: "", request: "r"}]})).status).toBe(400);
     expect((await bad({materials: [{name: "pasta"}],
-      entries: [{material_name: "p", request: "r", material_index: -1}]})).status).toBe(400);
+      entries: [{material_name: "p", request: "r", material_index: -2}]})).status).toBe(400);
     expect((await bad({materials: [{name: "pasta"}],
       entries: [1, 2, 3, 4]})).status).toBe(400);
+  } finally {
+    global.fetch = previousFetch; restore();
+  }
+});
+
+test("prices endpoint accepts rowless -1 without failing healthy entries", async () => {
+  const restore = withEnv();
+  const previousFetch = global.fetch;
+  try {
+    global.fetch = (async (url: unknown) => {
+      if (String(url).includes("/demo/price-reference")) {
+        const name = new URL(String(url)).searchParams.get("name") ?? "?";
+        return Response.json(ledgerHit(name));
+      }
+      return Response.json(grounded([]));
+    }) as typeof fetch;
+    const res = await fetchPrices(authed("http://localhost/api/voice-recipe/prices", {
+      materials: [{name: "pasta"}, {name: "tomato"}],
+      entries: [
+        {material_name: "ghost", request: "相場", material_index: -1},
+        {material_name: "pasta", request: "相場", material_index: 0, row_name: "pasta"}]}));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.research_status.map((e: {material_index: number}) => e.material_index))
+      .toEqual([-1, 0]);
+    expect(body.provisional_prices[0].material_name).toBe("pasta");
+    expect(body.provisional_prices[1]).toBeNull();
+  } finally {
+    global.fetch = previousFetch; restore();
+  }
+});
+
+test("deleted-row pointer never binds another ingredient", async () => {
+  const restore = withEnv();
+  const previousFetch = global.fetch;
+  try {
+    global.fetch = (async (url: unknown) => {
+      if (String(url).includes("/demo/price-reference")) {
+        const name = new URL(String(url)).searchParams.get("name") ?? "?";
+        return Response.json(ledgerHit(name));
+      }
+      return Response.json(grounded([]));
+    }) as typeof fetch;
+    const call = (materials: unknown, entries: unknown) =>
+      fetchPrices(authed("http://localhost/api/voice-recipe/prices", {materials, entries}));
+    // [tomato, pasta] -> tomato deleted, [pasta]: index 0 now names pasta.
+    // The tomato request carries its original row identity, so the stale
+    // pointer is discarded: rowless, searched by name, bound to nothing.
+    const deleted = await call([{name: "パスタ"}],
+      [{material_name: "トマト", request: "相場", material_index: 0, row_name: "トマト"}]);
+    expect(deleted.status).toBe(200);
+    const deletedBody = await deleted.json();
+    expect(deletedBody.research_status[0].material_index).toBe(-1);
+    expect(deletedBody.provisional_prices).toEqual([null]);
+    // Reorder [tomato, pasta] -> [pasta, tomato]: identity follows the name.
+    const reordered = await call([{name: "パスタ"}, {name: "トマト"}],
+      [{material_name: "トマト", request: "相場", material_index: 0, row_name: "トマト"}]);
+    const reorderedBody = await reordered.json();
+    expect(reorderedBody.research_status[0].material_index).toBe(1);
+    expect(reorderedBody.provisional_prices[0]).toBeNull();
+    expect(reorderedBody.provisional_prices[1].material_name).toBe("トマト");
+    // Rename pasta -> spaghetti: the old pointer names nothing verifiable.
+    const renamed = await call([{name: "スパゲッティ"}],
+      [{material_name: "パスタ", request: "相場", material_index: 0, row_name: "パスタ"}]);
+    const renamedBody = await renamed.json();
+    expect(renamedBody.research_status[0].material_index).toBe(-1);
+    expect(renamedBody.provisional_prices).toEqual([null]);
+    // Confirmed drift: row still carries its creation name, so the index
+    // names the row even though the searched wording differs.
+    const drifted = await call([{name: "パスタ"}],
+      [{material_name: "ディチェコ パスタ", request: "相場", material_index: 0, row_name: "パスタ"}]);
+    const driftedBody = await drifted.json();
+    expect(driftedBody.research_status[0].material_index).toBe(0);
+    expect(driftedBody.provisional_prices[0].material_name).toBe("パスタ");
+  } finally {
+    global.fetch = previousFetch; restore();
+  }
+});
+
+test("prices endpoint rejects bad row_name and out-of-shape indexes", async () => {
+  const restore = withEnv();
+  const previousFetch = global.fetch;
+  try {
+    global.fetch = (async () => Response.json({})) as typeof fetch;
+    const bad = (body: unknown) => fetchPrices(authed("http://localhost/api/voice-recipe/prices", body));
+    expect((await bad({materials: [{name: "pasta"}],
+      entries: [{material_name: "p", request: "r", material_index: -2}]})).status).toBe(400);
+    expect((await bad({materials: [{name: "pasta"}],
+      entries: [{material_name: "p", request: "r", material_index: 1.5}]})).status).toBe(400);
+    expect((await bad({materials: [{name: "pasta"}],
+      entries: [{material_name: "p", request: "r", row_name: 123}]})).status).toBe(400);
   } finally {
     global.fetch = previousFetch; restore();
   }
