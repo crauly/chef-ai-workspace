@@ -56,6 +56,32 @@ export function priceMissingNames(draft:Draft):string[]{
 // chef as a memo; formal supplier linkage uses the existing ledger path
 // (ingredient-assist -> offer observations -> observations/confirm, all
 // Human-Gate approved), never an automatic write.
+// Block 3 (dish image): build the single-shot illustration prompt from the
+// current draft plus an optional explicit hint. Pure helper (exported for
+// tests). The generated image is a preview only, never recipe evidence.
+export function dishImagePrompt(title:string,names:string[],hint:string):string{
+ const dish=(title||"").trim()||"unspecified dish";
+ let items=names.map(n=>n.trim()).filter(Boolean).slice(0,8);
+ let extra=hint.trim().slice(0,200);
+ const build=()=>`Appetizing food photograph of ${dish}`+(items.length?`, made with ${items.join(", ")}`:"")+(extra?`. ${extra}`:"");
+ let prompt=build();
+ // The route rejects the whole prompt past 500 chars: shed trailing
+ // ingredients first (title + explicit hint carry the intent), then the
+ // hint, so the UI never offers a request guaranteed to fail.
+ while(prompt.length>500&&items.length>1){items=items.slice(0,-1);prompt=build();}
+ if(prompt.length>500){extra="";prompt=build();}
+ if(prompt.length>500)prompt=prompt.slice(0,500);
+ return prompt;
+}
+// Block 3 guards (pure, exported for tests): an aborted flight is a normal
+// cancellation, never an API failure; a result belongs only to the draft it
+// started from, so a discarded/saved/replaced draft never receives it.
+export function isAbortError(err:unknown):boolean{
+ return !!err&&typeof err==="object"&&"name" in err&&(err as {name?:unknown}).name==="AbortError";
+}
+export function dishCompletionKept(started:object|null,current:object|null,aborted:boolean):boolean{
+ return !aborted&&started!==null&&started===current;
+}
 export function toSaveMaterials(draft:Draft){
  return draft.materials.map(m=>({name:m.name,
   quantity:m.quantity||null,unit:m.unit||null,
@@ -100,6 +126,13 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  const [photoMemo,setPhotoMemo]=useState("");
  const [photoAnalyzing,setPhotoAnalyzing]=useState(false),[photoFailed,setPhotoFailed]=useState(false);
  const photoFile=useRef<HTMLInputElement|null>(null),photoAbort=useRef<AbortController|null>(null);
+ // Dish image (Block 3): explicit "generate" only, never auto-run on parse or
+ // save. dishGenerating mirrors its own flight; dishFailed latches the last
+ // failure; dishImageUrl is a preview (illustration, never saved as evidence).
+ const [dishHint,setDishHint]=useState("");
+ const [dishImageUrl,setDishImageUrl]=useState<string|null>(null);
+ const [dishGenerating,setDishGenerating]=useState(false),[dishFailed,setDishFailed]=useState(false);
+ const dishAbort=useRef<AbortController|null>(null);
  // Pipeline status (drives the status list; each flag is set only while its
  // own stage actually runs, and failure latches clear on retry/success):
  // parsing = Muse voice-recipe in flight, parseFailed = last parse failed,
@@ -126,7 +159,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  useImperativeHandle(control,()=>({submit:enqueue,hasPending:()=>Boolean(dataTurns.current.length||inbox.current.length||draftRef.current),isSaving:()=>phaseRef.current==="saving",requestReview:()=>{showReview();},suspend:()=>{
   reviewed.current=null;inbox.current=inbox.current.filter(input=>input.command==="data");setStage("dictating");
  }}));
- useEffect(()=>{alive.current=true;return()=>{alive.current=false;semanticAbort.current?.abort();priceAbort.current?.abort();photoAbort.current?.abort();inbox.current=[];};},[]);
+ useEffect(()=>{alive.current=true;return()=>{alive.current=false;semanticAbort.current?.abort();priceAbort.current?.abort();photoAbort.current?.abort();dishAbort.current?.abort();inbox.current=[];};},[]);
  function setStage(next:"dictating"|"review"|"saving"){phaseRef.current=next;setPhase(next);}
  const englishMessages:Record<string,string>={"下書きを破棄しました。新しいレシピを話してください。":"Draft discarded. Describe a new recipe.","Museが料理の文脈・数量・価格を解釈しています…":"Muse is interpreting the dish, quantities and prices…","料理の解釈に失敗しました。保存していません。「解析を再試行」か補助入力で再開できます。":"Could not interpret the recipe. Nothing was saved. Retry analysis or use manual input.","確認用の下書きを表示しました。料理名・食材・数量・価格を確認し、正しければもう一度「保存してください」と話すか、承認して保存を押してください。":"Draft ready to review. Check the dish, ingredients, quantities and prices, then explicitly approve saving.","承認された内容を保存しています…":"Saving approved recipe…","保存済みです。":"Already saved.","レシピを保存しました。":"Recipe saved.","価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"Saved with unconfirmed purchase prices. Unknown prices are not set to zero; only partial costs are shown.","保存結果を確認できませんでした。再送時も同じ登録IDを使います。一覧を確認してから再試行してください。":"Could not confirm the save result. The same request ID is used for retries; check the recipe list first.","保存せず、下書きを保持します。":"Not saved. Draft preserved."};
  function say(text:string){if(alive.current)setMessage(ja?text:(englishMessages[text]??text));}
@@ -134,7 +167,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  function sayPhoto(text:string){if(alive.current)setMessage(ja?text:(photoMessages[text]??text));}
  function clear(){
   if(phaseRef.current==="saving")return;
-  epoch.current++;revision.current++;semanticAbort.current?.abort();priceAbort.current?.abort();photoAbort.current?.abort();priceEpoch.current++;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);setParsing(false);setParseFailed(false);setPriceFailed(false);setPhotoAnalyzing(false);setPhotoFailed(false);voice.cancel();inbox.current=[];
+  epoch.current++;revision.current++;semanticAbort.current?.abort();priceAbort.current?.abort();photoAbort.current?.abort();priceEpoch.current++;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);setParsing(false);setParseFailed(false);setPriceFailed(false);setPhotoAnalyzing(false);setPhotoFailed(false);dishAbort.current?.abort();setDishGenerating(false);setDishFailed(false);setDishImageUrl(null);voice.cancel();inbox.current=[];
   setCorrectionIndex(null);setPriceDetailIndex(null);setUnmatchedDetailIndex(null);dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);requestId.current=null;
   setStage("dictating");logVoiceEvent("draft.discarded.explicit","explicit cancel",clearTrace.current);clearTrace.current="";onDiscarded?.();say("下書きを破棄しました。新しいレシピを話してください。");
  }
@@ -355,6 +388,10 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    // announces them after its browse transition (this panel hides then).
    const suppliers=[...new Set(d.materials.map(m=>(m.supplier||"").trim()).filter(Boolean))];
    priceAbort.current?.abort();priceAbort.current=null;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);setPriceFailed(false);
+   // Dish preview belongs to the saved recipe only: abort its flight and
+   // clear preview/failure so neither survives into the next recipe (this
+   // panel stays mounted while hidden). The saved draft itself is untouched.
+   dishAbort.current?.abort();dishAbort.current=null;setDishGenerating(false);setDishFailed(false);setDishImageUrl(null);setDishHint("");
    say(mode==="confirmed"?(sharedVoice?"保存済みです。":"レシピを保存しました。"):"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。");onCreated(recipe,mode,suppliers);
   }catch{setStage("review");say("保存結果を確認できませんでした。再送時も同じ登録IDを使います。一覧を確認してから再試行してください。");}
   finally{if(alive.current&&!draining.current)setBusy(false);}
@@ -462,6 +499,40 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    if(alive.current)setPhotoAnalyzing(false);
   }
  }
+ async function generateDishImage(){
+  // Explicit user action only: no auto-run from parse/save flows.
+  // Double-submit guard: a running flight returns silently.
+  if(phaseRef.current==="saving"||dishGenerating)return;
+  const current=draftRef.current;
+  if(!current){say(ja?"先に下書きを作成してください。":"Create a draft first.");return;}
+  const started=current;
+  const prompt=dishImagePrompt(current.title,current.materials.map(m=>m.name),dishHint);
+  setDishFailed(false);setDishGenerating(true);
+  const traceId=`dish-image-${Date.now().toString(36)}`;
+  logVoiceEvent("dish-image.start",prompt.slice(0,80),traceId);
+  const controller=new AbortController();dishAbort.current=controller;
+  try{
+   const out=await request<{image:string}>("/api/dish-image",{method:"POST",body:JSON.stringify({prompt}),signal:controller.signal});
+   // Completion guard: a discarded/saved/replaced draft never receives
+   // a stale preview or failure — only the exact draft object this flight
+   // started from. (clear()/save() null draftRef.current and abort, so an
+   // already-settled fetch cannot leak into the next recipe either.)
+   if(!alive.current||!dishCompletionKept(started,draftRef.current,controller.signal.aborted))return;
+   // Preview only: the draft object is untouched (no revision/epoch bump),
+   // so a late voice/price result can never be clobbered by an image.
+   setDishImageUrl(out.image);
+   logVoiceEvent("dish-image.ok","preview ready; draft kept",traceId);
+   say(ja?"料理イメージを生成しました。":"Dish image generated.");
+  }catch(err){
+   // Abort (draft discarded/saved mid-flight) is a normal cancellation:
+   // never surface it as an API failure. HTTP/timeouts arrive as
+   // Error("<status>") from request(), so genuine failures still display.
+   if(!alive.current||controller.signal.aborted||isAbortError(err))return;
+   setDishFailed(true);logVoiceEvent("dish-image.fail",err instanceof Error?err.message:"failed",traceId);say(ja?"画像の生成に失敗しました。下書きは保持しています。":"Image generation failed. The draft is kept.");
+  }finally{
+   if(alive.current)setDishGenerating(false);
+  }
+ }
  function chooseName(index:number,name:string){
   const current=draftRef.current;
   if(!current||phaseRef.current==="saving")return;
@@ -527,10 +598,12 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     {key:"price",active:priceLoading,text:ja?"価格検索中…":"Searching prices…"},
     {key:"parse-fail",active:parseFailed&&!parsing,text:ja?"解析に失敗しました。下書きは保持しています。":"Analysis failed. The draft is kept."},
     {key:"price-fail",active:priceFailed&&!priceLoading,text:ja?"価格検索に失敗しました。下書きは保持しています。":"Price search failed. The draft is kept."},
-    {key:"photo-fail",active:photoFailed&&!photoAnalyzing,text:ja?"写真の解析に失敗しました。下書きは作成していません。":"Photo analysis failed. No draft was created."},
+{key:"dish-image",active:dishGenerating,text:ja?"料理イメージを生成中…":"Generating dish image…"},
+    {key:"dish-image-fail",active:dishFailed&&!dishGenerating,text:ja?"画像の生成に失敗しました。下書きは保持しています。":"Image generation failed. The draft is kept."},
+        {key:"photo-fail",active:photoFailed&&!photoAnalyzing,text:ja?"写真の解析に失敗しました。下書きは作成していません。":"Photo analysis failed. No draft was created."},
     {key:"done",active:!mic.transcribing&&!parsing&&!priceLoading&&!parseFailed&&!priceFailed&&turns.length>0&&draft!==null,text:ja?"処理完了：下書きに反映しました。":"Done: reflected in the draft."},
    ].filter(row=>row.active);
-   return rows.length?<ul className="voice-status-list" role="status" aria-live="polite" aria-label={ja?"処理状況":"Processing status"}>{rows.map(row=><li key={row.key}>{["listen","transcribe","parse","price","photo"].includes(row.key)?<span className="voice-spin" aria-hidden="true"/>:null}{row.text}</li>)}</ul>:null;
+   return rows.length?<ul className="voice-status-list" role="status" aria-live="polite" aria-label={ja?"処理状況":"Processing status"}>{rows.map(row=><li key={row.key}>{["listen","transcribe","parse","price","photo","dish-image"].includes(row.key)?<span className="voice-spin" aria-hidden="true"/>:null}{row.text}</li>)}</ul>:null;
   })()}
   <p aria-live="polite" role="status">{busy?(ja?"処理中 ⏳ ":"Working ⏳ "):""}{message}</p>
   {!sharedVoice&&<form onSubmit={event=>{event.preventDefault();if(manual.trim()){enqueue(manual);setManual("");}}}>
@@ -553,6 +626,11 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    <h3>{ja?"未保存の下書き：":"Unsaved draft: "}{draft.title||(ja?"料理名未設定":"Untitled recipe")}</h3>
    {draft.interpretations?.map((item,index)=><p key={index}>料理の文脈からの解釈案：{item.source} → {item.suggestion}（{item.reason}）</p>)}
    <p>{ja?"売価：":"Selling price: "}{draft.selling_price_jpy?("¥"+draft.selling_price_jpy):(ja?"未設定（売価なしでも保存できます）":"Not set (optional)")}</p>
+   <div>
+    <label>{ja?"料理イメージの指示（任意）":"Dish image hint (optional)"}<input aria-label={ja?"料理イメージの指示（任意）":"Dish image hint (optional)"} value={dishHint} onChange={event=>setDishHint(event.target.value)} maxLength={200} placeholder={ja?"例：和風の盛り付け":"e.g. rustic plating"} disabled={phase==="saving"||dishGenerating}/></label>
+    <button type="button" onClick={()=>void generateDishImage()} disabled={phase==="saving"||dishGenerating}>{ja?"画像を生成":"Generate image"}</button>
+    {dishImageUrl&&<div><img src={dishImageUrl} alt={ja?"生成した料理イメージ":"Generated dish image"} style={{maxWidth:"100%"}}/><p className="muted">{ja?"生成画像はイメージです。数量・価格・完成写真の証拠にはなりません。":"Generated image is an illustration, not evidence for quantities, prices, or the finished dish."}</p></div>}
+   </div>
    <ul>{draft.materials.map((material,index)=>{
     const priced=Boolean(material.price_jpy&&material.price_quantity&&material.price_unit);
     const provisional=draft.provisional_prices?.[index];
