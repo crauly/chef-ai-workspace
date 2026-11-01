@@ -41,7 +41,9 @@ VOICE_RECIPE_SCHEMA_PY = {
             "type": "object",
             "properties": {
                 "material_name": {"type": "string"},
-                "request": {"type": "string"}},
+                "request": {"type": "string"},
+                "material_index": {"type": "integer",
+                                   "minimum": 0}},
             "required": ["material_name", "request"],
             "additionalProperties": False}},
         "name_corrections": {"type": "array", "items": {

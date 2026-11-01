@@ -44,6 +44,11 @@ const PRICE_RESEARCH_SCHEMA = {
     // supplier, named maker or shop. Recorded only; the app resolves it
     // against the owned ledger, never against model knowledge.
     request: { type: "string" },
+    // 0-based position of the ingredient in this response's materials
+    // array. The app's canonical row key: it binds the researched price
+    // to the right row even when the spoken product wording differs from
+    // the materials name. Omit only when no row applies.
+    material_index: { type: "integer", minimum: 0 },
   },
   required: ["material_name", "request"],
   additionalProperties: false,

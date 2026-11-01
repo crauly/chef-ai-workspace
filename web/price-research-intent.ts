@@ -18,7 +18,10 @@
 // targets nothing rather than guessing. The caller keeps Muse entries
 // first and caps the total, so this path only fills gaps instead of
 // duplicating Muse output.
-export type ResearchTrigger = {material_name: string; request: string};
+// material_index is the exact materials[] position (this detector scans
+// the draft rows, so the index is known, never guessed). The route treats
+// it as the canonical row key.
+export type ResearchTrigger = {material_name: string; request: string; material_index: number};
 
 const JA_STANDALONE = ["相場", "平均価格", "仕入価格", "仕入れ価格", "仕入値",
   "市場価格", "参考価格", "仕入先", "仕入れ先", "最安", "平均で", "平均を"];
@@ -59,17 +62,20 @@ export function detectPriceResearch(turns: string[],
   if (named.length) {
     return named.slice(0, 10).map(m => {
       const turn = hits[lowered.findIndex(t => t.includes(m.name.trim().toLowerCase()))];
-      return {material_name: m.name.trim(), request: turn.trim().slice(0, 200)};
+      return {material_name: m.name.trim(), request: turn.trim().slice(0, 200),
+        material_index: materials.indexOf(m)};
     });
   }
   if (hits.some(turnIsRecipeWide)) {
     const request = hits[0].trim().slice(0, 200);
-    return open.slice(0, 10).map(m => ({material_name: m.name.trim(), request}));
+    return open.slice(0, 10).map(m => ({material_name: m.name.trim(), request,
+      material_index: materials.indexOf(m)}));
   }
   // Deictic ("この食材") with a single open line: that line is unambiguous.
   // With several open lines and no names, guessing would mis-search, so none.
   if (open.length === 1) {
-    return [{material_name: open[0].name.trim(), request: hits[0].trim().slice(0, 200)}];
+    return [{material_name: open[0].name.trim(), request: hits[0].trim().slice(0, 200),
+      material_index: materials.indexOf(open[0])}];
   }
   return [];
 }
