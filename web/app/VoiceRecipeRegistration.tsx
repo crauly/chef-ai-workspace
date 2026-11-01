@@ -10,7 +10,21 @@ type Ingredient={name:string;quantity:string;unit:string;price_jpy:string;price_
 type Interpretation={source:string;suggestion:string;reason:string};
 type NameCorrection={material_name:string;heard:string;candidates:{name:string;reason:string}[]};
 type PriceReference={material_name:string;status:string;origin?:"ledger"|"external";ingredient_name?:string;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null;sources?:{url:string;title:string}[];fetched_at?:string;text:string};
-type Draft={title:string;materials:Ingredient[];selling_price_jpy:string;notes:string[];missing:string[];interpretations?:Interpretation[];price_references?:PriceReference[];nameCorrections?:NameCorrection[]};
+type ProvisionalPrice={material_index:number;material_name:string;origin:"ledger"|"external";price_jpy:string;price_quantity:string;price_unit:string;currency:string;observation_count:number;sources:{url:string;title:string}[];fetched_at:string|null;status:"provisional";approval:"unapproved";text:string};
+type ResearchStatus={material_name:string;trigger:"muse"|"heuristic";ledger:string;web:"not_attempted"|"available"|"empty"|"not_searched"|"provider_error"|"timeout"|"misconfigured";provisional:boolean};
+type Draft={title:string;materials:Ingredient[];selling_price_jpy:string;notes:string[];missing:string[];interpretations?:Interpretation[];price_references?:PriceReference[];provisional_prices?:Array<ProvisionalPrice|null>;research_status?:ResearchStatus[];nameCorrections?:NameCorrection[]};
+const validPrice=/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/;
+function sourceUrl(url:string){try{const parsed=new URL(url);return parsed.protocol==="https:"?parsed.href:null;}catch{return null;}}
+function researchLabel(status:ResearchStatus,ja:boolean){
+ const messages:Record<ResearchStatus["web"],[string,string]>={
+  not_attempted:["Web検索未実施（仕入台帳を参照）","Web search not attempted (ledger used)"],
+  available:["Web検索完了","Web research completed"],empty:["価格候補なし","No comparable prices found"],
+  not_searched:["Web検索を確認できません","Web search not confirmed"],
+  provider_error:["検索サービスの応答エラー","Search provider error"],
+  timeout:["検索がタイムアウトしました","Search timed out"],
+  misconfigured:["検索サービスの設定を確認してください","Search configuration unavailable"]};
+ return messages[status.web][ja?0:1];
+}
 type Input={text:string;command:VoiceCommand;revision:number;approval:Draft|null;traceId:string};
 export type SaveMode="confirmed"|"unconfirmed";
 // Missing-entry kinds mirror web/app/api/voice-recipe/route.ts. Only a draft
@@ -196,9 +210,28 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   const nameCorrections=current.nameCorrections?.filter((_,i)=>i!==index);
   // A price lookup for the old ingredient name cannot safely be carried over.
   const price_references=name===previousName?current.price_references:current.price_references?.filter(ref=>ref.material_name!==previousName);
-  const next={...current,materials,missing,nameCorrections,price_references};
+  const provisional_prices=current.provisional_prices?.map((p,i)=>i===materialIndex&&name!==previousName?null:p);
+  const research_status=name===previousName?current.research_status:current.research_status?.filter(item=>item.material_name!==previousName);
+  const next={...current,materials,missing,nameCorrections,price_references,provisional_prices,research_status};
   draftRef.current=next;parseBase.current=next;setDraft(next);
   reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");setCorrectionIndex(null);
+ }
+ function adoptProvisional(index:number){
+  const current=draftRef.current;
+  if(!current||phaseRef.current==="saving"||busy)return;
+  const candidate=current.provisional_prices?.[index];
+  const material=current.materials[index];
+  if(!candidate||!material||candidate.material_index!==index||candidate.material_name.trim()!==material.name.trim()||
+     candidate.status!=="provisional"||candidate.approval!=="unapproved"||candidate.currency!=="JPY"||
+     !["g","ml"].includes(candidate.price_unit)||candidate.price_quantity!=="1"||
+     !validPrice.test(candidate.price_jpy)||Number(candidate.price_jpy)<=0||
+     (material.price_jpy&&material.price_quantity&&material.price_unit))return;
+  const materials=current.materials.map((m,i)=>i===index?{...m,price_jpy:candidate.price_jpy,price_quantity:candidate.price_quantity,price_unit:candidate.price_unit}:m);
+  const missing=current.missing.filter(item=>item!==material.name+PRICE_SUFFIX);
+  const next={...current,materials,missing};
+  draftRef.current=next;parseBase.current=next;setDraft(next);
+  reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
+  say(ja?"参考価格を下書きに採用しました。内容を確認してから保存してください。":"Reference price applied to the draft. Review before saving.");
  }
  const eligible=draftRef.current?saveModeFor(draftRef.current):null;
  return <section className="card" aria-label={ja?"音声レシピ一括登録":"Voice recipe registration"}>
@@ -224,7 +257,23 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    <h3>{ja?"未保存の下書き：":"Unsaved draft: "}{draft.title||(ja?"料理名未設定":"Untitled recipe")}</h3>
    {draft.interpretations?.map((item,index)=><p key={index}>料理の文脈からの解釈案：{item.source} → {item.suggestion}（{item.reason}）</p>)}
    <p>{ja?"売価：":"Selling price: "}{draft.selling_price_jpy?("¥"+draft.selling_price_jpy):(ja?"未設定（売価なしでも保存できます）":"Not set (optional)")}</p>
-   <ul>{draft.materials.map((material,index)=>{const priced=Boolean(material.price_jpy&&material.price_quantity&&material.price_unit);return <li key={index}>{material.name||(ja?"食材名不明":"Unnamed ingredient")}: {material.quantity||"?"}{material.unit} ／ {priced?`${ja?"仕入単価":"Purchase price"} ¥${material.price_jpy} / ${material.price_quantity}${material.price_unit}`:(ja?"仕入単価 未確定":"Purchase price unconfirmed")}{material.supplier?` / ${ja?"仕入先":"Supplier"}: ${material.supplier}`:""}</li>;})}</ul>
+   <ul>{draft.materials.map((material,index)=>{const priced=Boolean(material.price_jpy&&material.price_quantity&&material.price_unit);
+    const provisional=draft.provisional_prices?.[index];
+    const status=draft.research_status?.find(item=>item.material_name===material.name);
+    const canApply=provisional&&provisional.material_index===index&&provisional.material_name.trim()===material.name.trim()&&
+     provisional.currency==="JPY"&&provisional.price_quantity==="1"&&["g","ml"].includes(provisional.price_unit)&&
+     validPrice.test(provisional.price_jpy)&&Number(provisional.price_jpy)>0;
+    return <li key={index}>
+     <div><strong>{material.name||(ja?"食材名不明":"Unnamed ingredient")}</strong> — {material.quantity||"?"}{material.unit}</div>
+     <div>{priced?`${ja?"仕入単価":"Purchase price"} ¥${material.price_jpy} / ${material.price_quantity}${material.price_unit}`:(ja?"仕入単価 未確定":"Purchase price unconfirmed")}{material.supplier?` / ${ja?"仕入先":"Supplier"}: ${material.supplier}`:""}</div>
+     {status&&<p className="muted" role="status">{researchLabel(status,ja)}</p>}
+     {provisional&&canApply&&<div className="rounded-xl border border-current/20 p-3">
+      <div><strong>{ja?"参考価格（仮設定候補）":"Provisional reference price"}</strong> — ¥{provisional.price_jpy} / {provisional.price_quantity}{provisional.price_unit}</div>
+      <p className="muted">{provisional.origin==="external"?(ja?"Web検索":"Web research"):(ja?"仕入履歴":"Purchase ledger")} ・ {provisional.observation_count}{ja?"件のサンプル":" samples"}{provisional.fetched_at?` ・ ${provisional.fetched_at}`:""}</p>
+      <button type="button" disabled={busy||phase==="saving"||priced} onClick={()=>adoptProvisional(index)}>{priced?(ja?"価格設定済み":"Price set"):(ja?"参考価格を下書きに採用":"Apply reference price to draft")}</button>
+      {provisional.sources?.length>0&&<details><summary>{ja?"価格の出典":"Price sources"}</summary><ul>{provisional.sources.map((source,i)=>sourceUrl(source.url)?<li key={i}><a href={sourceUrl(source.url)!} target="_blank" rel="noopener noreferrer">{source.title||source.url}</a></li>:null)}</ul></details>}
+     </div>}
+    </li>;})}</ul>
    {draft.nameCorrections?.map((entry,index)=><div key={index} className="name-correction-row">
     <span>{ja?"食材名の補正候補":"Ingredient name suggestion"}: {entry.material_name}</span>
     <button type="button" disabled={busy||phase==="saving"} onClick={()=>setCorrectionIndex(index)}>{ja?"候補を選択":"Choose name"}</button>
@@ -249,7 +298,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
      {ref.origin==="external"&&ref.fetched_at&&<p className="muted">{ja?"調査日時":"Researched at"}: {ref.fetched_at}</p>}
      {ref.origin==="external"&&Boolean(ref.sources?.length)&&<ul>{ref.sources?.filter(source=>{try{return new URL(source.url).protocol==="https:";}catch{return false;}}).map((source,i)=><li key={`${source.url}-${i}`}><a href={source.url} target="_blank" rel="noopener noreferrer">{source.title||source.url}</a></li>)}</ul>}
     </li>)}</ul>
-    <p className="muted">{ja?"参考情報です。正式な仕入価格には自動反映しません。実際の価格を確認できた場合は音声で価格・数量・単位を伝えてください。不明な場合は価格未確定として確認できます。":"For reference only; not applied as a confirmed purchase price. To set a known price, dictate its amount, quantity and unit. Otherwise review and save with unconfirmed prices."}</p>
+    <p className="muted">{ja?"参考価格を使う場合は、食材行の「参考価格を下書きに採用」を押し、内容を確認してから保存を承認してください。":"To use a reference price, apply it on its ingredient row, then review and approve saving."}</p>
    </section>}
    {draft.missing.length>0&&<p role="alert">不足情報：{draft.missing.join("、")}</p>}
    {draft.notes.length>0&&<p role="alert">要確認：{draft.notes.join("、")}</p>}
