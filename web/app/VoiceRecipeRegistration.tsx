@@ -154,7 +154,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   logVoiceEvent("price.start",`${entries.length} entries`,traceId);
   try{
    const response=await request<Pick<Draft,"price_references"|"research_status"|"provisional_prices"|"research_state">>("/api/voice-recipe/prices",{
-    method:"POST",body:JSON.stringify({materials:base.materials,entries}),signal:controller.signal});
+    method:"POST",body:JSON.stringify({materials:base.materials,entries:entries.map(e=>({...e,material_index:e.material_index===-1?null:e.material_index}))}),signal:controller.signal});
    if(!alive.current||controller.signal.aborted||priceEpoch.current!==sequence||epoch.current!==requestEpoch||
       revision.current!==version||draftRef.current!==base)return;
    const merged=applyFoundPrices({...base,...response,pending_research:[]});
@@ -267,10 +267,12 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   const price_references=name===previousName?current.price_references:current.price_references?.filter(ref=>ref.material_name!==previousName);
   const provisional_prices=current.provisional_prices?.map((p,i)=>i===materialIndex&&name!==previousName?null:p);
   const research_status=name===previousName?current.research_status:current.research_status?.filter(item=>item.material_index!==materialIndex);
-  const next={...current,materials,missing,nameCorrections,price_references,provisional_prices,research_status};
+  const pending_research=current.pending_research?.filter(item=>name===previousName||item.material_index!==materialIndex)??[];
+  const next={...current,materials,missing,nameCorrections,price_references,provisional_prices,research_status,pending_research};
   setPriceDetailIndex(null);setUnmatchedDetailIndex(null);
   draftRef.current=next;parseBase.current=next;setDraft(next);
   reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");setCorrectionIndex(null);
+  if(pending_research.length)void enrichPrices(next,revision.current,epoch.current,"");
  }
  function adoptProvisional(index:number){
   const current=draftRef.current;
