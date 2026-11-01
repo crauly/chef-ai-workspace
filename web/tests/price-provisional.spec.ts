@@ -45,6 +45,27 @@ test("heuristic fires on explicit requests, never on stated prices", () => {
   expect(detectPriceResearch(["相場で入れて"], priced)).toEqual([]);
 });
 
+test("heuristic scopes to the named ingredient; wide requests cover all", () => {
+  const four = ["flour", "water", "salt", "saffron"].map(name =>
+    ({name, price_jpy: "", price_quantity: "", price_unit: ""}));
+  // A named request targets only that ingredient, so the route cap cannot
+  // eject it in favor of unrelated lines.
+  expect(detectPriceResearch(["check the price of saffron"], four).map(o => o.material_name))
+    .toEqual(["saffron"]);
+  const fourJa = ["小麦粉", "水", "塩", "サフラン"].map(name =>
+    ({name, price_jpy: "", price_quantity: "", price_unit: ""}));
+  expect(detectPriceResearch(["サフランの価格を調べて"], fourJa).map(o => o.material_name))
+    .toEqual(["サフラン"]);
+  // Explicit recipe-wide requests target every open line.
+  for (const turn of ["全食材の平均価格を調べて", "use the average price for all ingredients"]) {
+    expect(detectPriceResearch([turn], four).map(o => o.material_name))
+      .toEqual(["flour", "water", "salt", "saffron"]);
+  }
+  // Deictic with several open lines and no names: guess nothing.
+  expect(detectPriceResearch(["この食材の価格を調べておいて"], four)).toEqual([]);
+  expect(detectPriceResearch(["Find a reference price for this ingredient."], four)).toEqual([]);
+});
+
 test("grounded outcomes distinguish searched, empty, failure, and timeout", async () => {
   const ok = (body: unknown) => ({fetchImpl: (async () => Response.json(body)) as typeof fetch});
   expect((await runGroundedSearch({apiKey: "k", materialName: "pasta", request: "r", ...ok(grounded([CANDIDATE]))})).kind).toBe("found");
@@ -88,6 +109,37 @@ test("tool-run candidates with their own source URLs count as searched", async (
     {type: "message", role: "assistant", status: "completed", content: [
       {type: "output_text", text: "no prices found", annotations: []}]}]};
   expect((await runGroundedSearch({apiKey: "k", materialName: "pasta", request: "r", ...ok(prose)})).kind).toBe("not_searched");
+});
+
+test("fallback never averages an unsourced price on another row's URL", async () => {
+  const bare = (candidates: unknown) => ({status: "completed", output: [
+    {type: "web_search_call", status: "completed"},
+    {type: "message", role: "assistant", status: "completed", content: [
+      {type: "output_text", text: JSON.stringify({candidates}), annotations: []}]}]});
+  const ok = (b: unknown) => ({fetchImpl: (async () => Response.json(b)) as typeof fetch});
+  const unsourced = {...CANDIDATE};
+  delete (unsourced as {url?: string}).url;
+  // Unsourced price row + invalid row carrying a URL: no usable price, so
+  // the invalid row's URL must not authorize a "found".
+  const mixed = await runGroundedSearch({apiKey: "k", materialName: "pasta", request: "r",
+    ...ok(bare([unsourced, {url: "https://example.com/no-price"}]))});
+  expect(mixed.kind).toBe("empty");
+  // Sourced and unsourced rows together: only the sourced row counts.
+  const cheap = {...CANDIDATE};
+  delete (cheap as {url?: string}).url;
+  cheap.amount = "100";
+  const both = await runGroundedSearch({apiKey: "k", materialName: "pasta", request: "r",
+    ...ok(bare([CANDIDATE, cheap]))});
+  expect(both.kind).toBe("found");
+  if (both.kind === "found") {
+    expect(both.entry.average_unit_price).toBe("0.7600");
+    expect(both.entry.observation_count).toBe(1);
+    expect(both.entry.samples.map(x => x.amount)).toEqual(["380"]);
+  }
+  // A non-URL string is not source evidence.
+  const bogus = await runGroundedSearch({apiKey: "k", materialName: "pasta", request: "r",
+    ...ok(bare([{...CANDIDATE, url: "not a url"}]))});
+  expect(bogus.kind).toBe("not_searched");
 });
 
 test("omitted price_research still reaches grounding; provisional stays unapproved", async () => {
@@ -179,6 +231,47 @@ test("no request means no search, no provisional, no status", async () => {
     global.fetch = previousFetch;
     if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
     if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
+  }
+});
+
+test("named heuristic request survives the entry cap; only saffron is searched", async () => {
+  const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
+  const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
+  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
+  const previousFetch = global.fetch;
+  try {
+    const names = ["flour", "water", "salt", "サフラン"];
+    const muse = {title: "t",
+      materials: names.map(name => ({name, quantity: "100", unit: "g",
+        price_jpy: "", price_quantity: "", price_unit: "", supplier: ""})),
+      selling_price_jpy: "", notes: [], interpretations: [], price_research: []};
+    const saffron = {...CANDIDATE, name: "サフラン"};
+    let groundingCalls = 0;
+    global.fetch = (async (url: unknown) => {
+      if (String(url).includes("/v1/responses")) {
+        groundingCalls++;
+        return Response.json(grounded([saffron]));
+      }
+      return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(muse)}}]});
+    }) as typeof fetch;
+    const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
+      {turns: ["サフランの平均仕入価格を調べて"]}));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // Only the named ingredient is researched: one grounding call, and the
+    // three-entry cap cannot eject saffron for unrelated lines.
+    expect(groundingCalls).toBe(1);
+    expect(body.research_status).toEqual([{material_name: "サフラン", trigger: "heuristic",
+      ledger: "unavailable", web: "available", provisional: true}]);
+    expect(body.provisional_prices.map((x: {material_name: string} | null) => x?.material_name ?? null))
+      .toEqual([null, null, null, "サフラン"]);
+  } finally {
+    global.fetch = previousFetch;
+    if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
+    if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
+    if (base === undefined) delete process.env.FASTAPI_BASE_URL; else process.env.FASTAPI_BASE_URL = base;
+    if (token === undefined) delete process.env.DEMO_ACCESS_TOKEN; else process.env.DEMO_ACCESS_TOKEN = token;
   }
 });
 

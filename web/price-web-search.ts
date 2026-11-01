@@ -295,6 +295,22 @@ const SEARCH_INSTRUCTIONS =
   `Never invent prices from your own knowledge. ` +
   `When unsure, return {"candidates":[]}.`;
 
+/** A per-candidate source URL is usable only when it is a non-empty
+ * http(s) URL. In the citation-free fallback path every summarized row
+ * must carry its own: one row's URL must never substantiate another row's
+ * price. */
+export function hasUsableSourceUrl(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const u = (raw as Record<string, unknown>).url;
+  if (typeof u !== "string" || !u.trim()) return false;
+  try {
+    const parsed = new URL(u.trim());
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /** Discriminated grounding outcome. "found" and "empty" both searched;
  * "not_searched" means the tool never ran, or ran without any source
  * evidence (neither url_citation annotations nor candidate source URLs);
@@ -345,25 +361,26 @@ export async function runGroundedSearch(args: {
     if (!Array.isArray(list)) return {kind: "provider_error"};
     // Strict pass: tool ran with url_citation annotations. Fallback: the
     // tool ran and the model returned candidates that each carry their own
-    // source page URL (the shape live completed responses actually use).
-    // Anything else -- tool-request-only, citation-free prose, unparsable
-    // payload -- stays "not_searched" and never becomes a price.
+    // usable source URL (the shape live completed responses actually use).
+    // Unsourced rows are dropped BEFORE summarization, so one row's URL can
+    // never substantiate another row's price in the average. Anything else
+    // -- tool-request-only, citation-free prose, unparsable payload -- stays
+    // "not_searched" and never becomes a price.
     let sources = parsed.citations;
+    let rows: unknown[] = list;
     if (!parsed.searched) {
-      const sourced = list.some(c => !!c && typeof c === "object" && !Array.isArray(c) &&
-        typeof (c as Record<string, unknown>).url === "string" &&
-        ((c as Record<string, unknown>).url as string).trim().length > 0);
-      if (!parsed.toolRan || !sourced) return {kind: "not_searched"};
+      if (!parsed.toolRan) return {kind: "not_searched"};
+      rows = list.filter(hasUsableSourceUrl);
+      if (!rows.length) return {kind: "not_searched"};
       const seen = new Set(sources.map(c => c.url));
-      for (const c of list) {
-        if (!c || typeof c !== "object" || Array.isArray(c)) continue;
-        const u = (c as Record<string, unknown>).url;
-        if (typeof u !== "string" || !u.trim() || seen.has(u.trim())) continue;
-        seen.add(u.trim());
-        sources = [...sources, {url: u.trim().slice(0, 500), title: u.trim().slice(0, 200)}];
+      for (const c of rows) {
+        const u = ((c as Record<string, unknown>).url as string).trim();
+        if (seen.has(u)) continue;
+        seen.add(u);
+        sources = [...sources, {url: u.slice(0, 500), title: u.slice(0, 200)}];
       }
     }
-    const entry = summarizeGroundedCandidates(list, sources, materialName);
+    const entry = summarizeGroundedCandidates(rows, sources, materialName);
     return entry.status === "available" ? {kind: "found", entry} : {kind: "empty", entry};
   } catch (error) {
     // Abort (local timeout or caller cancellation) stays distinct from
