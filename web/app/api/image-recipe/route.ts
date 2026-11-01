@@ -63,12 +63,14 @@ Output only JSON with exactly title, materials, selling_price_jpy, notes, interp
   // Provenance enforcement (server-side, never prompt-only): a quantity,
   // unit, purchase price, or selling price counts as confirmed only when
   // the user's memo states that value for that ingredient row with its
-  // item marker adjacent (quantity unit, yen, selling-price mention).
-  // Anything the model filled in from the photo alone is reset to "" and
-  // recomputed into missing[], so a guessed number can never reach the
-  // save path as a confirmed fact. A bare numeric coincidence is not
-  // evidence: memo "ホールトマト200円" never confirms quantity "200",
-  // and "1200円" alone never confirms a selling price without a
+  // item marker adjacent (quantity unit, yen, selling-price mention) in
+  // the same ingredient description. Anything the model filled in from
+  // the photo alone is reset to "" and recomputed into missing[], so a
+  // guessed number can never reach the save path as a confirmed fact.
+  // A bare numeric coincidence is not evidence: memo "ホールトマト200円"
+  // never confirms quantity "200", and memo "トマト200g、オイル20g"
+  // never confirms a guessed トマト "20g" — that number belongs to
+  // オイル. "1200円" alone never confirms a selling price without a
   // selling-price mention. Units ride with their sibling number: a unit
   // without its quantity or price basis is meaningless and is reset as
   // well. Matching uses left token boundaries, so memo "2000g" never
@@ -76,24 +78,52 @@ Output only JSON with exactly title, materials, selling_price_jpy, notes, interp
   const esc=(v:string)=>v.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
   const QTY_UNIT="(?:g|kg|ml|l|L|グラム|キログラム|キロ|ミリリットル|リットル)";
   const YEN="(?:円|¥)";
-  // Row correspondence: the memo must mention the ingredient row, either
-  // by full name or by a name token (len>=2) split on common delimiters.
-  const rowMentioned=(name:string)=>{
-   if(hint===""||name==="")return false;
-   if(hint.includes(name))return true;
-   return name.split(/[\s　・（）()\[\]「」『』〈〉／\/,，、。·]+/).some(t=>t.length>=2&&hint.includes(t));
+  const SEG_BOUNDARY=/[、，。,\n。]/;
+  // Row mentions: every position where a known material row is named
+  // (full name, else len>=2 name tokens), so each number occurrence can
+  // be attributed to the row it actually describes.
+  const mentions:{pos:number;row:string}[]=[];
+  for(const mat of output.materials){
+   const name=mat.name;if(!name)continue;
+   const record=(token:string)=>{
+    let from=0;for(;;){const i=hint.indexOf(token,from);if(i<0)break;mentions.push({pos:i,row:name});from=i+1;}
+   };
+   if(hint.includes(name))record(name);
+   else for(const t of name.split(/[\s　・（）()\[\]「」『』〈〉／\/,，、。·]+/))if(t.length>=2)record(t);
+  }
+  mentions.sort((a,b)=>a.pos-b.pos);
+  // Row-item correspondence: each value+marker occurrence is attributed
+  // to the nearest preceding row mention (Japanese ellipsis keeps
+  // working: "ホールトマト200g、400gで300円" attributes all three
+  // numbers to ホールトマト). With no preceding mention, a following
+  // mention in the same segment counts ("200gのホールトマト"). A number
+  // whose owner is another row — or no row — confirms nothing.
+  const attributed=(row:string,value:string,marker:string)=>{
+   if(row===""||value===""||hint==="")return false;
+   const re=new RegExp(`(^|[^\\d.])${esc(value)}\\s*${marker}`,"g");
+   let m:RegExpExecArray|null;
+   while((m=re.exec(hint))){
+    const valuePos=m.index+m[1].length;
+    let owner:string|null=null;
+    for(const mention of mentions){if(mention.pos<=valuePos)owner=mention.row;else break;}
+    if(owner===null){
+     const next=mentions.find(mention=>mention.pos>=valuePos);
+     if(next&&![...hint.slice(valuePos,next.pos)].some(ch=>SEG_BOUNDARY.test(ch)))owner=next.row;
+    }
+    if(owner===row)return true;
+   }
+   return false;
   };
-  // Item correspondence: the number must appear with its item marker
-  // adjacent on the right (allowing whitespace), with a left token
-  // boundary so "2000g" cannot confirm "200".
-  const numBefore=(value:string,marker:string)=>{
+  const qtyStated=(name:string,value:string)=>attributed(name,value,QTY_UNIT);
+  const priceStated=(name:string,value:string)=>attributed(name,value,YEN);
+  const priceQtyStated=(name:string,value:string)=>attributed(name,value,QTY_UNIT);
+  const sellingStated=(value:string)=>{
    if(value===""||hint==="")return false;
-   return new RegExp(`(^|[^\\d.])${esc(value)}\\s*${marker}`).test(hint);
+   if(!/(売価|売値)/.test(hint))return false;
+   // Selling price is its own item, not an ingredient row: any
+   // yen-marked occurrence counts, independent of row attribution.
+   return new RegExp(`(^|[^\\d.])${esc(value)}\\s*${YEN}`).test(hint);
   };
-  const qtyStated=(name:string,value:string)=>rowMentioned(name)&&numBefore(value,QTY_UNIT);
-  const priceStated=(name:string,value:string)=>rowMentioned(name)&&numBefore(value,YEN);
-  const priceQtyStated=(name:string,value:string)=>rowMentioned(name)&&numBefore(value,QTY_UNIT);
-  const sellingStated=(value:string)=>value!==""&&hint!==""&&numBefore(value,YEN)&&/(売価|売値)/.test(hint);
   let stripped=false;
   const materials=output.materials.map(m=>{
    const keepQty=qtyStated(m.name,m.quantity);

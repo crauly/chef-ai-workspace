@@ -215,3 +215,40 @@ test("unrelated same numbers in the memo are not provenance evidence", async () 
     expect((await res4.json()).selling_price_jpy).toBe("1200");
   } finally { restore(); restoreFetch(); }
 });
+
+const MUSE_TWO_ROWS = {title: "トマトパスタ",
+  materials: [
+    {name: "トマト", quantity: "20", unit: "g", price_jpy: "", price_quantity: "", price_unit: "", supplier: ""},
+    {name: "オリーブオイル", quantity: "20", unit: "g", price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
+  selling_price_jpy: "", notes: [], interpretations: [], price_research: [],
+  name_corrections: []};
+
+test("numbers are attributed to their own row, never borrowed across rows", async () => {
+  const restore = withEnv();
+  const restoreFetch = upstreamProposal(MUSE_TWO_ROWS);
+  try {
+    // "20g" belongs to オリーブオイル: the model's トマト "20g" is rejected,
+    // オリーブオイル "20g" is kept. Row mention alone is not enough.
+    const res = await proposeImage(authed("http://localhost/api/image-recipe",
+      {image: PNG, text: "トマト200g、オリーブオイル20g"}));
+    const body = await res.json();
+    expect(body.materials[0].quantity).toBe("");
+    expect(body.materials[0].unit).toBe("");
+    expect(body.materials[1].quantity).toBe("20");
+    expect(body.materials[1].unit).toBe("g");
+    // Same number on two rows: each occurrence confirms its own row.
+    const res2 = await proposeImage(authed("http://localhost/api/image-recipe",
+      {image: PNG, text: "トマト20g、オリーブオイル20g"}));
+    const body2 = await res2.json();
+    expect(body2.materials[0].quantity).toBe("20");
+    expect(body2.materials[0].unit).toBe("g");
+    expect(body2.materials[1].quantity).toBe("20");
+    expect(body2.materials[1].unit).toBe("g");
+    // Ambiguous correspondence ("each") is fail-closed for the non-owner:
+    // "20g" sits with オリーブオイル, so トマト stays unresolved.
+    const res3 = await proposeImage(authed("http://localhost/api/image-recipe",
+      {image: PNG, text: "トマト、オリーブオイル各20g"}));
+    const body3 = await res3.json();
+    expect(body3.materials[0].quantity).toBe("");
+  } finally { restore(); restoreFetch(); }
+});

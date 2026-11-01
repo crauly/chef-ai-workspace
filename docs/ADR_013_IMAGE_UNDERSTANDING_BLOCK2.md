@@ -96,6 +96,10 @@ confirmation without an image-capable path.
   while the photo is in flight wins — the late photo result is
   discarded with an explicit message, never silently, and no
   revision/epoch bump is applied.
+- `web/tests/image-recipe.spec.ts` (+1, now 10): cross-row borrowing
+  rejected ("トマト200g、オリーブオイル20g" strips トマト "20g",
+  keeps オイル "20g"); same number on two rows confirms each owner;
+  ambiguous "各20g" stays fail-closed for the non-owner.
 - `web/tests/image-recipe.spec.ts` (+1, now 9): unrelated same numbers
   in the memo are not provenance — "200円" never confirms quantity
   "200", "200グラム" confirms "200"+"g" via unit alias, bare "1200円"
@@ -125,6 +129,15 @@ confirmation without an image-capable path.
    price bases, yen for purchase prices, yen + selling-price mention for
    selling prices). Left token boundaries still reject "2000g" ⇒ "200".
    Supplier/name stay untouched (identification hints, not measurements).
+3. Cross-row attribution: row and number were matched independently
+   against the whole memo, so "トマト200g、オイル20g" confirmed a
+   guessed トマト "20g". Each value+marker occurrence is now attributed
+   to the nearest preceding row mention (ellipsis keeps working:
+   "ホールトマト200g、400gで300円" attributes all three numbers to
+   ホールトマト; "200gのホールトマト" uses the following mention in the
+   same segment). Only an occurrence owned by the row confirms it;
+   ambiguous or foreign numbers stay unresolved. Selling price remains a
+   standalone item (yen + selling-price mention, no row binding).
 
 ## Open / verify on device
 - Large phone photos (multi-MB data URLs) against the body ceiling and
