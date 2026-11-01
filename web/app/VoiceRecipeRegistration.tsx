@@ -13,7 +13,7 @@ type PriceReference={material_name:string;status:string;origin?:"ledger"|"extern
 type ProvisionalPrice={material_index:number;material_name:string;origin:"ledger"|"external";price_jpy:string;price_quantity:string;price_unit:string;currency:string;observation_count:number;sources:{url:string;title:string}[];fetched_at:string|null;status:"provisional";approval:"unapproved";text:string};
 type ResearchStatus={material_name:string;trigger:"muse"|"heuristic";ledger:string;web:"not_attempted"|"available"|"empty"|"not_searched"|"provider_error"|"timeout"|"misconfigured";provisional:boolean};
 type Draft={title:string;materials:Ingredient[];selling_price_jpy:string;notes:string[];missing:string[];interpretations?:Interpretation[];price_references?:PriceReference[];provisional_prices?:Array<ProvisionalPrice|null>;research_status?:ResearchStatus[];nameCorrections?:NameCorrection[]};
-const validPrice=/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/;
+const validPrice=/^(?:0|[1-9]\d*)(?:\.\d+)?$/;
 function sourceUrl(url:string){try{const parsed=new URL(url);return parsed.protocol==="https:"?parsed.href:null;}catch{return null;}}
 function researchLabel(status:ResearchStatus,ja:boolean){
  const messages:Record<ResearchStatus["web"],[string,string]>={
@@ -62,6 +62,22 @@ export function toSaveMaterials(draft:Draft){
   price_unit:m.price_unit||null}));
 }
 
+function applyFoundPrices(draft:Draft):Draft{
+ const applied=new Set<number>();
+ const materials=draft.materials.map((m,index)=>{
+  const p=draft.provisional_prices?.[index];
+  if(!p||p.material_index!==index||p.material_name.trim()!==m.name.trim()||
+    p.status!=="provisional"||p.approval!=="unapproved"||p.currency!=="JPY"||
+    p.price_quantity!=="1"||!["g","ml"].includes(p.price_unit)||
+    !validPrice.test(p.price_jpy)||Number(p.price_jpy)<=0||
+    (m.price_jpy&&m.price_quantity&&m.price_unit))return m;
+  applied.add(index);
+  return {...m,price_jpy:p.price_jpy,price_quantity:p.price_quantity,price_unit:p.price_unit};
+ });
+ if(!applied.size)return draft;
+ const missing=draft.missing.filter(item=>!draft.materials.some((m,i)=>applied.has(i)&&item===m.name+PRICE_SUFFIX));
+ return {...draft,materials,missing};
+}
 export type RegistrationHandle={submit:(text:string,meta?:VoiceCaptureMeta)=>void;hasPending:()=>boolean;isSaving:()=>boolean;suspend:()=>void;requestReview:()=>void};
 export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,control,sharedVoice}:{locale:Locale;onCreated:(recipe:Recipe,mode:SaveMode,suppliers:string[])=>void;onDiscarded?:()=>void;control?:Ref<RegistrationHandle>;sharedVoice?:{markReview:()=>number;cancel:()=>void;captureMessage:string}}){
  const ja=locale==="ja";
@@ -108,11 +124,13 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   logVoiceEvent("muse.start",`${turnsToSend.length} new turns${usePrevious?"+draft":""}`,traceId);say("Museが料理の文脈・数量・価格を解釈しています…");
   try{
    const out=await request<Draft>("/api/voice-recipe",{method:"POST",body:JSON.stringify(usePrevious?{turns:turnsToSend,previous:usePrevious}:{turns:next}),signal:aborter.signal});
-   parsedTurns.current=next.length;parseBase.current=out;
+   parsedTurns.current=next.length;
    if(!alive.current||epoch.current!==current||revision.current!==version){logVoiceEvent("muse.ok","stale result ignored",traceId);return;}
+   const enriched=applyFoundPrices(out);
+   parseBase.current=enriched;
    logVoiceEvent(draftRef.current?"draft.updated":"draft.created", "voice-recipe",traceId);
-   setCorrectionIndex(null);draftRef.current=out;setDraft(out);reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
-   say(out.missing.length||out.notes.length?(ja?"確認が必要です："+[...out.missing,...out.notes].join("、"):"Needs review: "+[...out.missing,...out.notes].join(", ")):
+   setCorrectionIndex(null);draftRef.current=enriched;setDraft(enriched);reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
+   say(enriched.missing.length||enriched.notes.length?(ja?"確認が必要です："+[...enriched.missing,...enriched.notes].join("、"):"Needs review: "+[...enriched.missing,...enriched.notes].join(", ")):
     (ja?"下書きを更新しました。内容を確認し、「保存してください」と話すか、確認ボタンを押してください。":"Draft updated. Review it, then explicitly approve saving."));
   }catch{
    if(alive.current&&epoch.current===current&&revision.current===version&&!aborter.signal.aborted){
@@ -270,7 +288,8 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
      {provisional&&canApply&&<div className="rounded-xl border border-current/20 p-3">
       <div><strong>{ja?"参考価格（仮設定候補）":"Provisional reference price"}</strong> — ¥{provisional.price_jpy} / {provisional.price_quantity}{provisional.price_unit}</div>
       <p className="muted">{provisional.origin==="external"?(ja?"Web検索":"Web research"):(ja?"仕入履歴":"Purchase ledger")} ・ {provisional.observation_count}{ja?"件のサンプル":" samples"}{provisional.fetched_at?` ・ ${provisional.fetched_at}`:""}</p>
-      <button type="button" disabled={busy||phase==="saving"||priced} onClick={()=>adoptProvisional(index)}>{priced?(ja?"価格設定済み":"Price set"):(ja?"参考価格を下書きに採用":"Apply reference price to draft")}</button>
+      <p className="muted">{priced?(ja?"下書き価格に仮反映済み（保存前に内容を確認してください）":"Provisional price applied to draft; review before saving"):(ja?"参考価格を確認して採用できます":"Review and apply this reference price")}</p>
+      {!priced&&<button type="button" disabled={busy||phase==="saving"} onClick={()=>adoptProvisional(index)}>{ja?"参考価格を下書きに採用":"Apply reference price to draft"}</button>}
       {provisional.sources?.length>0&&<details><summary>{ja?"価格の出典":"Price sources"}</summary><ul>{provisional.sources.map((source,i)=>sourceUrl(source.url)?<li key={i}><a href={sourceUrl(source.url)!} target="_blank" rel="noopener noreferrer">{source.title||source.url}</a></li>:null)}</ul></details>}
      </div>}
     </li>;})}</ul>
@@ -298,7 +317,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
      {ref.origin==="external"&&ref.fetched_at&&<p className="muted">{ja?"調査日時":"Researched at"}: {ref.fetched_at}</p>}
      {ref.origin==="external"&&Boolean(ref.sources?.length)&&<ul>{ref.sources?.filter(source=>{try{return new URL(source.url).protocol==="https:";}catch{return false;}}).map((source,i)=><li key={`${source.url}-${i}`}><a href={source.url} target="_blank" rel="noopener noreferrer">{source.title||source.url}</a></li>)}</ul>}
     </li>)}</ul>
-    <p className="muted">{ja?"参考価格を使う場合は、食材行の「参考価格を下書きに採用」を押し、内容を確認してから保存を承認してください。":"To use a reference price, apply it on its ingredient row, then review and approve saving."}</p>
+    <p className="muted">{ja?"参考価格を取得できた食材は下書き価格へ仮反映しています。価格と出典を確認してからレシピ全体の保存を承認してください。":"Found reference prices are provisionally applied to draft lines. Review prices and sources before approving recipe save."}</p>
    </section>}
    {draft.missing.length>0&&<p role="alert">不足情報：{draft.missing.join("、")}</p>}
    {draft.notes.length>0&&<p role="alert">要確認：{draft.notes.join("、")}</p>}
