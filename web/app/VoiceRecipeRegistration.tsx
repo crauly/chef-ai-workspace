@@ -80,7 +80,10 @@ function applyFoundPrices(draft:Draft):Draft{
  return {...draft,materials,missing};
 }
 export type RegistrationHandle={submit:(text:string,meta?:VoiceCaptureMeta)=>void;hasPending:()=>boolean;isSaving:()=>boolean;suspend:()=>void;requestReview:()=>void};
-export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,control,sharedVoice}:{locale:Locale;onCreated:(recipe:Recipe,mode:SaveMode,suppliers:string[])=>void;onDiscarded?:()=>void;control?:Ref<RegistrationHandle>;sharedVoice?:{markReview:()=>number;cancel:()=>void;captureMessage:string}}){
+// Live microphone signals owned by the workspace (single mic). Display only:
+// recording = mic open, transcribing = batch transcription in flight/backlogged.
+export type SharedMicStatus={recording:boolean;transcribing:boolean;queued:number};
+export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,control,sharedVoice}:{locale:Locale;onCreated:(recipe:Recipe,mode:SaveMode,suppliers:string[])=>void;onDiscarded?:()=>void;control?:Ref<RegistrationHandle>;sharedVoice?:{markReview:()=>number;cancel:()=>void;captureMessage:string;mic?:SharedMicStatus}}){
  const ja=locale==="ja";
  const [busy,setBusy]=useState(false),[turns,setTurns]=useState<string[]>([]),[draft,setDraft]=useState<Draft|null>(null);
  const [phase,setPhase]=useState<"dictating"|"review"|"saving">("dictating");
@@ -90,6 +93,11 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  const [priceDetailIndex,setPriceDetailIndex]=useState<number|null>(null);
  const [unmatchedDetailIndex,setUnmatchedDetailIndex]=useState<number|null>(null);
  const [priceLoading,setPriceLoading]=useState(false);
+ // Pipeline status (drives the status list; each flag is set only while its
+ // own stage actually runs, and failure latches clear on retry/success):
+ // parsing = Muse voice-recipe in flight, parseFailed = last parse failed,
+ // priceFailed = last price research failed while the draft was retained.
+ const [parsing,setParsing]=useState(false),[parseFailed,setParseFailed]=useState(false),[priceFailed,setPriceFailed]=useState(false);
  const dataTurns=useRef<string[]>([]),draftRef=useRef<Draft|null>(null),reviewed=useRef<Draft|null>(null);
  const phaseRef=useRef<"dictating"|"review"|"saving">("dictating");
  const approvalEpoch=useRef(0);
@@ -117,7 +125,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  function say(text:string){if(alive.current)setMessage(ja?text:(englishMessages[text]??text));}
  function clear(){
   if(phaseRef.current==="saving")return;
-  epoch.current++;revision.current++;semanticAbort.current?.abort();priceAbort.current?.abort();priceEpoch.current++;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);voice.cancel();inbox.current=[];
+  epoch.current++;revision.current++;semanticAbort.current?.abort();priceAbort.current?.abort();priceEpoch.current++;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);setParsing(false);setParseFailed(false);setPriceFailed(false);voice.cancel();inbox.current=[];
   setCorrectionIndex(null);setPriceDetailIndex(null);setUnmatchedDetailIndex(null);dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);requestId.current=null;
   setStage("dictating");logVoiceEvent("draft.discarded.explicit","explicit cancel",clearTrace.current);clearTrace.current="";onDiscarded?.();say("下書きを破棄しました。新しいレシピを話してください。");
  }
@@ -145,13 +153,19 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   // successfully parsed draft as context, instead of reprocessing history.
   const previous=parseBase.current;
   const fresh=next.slice(parsedTurns.current);
-  const turnsToSend=fresh.length?fresh:next.slice(-30);
+  // Without a previously parsed draft there is no revision context, so a
+  // follow-up that arrived mid-parse must resend full history (up to the
+  // 30-turn window), never just its own delta. Otherwise the earlier
+  // utterance is never interpreted at all.
+  const turnsToSend=fresh.length&&previous?fresh:next.slice(-30);
   const usePrevious=previous&&fresh.length?previous:null;
-  logVoiceEvent("muse.start",`${turnsToSend.length} new turns${usePrevious?"+draft":""}`,traceId);say(ja?"レシピを解析中です。価格調査を依頼した場合は続けて検索します…":"Interpreting recipe and checking requested prices…");
+  logVoiceEvent("muse.start",`${turnsToSend.length} new turns${usePrevious?"+draft":""}`,traceId);if(alive.current){setParseFailed(false);setParsing(true);}say(ja?"レシピを解析中です。価格調査を依頼した場合は続けて検索します…":"Interpreting recipe and checking requested prices…");
   try{
    const out=await request<Draft>("/api/voice-recipe",{method:"POST",body:JSON.stringify(usePrevious?{turns:turnsToSend,previous:usePrevious,defer_prices:true}:{turns:next,defer_prices:true}),signal:aborter.signal});
-   parsedTurns.current=next.length;
    if(!alive.current||epoch.current!==current||revision.current!==version){logVoiceEvent("muse.ok","stale result ignored",traceId);return;}
+   // Advance only for the applied result: a stale response must not move the
+   // cursor, or the next parse would skip turns the stale one never applied.
+   parsedTurns.current=next.length;
    const enriched=applyFoundPrices(out);
    parseBase.current=enriched;
    logVoiceEvent(draftRef.current?"draft.updated":"draft.created", "voice-recipe",traceId);
@@ -205,6 +219,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   }catch{
    if(alive.current&&epoch.current===current&&revision.current===version&&!aborter.signal.aborted){
     logVoiceEvent("muse.fail","voice-recipe failed; draft kept",traceId);
+    setParseFailed(true);
     say("料理の解釈に失敗しました。保存していません。「解析を再試行」か補助入力で再開できます。");
     const stash=priceStash.current;
     const candidate=draftRef.current ?? parseBase.current;
@@ -222,6 +237,9 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
      priceStash.current=null;priceFlight.current=null;priceAbort.current=null;setPriceLoading(false);
     }
    }
+  }finally{
+   // Display flag only: button disabling stays on busy/draining.
+   if(alive.current)setParsing(false);
   }
  }
  async function enrichPrices(base:Draft,version:number,requestEpoch:number,traceId:string){
@@ -233,7 +251,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   priceAbort.current?.abort();
   const controller=new AbortController();priceAbort.current=controller;
   priceFlight.current={key,rows};
-  setPriceLoading(true);
+  setPriceLoading(true);setPriceFailed(false);
   logVoiceEvent("price.start",`${entries.length} entries`,traceId);
   let stashed=false;
   try{
@@ -286,7 +304,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     // same invalidation as the success path, otherwise save() would
     // silently no-op with the approval button still enabled.
     reviewed.current=null;reviewMode.current=null;requestId.current=null;
-    setStage("dictating");
+    setStage("dictating");setPriceFailed(true);
     logVoiceEvent("price.fail","price research failed; draft retained",traceId);
    }
   }finally{
@@ -428,6 +446,21 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   <p aria-live="polite">{voice.recording?"聞き取り中… ":""}{voice.busy?"音声を文字にしています…":""}</p>
   {voice.error&&<p role="alert">{voice.error}</p>}
   {voice.supported===false&&<p>{ja?"音声入力を利用できません。補助入力を使用してください。":"Voice input is unavailable. Use manual input."}</p>}</>}
+  {(()=>{
+   // Status rows mirror live pipeline flags only: nothing is shown as running
+   // before it starts, and voice vs. price stages stay independent.
+   const mic=sharedVoice?.mic??{recording:capture.recording,transcribing:capture.busy||capture.queued>0,queued:capture.queued};
+   const rows:{key:string;active:boolean;text:string}[]=[
+    {key:"listen",active:mic.recording&&!mic.transcribing&&!parsing,text:ja?"音声受付中…":"Receiving audio…"},
+    {key:"transcribe",active:mic.transcribing,text:ja?`文字起こし中…${mic.queued>0?`（ほか${mic.queued}件処理待ち）`:""}`:`Transcribing…${mic.queued>0?` (${mic.queued} queued)`:""}`},
+    {key:"parse",active:parsing,text:ja?"レシピ解析中…":"Analyzing recipe…"},
+    {key:"price",active:priceLoading,text:ja?"価格検索中…":"Searching prices…"},
+    {key:"parse-fail",active:parseFailed&&!parsing,text:ja?"解析に失敗しました。下書きは保持しています。":"Analysis failed. The draft is kept."},
+    {key:"price-fail",active:priceFailed&&!priceLoading,text:ja?"価格検索に失敗しました。下書きは保持しています。":"Price search failed. The draft is kept."},
+    {key:"done",active:!mic.transcribing&&!parsing&&!priceLoading&&!parseFailed&&!priceFailed&&turns.length>0&&draft!==null,text:ja?"処理完了：下書きに反映しました。":"Done: reflected in the draft."},
+   ].filter(row=>row.active);
+   return rows.length?<ul className="voice-status-list" role="status" aria-live="polite" aria-label={ja?"処理状況":"Processing status"}>{rows.map(row=><li key={row.key}>{["listen","transcribe","parse","price"].includes(row.key)?<span className="voice-spin" aria-hidden="true"/>:null}{row.text}</li>)}</ul>:null;
+  })()}
   <p aria-live="polite" role="status">{busy?(ja?"処理中 ⏳ ":"Working ⏳ "):""}{message}</p>
   {!sharedVoice&&<form onSubmit={event=>{event.preventDefault();if(manual.trim()){enqueue(manual);setManual("");}}}>
    <input aria-label={ja?"音声認識できない場合の入力":"Manual input when voice recognition is unavailable"} value={manual} onChange={event=>setManual(event.target.value)} placeholder={ja?"音声認識できないときの補助入力":"Type when voice recognition is unavailable"} disabled={phase==="saving"}/>

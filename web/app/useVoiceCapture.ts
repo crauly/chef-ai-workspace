@@ -42,6 +42,9 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
   const [recording, setRecording] = useState(false), [busy, setBusy] = useState(false);
   const [supported, setSupported] = useState<boolean | null>(null), [error, setError] = useState("");
   const [notice,setNotice]=useState("");
+  // Buffered utterances waiting for a free transcription slot. Exposed so
+  // status UI can show transcribing/backlog states tied to actual activity.
+  const [queued,setQueued]=useState(0);
   // Monotonic failure counter: identical messages from distinct fragments must
   // each raise an audible cue, so the UI keys announcements on tick, not text.
   const [errorTick,setErrorTick]=useState(0);
@@ -68,6 +71,7 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
     let stream: MediaStream | undefined, context: AudioContext | undefined, node: AudioWorkletNode | undefined;
     let frames: Float32Array[] = [], samples = 0, silent = 0, voiced = false;
     let speechReviewEpoch = 0;
+    let deferredLogged = -1;
     let pending = Promise.resolve(), requests = 0, closed = false;
     // Accepted audio waiting for a free transcription slot. Ordered FIFO and
     // bounded to 60 buffered seconds at the captured sample rate, so a slow
@@ -94,6 +98,7 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
     };
     const refreshBacklogNotice = () => {
       if (!mounted.current) return;
+      setQueued(backlog.depth);
       if (backlog.depth)
         setNotice(locale === "ja" ? `受信済みの音声${backlog.depth}件を順に文字にしています。話し続けられます。下書きは保持しています。` : `Transcribing ${backlog.depth} buffered utterance(s). Keep talking; the draft is retained.`);
       else setNotice("");
@@ -162,7 +167,7 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
     const submit = () => {
       if (!voiced || !frames.length || !context) {frames = []; samples = 0; silent = 0; voiced = false; return;}
       const batch = frames, rate = context.sampleRate, capturedReview = speechReviewEpoch;
-      frames = []; samples = 0; silent = 0; voiced = false;
+      frames = []; samples = 0; silent = 0; voiced = false; deferredLogged = -1;
       // Buffer instead of pausing capture: the mic stays open and buffered
       // utterances transcribe in capture order as slots free up.
       if (backlog.depth || requests >= 3) {
@@ -196,8 +201,22 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
         // Keep a short lead-in; never upload an idle microphone.
         if (!voiced && samples > rate * 0.3) {samples -= frames.shift()!.length;}
         // Local silence detection only delimits audio. Muse does all transcription.
-        if (voiced && ((silent >= rate * VOICE_SILENCE_MS / 1000&&requests<2) || samples >= rate * 29)) {
-          submit(); if (!continuous) cleanup();
+        // Silence cuts pause while two transcriptions are already in flight:
+        // submit() routes overflow into the bounded FIFO backlog, so a brief
+        // lag coalesces instead of fanning out into parallel uploads.
+        // Diagnosis, not guessing: a suppressed cut logs capture.endpoint.deferred
+        // with the merged seconds, and the 29s cap logs capture.endpoint.forced,
+        // so a real-device run can attribute a lost batch to merge pressure or
+        // to one oversized request.
+        const quiet = silent >= rate * VOICE_SILENCE_MS / 1000, oversized = samples >= rate * 29;
+        if (voiced && (quiet || oversized)) {
+          if (quiet && !oversized && requests >= 2) {
+            const merged = Math.floor(samples / rate);
+            if (merged !== deferredLogged) { deferredLogged = merged; logVoiceEvent("capture.endpoint.deferred", `${merged}s merged/${requests} in flight`); }
+          } else {
+            if (oversized) logVoiceEvent("capture.endpoint.forced", `${(samples / rate).toFixed(1)}s batch`);
+            submit(); if (!continuous) cleanup();
+          }
         }
       };
       stream.getTracks().forEach(track => {track.onended = () => {if (!closed && valid()) {logVoiceEvent("capture.disconnect", "microphone track ended");
@@ -207,5 +226,5 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
       if (valid()) {abort(); fail(locale === "ja" ? "マイクを開始できません。権限と対応ブラウザを確認してください。" : "Could not start microphone. Check permission and browser support.");}
     }
   }
-  return {recording, busy, supported, error,errorTick,notice, start, stop, cancel, markReview};
+  return {recording, busy, supported, error,errorTick,notice,queued, start, stop, cancel, markReview};
 }

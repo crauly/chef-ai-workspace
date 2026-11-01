@@ -237,7 +237,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
     </details>
    </section>}
   </section>
-  <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} onDiscarded={()=>setDraftPending(false)} sharedVoice={{markReview:mark,cancel:()=>{},captureMessage:micRecording?"音声受付中です。確認後は「登録」「登録してください」でも保存できます。":micBusy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${micError||micNotice||""}`}} onCreated={(recipe,mode,suppliers)=>{
+  <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} onDiscarded={()=>setDraftPending(false)} sharedVoice={{markReview:mark,cancel:()=>{},mic:realtimeActive?{recording:realtime.recording,transcribing:false,queued:0}:{recording:voice.recording,transcribing:voice.busy||voice.queued>0,queued:voice.queued},captureMessage:micRecording?"音声受付中です。確認後は「登録」「登録してください」でも保存できます。":micBusy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${micError||micNotice||""}`}} onCreated={(recipe,mode,suppliers)=>{
    // The spoken purchase source survives as a memo in this always-visible
   // region (the registration panel hides in browse mode). Formal linkage
   // reuses the ledger path behind the Human Gate; nothing auto-registers.
