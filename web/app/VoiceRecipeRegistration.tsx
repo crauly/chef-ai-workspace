@@ -8,7 +8,9 @@ import {logVoiceEvent} from "./voice-diagnostics";
 
 type Ingredient={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string;supplier:string};
 type Interpretation={source:string;suggestion:string;reason:string};
-type Draft={title:string;materials:Ingredient[];selling_price_jpy:string;notes:string[];missing:string[];interpretations?:Interpretation[];nameCorrections?:{material_name:string;heard:string;candidates:{name:string;reason:string}[]}[]};
+type NameCorrection={material_name:string;heard:string;candidates:{name:string;reason:string}[]};
+type PriceReference={material_name:string;status:string;ingredient_name?:string;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null;text:string};
+type Draft={title:string;materials:Ingredient[];selling_price_jpy:string;notes:string[];missing:string[];interpretations?:Interpretation[];price_references?:PriceReference[];nameCorrections?:NameCorrection[]};
 type Input={text:string;command:VoiceCommand;revision:number;approval:Draft|null;traceId:string};
 export type SaveMode="confirmed"|"unconfirmed";
 // Missing-entry kinds mirror web/app/api/voice-recipe/route.ts. Only a draft
@@ -53,6 +55,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  const [phase,setPhase]=useState<"dictating"|"review"|"saving">("dictating");
  const [message,setMessage]=useState(ja?"料理名・食材・分量・仕入単価を話してください。":"Describe the recipe, quantities and purchase prices.");
  const [manual,setManual]=useState("");
+ const [correctionIndex,setCorrectionIndex]=useState<number|null>(null);
  const dataTurns=useRef<string[]>([]),draftRef=useRef<Draft|null>(null),reviewed=useRef<Draft|null>(null);
  const phaseRef=useRef<"dictating"|"review"|"saving">("dictating");
  const approvalEpoch=useRef(0);
@@ -72,7 +75,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  function clear(){
   if(phaseRef.current==="saving")return;
   epoch.current++;revision.current++;semanticAbort.current?.abort();voice.cancel();inbox.current=[];
-  dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);requestId.current=null;
+  setCorrectionIndex(null);dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);requestId.current=null;
   setStage("dictating");logVoiceEvent("draft.discarded.explicit","explicit cancel",clearTrace.current);clearTrace.current="";onDiscarded?.();say("下書きを破棄しました。新しいレシピを話してください。");
  }
  const parsedTurns=useRef(0);
@@ -94,7 +97,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    parsedTurns.current=next.length;parseBase.current=out;
    if(!alive.current||epoch.current!==current||revision.current!==version){logVoiceEvent("muse.ok","stale result ignored",traceId);return;}
    logVoiceEvent(draftRef.current?"draft.updated":"draft.created", "voice-recipe",traceId);
-   draftRef.current=out;setDraft(out);reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
+   setCorrectionIndex(null);draftRef.current=out;setDraft(out);reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
    say(out.missing.length||out.notes.length?(ja?"確認が必要です："+[...out.missing,...out.notes].join("、"):"Needs review: "+[...out.missing,...out.notes].join(", ")):
     (ja?"下書きを更新しました。内容を確認し、「保存してください」と話すか、確認ボタンを押してください。":"Draft updated. Review it, then explicitly approve saving."));
   }catch{
@@ -180,6 +183,23 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    draining.current=false;if(alive.current)setBusy(false);if(inbox.current.length)void drain();
   });
  }
+ function chooseName(index:number,name:string){
+  const current=draftRef.current;
+  if(!current||phaseRef.current==="saving")return;
+  const entry=current.nameCorrections?.[index];
+  if(!entry)return;
+  const materialIndex=current.materials.findIndex(m=>m.name===entry.material_name);
+  if(materialIndex<0)return;
+  const previousName=current.materials[materialIndex].name;
+  const materials=current.materials.map((m,i)=>i===materialIndex?{...m,name}:m);
+  const missing=current.missing.map(text=>text.startsWith(previousName+"の仕入単価")?name+text.slice(previousName.length):text);
+  const nameCorrections=current.nameCorrections?.filter((_,i)=>i!==index);
+  // A price lookup for the old ingredient name cannot safely be carried over.
+  const price_references=name===previousName?current.price_references:current.price_references?.filter(ref=>ref.material_name!==previousName);
+  const next={...current,materials,missing,nameCorrections,price_references};
+  draftRef.current=next;parseBase.current=next;setDraft(next);
+  reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");setCorrectionIndex(null);
+ }
  const eligible=draftRef.current?saveModeFor(draftRef.current):null;
  return <section className="card" aria-label={ja?"音声レシピ一括登録":"Voice recipe registration"}>
   <h2>{ja?"音声でレシピを一括登録":"Full recipe by voice"}</h2>
@@ -205,6 +225,29 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    {draft.interpretations?.map((item,index)=><p key={index}>料理の文脈からの解釈案：{item.source} → {item.suggestion}（{item.reason}）</p>)}
    <p>{ja?"売価：":"Selling price: "}{draft.selling_price_jpy?("¥"+draft.selling_price_jpy):(ja?"未設定（売価なしでも保存できます）":"Not set (optional)")}</p>
    <ul>{draft.materials.map((material,index)=>{const priced=Boolean(material.price_jpy&&material.price_quantity&&material.price_unit);return <li key={index}>{material.name||(ja?"食材名不明":"Unnamed ingredient")}: {material.quantity||"?"}{material.unit} ／ {priced?`${ja?"仕入単価":"Purchase price"} ¥${material.price_jpy} / ${material.price_quantity}${material.price_unit}`:(ja?"仕入単価 未確定（推測しません）":"Purchase price unconfirmed (not estimated)")}{material.supplier?` / ${ja?"仕入先":"Supplier"}: ${material.supplier}`:""}</li>;})}</ul>
+   {draft.nameCorrections?.map((entry,index)=><div key={index} className="name-correction-row">
+    <span>{ja?"食材名の補正候補":"Ingredient name suggestion"}: {entry.material_name}</span>
+    <button type="button" disabled={busy||phase==="saving"} onClick={()=>setCorrectionIndex(index)}>{ja?"候補を選択":"Choose name"}</button>
+   </div>)}
+   {correctionIndex!==null&&draft.nameCorrections?.[correctionIndex]&&<div className="name-choice-overlay" onClick={()=>setCorrectionIndex(null)}>
+    <section role="dialog" aria-modal="true" aria-label={ja?"食材名を選択":"Choose ingredient name"} className="name-choice-dialog" onClick={e=>e.stopPropagation()}>
+     <h4>{ja?"食材名を選択":"Choose ingredient name"}</h4>
+     <p>{ja?"音声認識結果とAIの候補を比較してください。":"Compare the recognized phrase with AI suggestions."}</p>
+     <div className="name-choice-options">
+      <button type="button" onClick={()=>chooseName(correctionIndex,draft.nameCorrections![correctionIndex].heard||draft.nameCorrections![correctionIndex].material_name)}>{ja?"音声認識の原文":"Original recognition"}: {draft.nameCorrections[correctionIndex].heard||draft.nameCorrections[correctionIndex].material_name}</button>
+      {draft.nameCorrections[correctionIndex].candidates.map((c,i)=><button key={i} type="button" onClick={()=>chooseName(correctionIndex,c.name)}>{ja?`候補${i+1}`:`Suggestion ${i+1}`}: {c.name}<small>{c.reason}</small></button>)}
+     </div>
+     <button type="button" onClick={()=>setCorrectionIndex(null)}>{ja?"閉じる":"Close"}</button>
+    </section>
+   </div>}
+   {Boolean(draft.price_references?.length)&&<section className="rounded-xl border border-current/20 p-3" aria-label={ja?"参考価格の調査結果":"Reference price research"}>
+    <h4>{ja?"参考価格（未確定）":"Reference prices (unconfirmed)"}</h4>
+    <ul>{draft.price_references?.map((ref,index)=><li key={`${ref.material_name}-${index}`}>
+     <strong>{ref.material_name}</strong>{ref.ingredient_name&&ref.ingredient_name!==ref.material_name?` — ${ref.ingredient_name}`:""}
+     <p>{ref.text}</p>
+    </li>)}</ul>
+    <p className="muted">{ja?"参考情報です。正式な仕入価格には自動反映しません。実際の価格を確認できた場合は音声で価格・数量・単位を伝えてください。不明な場合は価格未確定として確認できます。":"For reference only; not applied as a confirmed purchase price. To set a known price, dictate its amount, quantity and unit. Otherwise review and save with unconfirmed prices."}</p>
+   </section>}
    {draft.missing.length>0&&<p role="alert">不足情報：{draft.missing.join("、")}</p>}
    {draft.notes.length>0&&<p role="alert">要確認：{draft.notes.join("、")}</p>}
    <p>{phase==="review"?(reviewMode.current==="unconfirmed"?(ja?"確認待ち（価格未確定）：数量は確定、価格は未確定として保存します。よければ明示承認してください。":"Pending review: quantities are confirmed, but purchase prices are unconfirmed. Explicitly approve to save."):(ja?"確認待ち：内容が正しければ、保存を明示承認してください。":"Pending review: explicitly approve saving if the details are correct.")):(ja?"まだ保存されていません。":"Not saved yet.")}</p>
