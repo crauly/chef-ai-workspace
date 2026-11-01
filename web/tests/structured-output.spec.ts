@@ -188,13 +188,18 @@ test("supplier is extracted without guessing; revision reuses the previous draft
     }) as typeof fetch;
     const previous = {title: "テスト", materials: [{name: "ディチェコ パスタ", quantity: "100",
       unit: "g", price_jpy: "350", price_quantity: "500", price_unit: "g", supplier: "築地場外"}],
-      selling_price_jpy: "", notes: [], interpretations: []};
+      selling_price_jpy: "", notes: [], interpretations: [],
+      nameCorrections: [{material_name: "ディチェコ パスタ", heard: "デチェコパスタ",
+        candidates: [{name: "ディチェコ パスタ", reason: "ASR phonetic match"}]}]};
     const revised = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["あと卵50g"], previous}));
     expect(revised.status).toBe(200);
     const sent = JSON.parse(sentBody).messages[1];
     expect(Object.keys(JSON.parse(sent.content)).sort()).toEqual(["new_turns", "previous_draft"]);
     expect(JSON.parse(sent.content).new_turns).toEqual(["あと卵50g"]);
+    // Unrelated follow-up keeps the unresolved correction context.
+    expect(JSON.parse(sent.content).previous_draft.name_corrections).toEqual(
+      previous.nameCorrections);
     expect((await revised.json()).materials).toHaveLength(2);
     // Malformed previous draft fails closed without calling the provider.
     global.fetch = (async () => Response.json({choices: []})) as typeof fetch;

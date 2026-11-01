@@ -8,7 +8,7 @@ import {logVoiceEvent} from "./voice-diagnostics";
 
 type Ingredient={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string;supplier:string};
 type Interpretation={source:string;suggestion:string;reason:string};
-type Draft={title:string;materials:Ingredient[];selling_price_jpy:string;notes:string[];missing:string[];interpretations?:Interpretation[]};
+type Draft={title:string;materials:Ingredient[];selling_price_jpy:string;notes:string[];missing:string[];interpretations?:Interpretation[];nameCorrections?:{material_name:string;heard:string;candidates:{name:string;reason:string}[]}[]};
 type Input={text:string;command:VoiceCommand;revision:number;approval:Draft|null;traceId:string};
 export type SaveMode="confirmed"|"unconfirmed";
 // Missing-entry kinds mirror web/app/api/voice-recipe/route.ts. Only a draft
