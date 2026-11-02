@@ -46,11 +46,19 @@ class CostTests(unittest.TestCase):
         line = MaterialLine("m1", known("海老"), known("3"), "尾", price_override=quote("300", "100", "g"))
         self.assertTrue(calculate_cost(recipe(line)).partial)
 
-    def test_override_and_adjustment(self):
-        line = MaterialLine("m1", known("海老"), known("3"), "尾", ingredient_id="i1", price_override=quote("150"), price_mode="override")
-        result = calculate_cost(recipe(line, adjustment="50"), {"i1": Ingredient("i1", "別の海老", quote("10"))})
-        self.assertEqual(result.total_cost_jpy, Decimal("500"))
-        self.assertEqual(result.line_price_sources["m1"], "line_override")
+    def test_linked_ingredient_cannot_override_shared_price(self):
+        with self.assertRaisesRegex(ValueError, "shared master pricing"):
+            MaterialLine("m1", known("海老"), known("3"), "尾", ingredient_id="i1", price_override=quote("150"), price_mode="override")
+
+    def test_shared_price_applies_to_all_linked_recipes(self):
+        line_a = MaterialLine("m1", known("海老"), known("3"), "尾", ingredient_id="i1", price_mode="inherit")
+        line_b = MaterialLine("m2", known("海老"), known("2"), "尾", ingredient_id="i1", price_mode="inherit")
+        initial = {"i1": Ingredient("i1", "共通の海老", quote("150"))}
+        updated = {"i1": Ingredient("i1", "共通の海老", quote("200"))}
+        self.assertEqual(calculate_cost(recipe(line_a), initial).total_cost_jpy, Decimal("450"))
+        self.assertEqual(calculate_cost(recipe(line_b), initial).total_cost_jpy, Decimal("300"))
+        self.assertEqual(calculate_cost(recipe(line_a), updated).total_cost_jpy, Decimal("600"))
+        self.assertEqual(calculate_cost(recipe(line_b), updated).total_cost_jpy, Decimal("400"))
 
     def test_rounding(self):
         line = MaterialLine("m1", known("海老"), known("1"), "尾", price_override=quote("1", "3"))
