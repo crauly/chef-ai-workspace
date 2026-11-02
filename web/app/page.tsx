@@ -173,7 +173,7 @@ export default function Library(){
   return <div className="name-choice-overlay" onClick={()=>setEditingId(null)}>
    <section role="dialog" aria-modal="true" aria-label={locale==="ja"?`${name}を編集`:`Edit ${name}`} className="name-choice-dialog" onClick={e=>e.stopPropagation()}>
     <h4>{name}</h4>
-    <p className="muted">{locale==="ja"?"現在":"Current"}: {line.quantity.value??t("missing")} {line.unit??""} ／ {line.price_override?`¥${line.price_override.amount_jpy.value} / ${line.price_override.per_quantity}${line.price_override.per_unit}`:(locale==="ja"?"仕入単価 未設定":"Purchase price not set")}</p>
+    <p className="muted">{locale==="ja"?"現在":"Current"}: {line.quantity.value??t("missing")} {line.unit??""} ／ {line.price_override?`¥${line.price_override.amount_jpy.value} / ${line.price_override.per_quantity}${line.price_override.per_unit}`:line.price_mode==="inherit"?(locale==="ja"?"共通食材から継承（単価はここでは未取得）":"Inherited from shared ingredient (price not loaded)"):(locale==="ja"?"仕入単価 未設定":"Purchase price not set")}</p>
     {(qtyChanged||priceChanged)&&<p className="edit-diff">{locale==="ja"?"変更後":"After"}: {editQty.trim()||"?"} {editUnit}{priceChanged?` ／ ¥${editPrice.trim()||"?"} / ${editPriceQty}${editPriceUnit}`:""}</p>}
     <div className="edit-modal-fields">
      <label>{locale==="ja"?"数量":"Quantity"}<input inputMode="decimal" value={editQty} onChange={e=>setEditQty(e.target.value)} disabled={busy}/></label>
