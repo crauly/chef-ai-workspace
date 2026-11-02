@@ -27,6 +27,10 @@ test("approved voice draft carries its generated preview to the saved recipe wit
  expect(saves).toBe(0);
  await entry.fill("保存してください");await page.getByRole("button",{name:"反映"}).click();
  await expect.poll(()=>saves).toBe(1);
+ // A request reaching the route is not the same as the application completing
+ // the save. Ensure the formal save has finished before checking the cache.
+ await expect(page.getByRole("region",{name:"Recipe cost summary"})).toBeVisible();
+ await expect(page).toHaveURL(new RegExp("/recipes/"+recipeId+"$"));
  await expect.poll(async()=>page.evaluate(async(id)=>{
   return await new Promise<boolean>((resolve,reject)=>{
    const req=indexedDB.open("chef-ai-recipe-image-cache",1);
