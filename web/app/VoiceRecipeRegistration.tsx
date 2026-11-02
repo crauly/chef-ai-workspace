@@ -376,6 +376,16 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   else
    say(ja?"仕入単価が不明の項目があります（"+priceMissingNames(d).join("、")+"）。数量は確定、価格は未確定として保存できます。価格を推測やゼロ埋めで補いません。よければもう一度「保存してください」と話すか、価格未確定として保存を押してください。":"Missing purchase prices: "+priceMissingNames(d).join(", ")+". Quantities are confirmed. You may explicitly approve saving with unconfirmed prices; no price will be guessed or set to zero.");
  }
+ // Explicit registration is the single user authorization; never bypass validation.
+ async function register(){
+  const d=draftRef.current;
+  if(phaseRef.current==="saving")return;
+  if(!d){say("先にレシピの内容を入力してください。");return;}
+  const mode=saveModeFor(d);
+  if(!mode){say("登録に必要な情報が不足しています："+[...d.missing,...d.notes].join("、"));return;}
+  reviewed.current=d;reviewMode.current=mode;setStage("review");
+  await save();
+ }
  async function save(){
   const d=draftRef.current;
   const mode=reviewMode.current;
@@ -424,11 +434,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
      await parse(dataTurns.current,batch[batch.length-1].revision,batch[batch.length-1].traceId);
     }else if(input.revision===revision.current){
      if(input.command==="review")showReview(input.traceId);
-     else if(input.command==="save"){
-      // An explicit save request presents review first; a later request approves it.
-      if(input.approval&&phaseRef.current==="review"&&input.approval===reviewed.current&&reviewed.current===draftRef.current)await save();
-      else showReview(input.traceId);
-     }else if(input.command==="hold"){
+     else if(input.command==="save")await register();else if(input.command==="hold"){
       reviewed.current=null;setStage("dictating");say("保存せず、下書きを保持します。");
      }
     }
@@ -593,7 +599,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   <h2>{ja?"音声でレシピを一括登録":"Full recipe by voice"}</h2>
   <details className="voice-help"><summary>{ja?"登録の使い方":"How to register"}</summary>
   <p>{ja?"料理名、食材、分量、仕入単価、売価を自然な言葉で伝えてください。料理の文脈を解釈し、変更案を下書きで確認できます。":"Describe the dish, ingredients, quantities, purchase prices and selling price naturally. Review the interpreted recipe as a draft."}</p>
-  <p>{ja?"下書きは自動保存されます。「登録」「保存」「正式登録」で内容確認へ進み、確認後の明示承認で正式登録します。「破棄」で下書きを削除します。":"Ask to review the draft before saving. An explicit approval is required to save; discarding removes the draft."}</p>
+  <p>{ja?"下書きは自動保存されます。入力内容を見ながら編集し、「登録」「保存」で正式登録します。「破棄」で下書きを削除します。":"Ask to review the draft before saving. An explicit approval is required to save; discarding removes the draft."}</p>
   <p>{ja?"仕入単価だけが不明でも、確認後に価格未確定として保存できます（推測・ゼロ埋めしません）。確定保存と未確定保存は確認画面で区別されます。":"If only purchase prices are missing, you may approve saving with unconfirmed prices. Missing prices are never guessed or set to zero."}</p>
   <p>{ja?"音声はMetaへ送信して文字起こしします。録音は保存しません。発話の間を約1秒空けると解釈します。":"Audio is sent to Meta and not stored. Pause for about one second between turns."}</p>
   </details>
@@ -625,11 +631,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    <button type="submit" disabled={!manual.trim()||phase==="saving"}>{ja?"反映":"Apply"}</button>
   </form>}
   <button type="button" disabled={busy||!dataTurns.current.length||phase==="saving"} onClick={retry}>{ja?"解析を再試行":"Retry analysis"}</button>
-  <div>
-   <label>{ja?"写真から下書き":"Draft from photo"}<input ref={photoFile} type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/x-icon" aria-label={ja?"解析する写真":"Photo to analyze"} disabled={phase==="saving"||photoAnalyzing}/></label>
-   <input aria-label={ja?"写真のメモ（任意）":"Photo note (optional)"} value={photoMemo} onChange={event=>setPhotoMemo(event.target.value)} maxLength={1000} placeholder={ja?"分量・価格が分かる場合のみ記入":"Quantities/prices only if known"} disabled={phase==="saving"||photoAnalyzing}/>
-   <button type="button" onClick={()=>void analyzePhoto()} disabled={phase==="saving"||photoAnalyzing}>{ja?"写真を解析":"Analyze photo"}</button>
-  </div>
+
 
   {draft&&<div id="draft" aria-label="未保存のレシピ下書き">
    {priceLoading&&<p role="status" aria-live="polite">{ja?"価格を検索しています… 下書きは先に確認できます。":"Searching prices… You can inspect the draft now."}</p>}
@@ -752,10 +754,16 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    {draft.notes.length>0&&<p role="alert">要確認：{draft.notes.join("、")}</p>}
    <p>{phase==="review"?(reviewMode.current==="unconfirmed"?(ja?"確認待ち（価格未確定）：数量は確定、価格は未確定として保存します。よければ明示承認してください。":"Pending review: quantities are confirmed, but purchase prices are unconfirmed. Explicitly approve to save."):(ja?"確認待ち：内容が正しければ、保存を明示承認してください。":"Pending review: explicitly approve saving if the details are correct.")):(ja?"まだ保存されていません。":"Not saved yet.")}</p>
    {sharedVoice&&<><p role="status">{sharedVoice.captureMessage}</p><a href="#voice-controls">音声操作・再開へ戻る</a></>}
-   <button type="button" disabled={busy||!eligible||phase==="saving"} onClick={()=>showReview()}>{ja?"内容を確認":"Review draft"}</button>
-   <button type="button" disabled={busy||phase!=="review"||!eligible} onClick={()=>void save()}>{phase==="review"&&reviewMode.current==="unconfirmed"?(ja?"価格未確定として承認して保存":"Approve & save with unconfirmed prices"):(ja?"内容を承認して保存":"Approve & save")}</button>
+   <button type="button" disabled={busy||!eligible||phase==="saving"} onClick={()=>void register()}>{ja?"レシピを登録":"Register recipe"}</button>
    <button type="button" disabled={phase==="saving"} onClick={clear}>{ja?"下書きを破棄":"Discard draft"}</button>
   </div>}
   <details className="voice-transcript"><summary>{ja?"認識した発話":"Recognized utterances"}（{turns.length}{ja?"件":" turns"}）</summary>{turns.length>0?<ol aria-label={ja?"認識した発話の一覧":"Recognized utterances"}>{[...turns].reverse().map((turn,index)=><li key={`${turns.length-index}`}>{turn}</li>)}</ol>:<p>{ja?"まだ発話はありません。":"No utterances yet."}</p>}</details>
+  <details className="voice-photo-option"><summary>{ja?"写真からレシピを読み取る（オプション）":"Import recipe from photo (optional)"}</summary>
+  <div>
+   <label>{ja?"写真から下書き":"Draft from photo"}<input ref={photoFile} type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/x-icon" aria-label={ja?"解析する写真":"Photo to analyze"} disabled={phase==="saving"||photoAnalyzing}/></label>
+   <input aria-label={ja?"写真のメモ（任意）":"Photo note (optional)"} value={photoMemo} onChange={event=>setPhotoMemo(event.target.value)} maxLength={1000} placeholder={ja?"分量・価格が分かる場合のみ記入":"Quantities/prices only if known"} disabled={phase==="saving"||photoAnalyzing}/>
+   <button type="button" onClick={()=>void analyzePhoto()} disabled={phase==="saving"||photoAnalyzing}>{ja?"写真を解析":"Analyze photo"}</button>
+  </div>
+  </details>
  </section>;
 }
