@@ -30,14 +30,15 @@ export default function DishImageSection({recipeId,title,names,locale,disabled}:
  const flight=useRef<AbortController|null>(null);
  const owner=useRef(recipeId);
  const plateSelectionInitialized=useRef(false);
+ const generationStarted=useRef(false);
  // Recipe switch: abort the in-flight request and drop its state. The
  // abort is a normal cancellation, never surfaced as an API failure.
  useEffect(()=>{
-  owner.current=recipeId;
+  owner.current=recipeId;generationStarted.current=false;
   flight.current?.abort();flight.current=null;
   setImage(null);setSavedLocal(false);setSaveWarning(false);setGenerating(false);setFailed(false);setEnlarged(false);
   let valid=true;
-  void getDishPreview(recipeId).then(cached=>{if(valid&&owner.current===recipeId&&cached){setImage(cached);setSavedLocal(true);}}).catch(()=>{});
+  void getDishPreview(recipeId).then(cached=>{if(valid&&!generationStarted.current&&owner.current===recipeId&&cached){setImage(cached);setSavedLocal(true);}}).catch(()=>{});
   return()=>{valid=false;flight.current?.abort();flight.current=null;};
  },[recipeId]);
  // Default-plate status only (no form here): re-read when the settings
@@ -62,6 +63,7 @@ export default function DishImageSection({recipeId,title,names,locale,disabled}:
   // Explicit user action only; a running flight returns silently
   // (double-submit guard via disabled button + this check).
   if(generating||disabled)return;
+  generationStarted.current=true;
   const started=recipeId;
   const chosen=plates.find(p=>p.id===selectedPlateId);
   const prompt=dishImagePrompt(title,names,chosen?.note??"");
