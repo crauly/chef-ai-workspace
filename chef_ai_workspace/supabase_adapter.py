@@ -165,7 +165,12 @@ class SupabasePersistence:
                   .eq("supplier_id", supplier_id).limit(1).execute()).data or []
         if offers:
             raise ValueError("Supplier is used by purchase offers")
-        self.client.table("suppliers").delete().eq("owner_id", owner_id).eq("id", supplier_id).execute()
+        try:
+            self.client.table("suppliers").delete().eq("owner_id", owner_id).eq("id", supplier_id).execute()
+        except APIError as exc:
+            if str(exc.code) == "23503":
+                raise ValueError("Supplier is used by purchase offers") from exc
+            raise
 
     def create_owned_offer(self, owner_id, ingredient_id, supplier_id=None,
                            product_url=None, package_quantity=None,
