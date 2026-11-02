@@ -31,13 +31,25 @@ test("approved voice draft carries its generated preview to the saved recipe wit
  // the save. Ensure the formal save has finished before checking the cache.
  await expect(page.getByRole("region",{name:"Recipe cost summary"})).toBeVisible();
  await expect(page).toHaveURL(new RegExp("/recipes/"+recipeId+"$"));
- await expect.poll(async()=>page.evaluate(async(id)=>{
-  return await new Promise<boolean>((resolve,reject)=>{
+ // First verify the actual detail UI; it uses the same cache reader as production.
+ const detailImage=page.getByRole("region",{name:"料理イメージ"}).getByRole("img",{name:"生成した料理イメージ"});
+ const cache=await page.evaluate(async(id)=>{
+  return await new Promise<{keys:string[];found:boolean;length:number;prefix:string}>((resolve,reject)=>{
    const req=indexedDB.open("chef-ai-recipe-image-cache",1);
    req.onerror=()=>reject(req.error);
-   req.onsuccess=()=>{const db=req.result;const get=db.transaction("images","readonly").objectStore("images").get(id);
-    get.onsuccess=()=>{resolve(get.result===IMG);db.close();};get.onerror=()=>reject(get.error);};
+   req.onsuccess=()=>{
+    const db=req.result,tx=db.transaction("images","readonly"),store=tx.objectStore("images");
+    const keys=store.getAllKeys(),value=store.get(id);
+    tx.oncomplete=()=>{
+     const image=value.result;
+     resolve({keys:keys.result.map(String),found:typeof image==="string",length:typeof image==="string"?image.length:0,prefix:typeof image==="string"?image.slice(0,35):""});
+     db.close();
+    };
+    tx.onerror=()=>reject(tx.error);
+   };
   });
- },recipeId)).toBe(true);
+ },recipeId);
+ expect(cache.keys,JSON.stringify({recipeId,cache,detailImageCount:await detailImage.count(),images,saves})).toContain(recipeId);
+ await expect(detailImage).toHaveAttribute("src",IMG);
  expect(images).toBe(1);
 });
