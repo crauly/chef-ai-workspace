@@ -321,3 +321,10 @@ a,.link{color:#b3d5ff}
 .dish-image-dialog img{max-height:84dvh;object-fit:contain}
 .dish-image-close{position:absolute;right:5px;top:5px;display:grid;place-items:center;width:42px;height:42px;padding:0;border-radius:999px;background:rgba(0,0,0,.7);color:white;font-size:1.8rem}
 @media(max-width:520px){.recipe-detail .dish-image{padding:10px}.recipe-detail .dish-image-open img{max-height:260px}.recipe-detail .dish-image-actions button{flex:unset}.dish-image-header p{font-size:.72rem}}
+.plate-settings{margin:18px 0 8px;border:1px solid rgba(163,186,174,.22);border-radius:12px;padding:10px 14px;background:rgba(114,145,128,.07)}
+.plate-settings summary{cursor:pointer;font-weight:700;font-size:.9rem}
+.plate-settings-body{display:grid;gap:10px;margin-top:10px}
+.plate-preview{display:block;width:100%;max-width:320px;max-height:220px;object-fit:cover;border-radius:10px;border:1px solid rgba(163,186,174,.3)}
+.plate-file-label,.plate-note-label{display:grid;gap:6px;font-size:.85rem}
+.plate-note-label input{padding:8px 10px;border-radius:8px;border:1px solid rgba(163,186,174,.3);background:rgba(0,0,0,.25);color:inherit}
+.plate-actions{display:flex;gap:10px;flex-wrap:wrap}

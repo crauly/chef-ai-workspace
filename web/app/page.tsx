@@ -3,6 +3,7 @@ import {useCallback,useEffect,useRef,useState} from "react";
 import {label, type Locale} from "./i18n";
 import AIEditor,{type EditorHandle} from "./AIEditor";
 import DishImageSection from "./DishImageSection";
+import PlateSettingsSection from "./PlateSettingsSection";
 import VoiceWorkspace from "./VoiceWorkspace";
 import PriceBell from "./PriceBell";
 import SourcingSuggestions from "./SourcingSuggestions";
@@ -132,6 +133,7 @@ export default function Library(){
  </button>)}</div>
  {items.length===0&&!error&&!loadingList&&<p className="muted">{query?(locale==="ja"?"一致するレシピがありません。":"No recipes match this name."):t("empty")}</p>}
  <div className="toolbar"><button disabled={page===1} onClick={()=>setPage(p=>p-1)}>{t("previous")}</button><span>{t("page")} {page}</span><button disabled={items.length<20} onClick={()=>setPage(p=>p+1)}>{t("next")}</button></div>
+ <details className="plate-settings"><summary>{locale==="ja"?"料理画像設定（デフォルト皿）":"Dish image settings (default plate)"}</summary><PlateSettingsSection locale={locale}/></details>
  </div>
  {selected&&<section className="recipe-detail" ref={detailRef} aria-label={t("detail")}> 
  <div className="detail-topbar"><button type="button" className="detail-back" onClick={()=>{setEditingId(null);setAiOpen(false);setSelected(null);window.scrollTo({top:0,behavior:"instant"});}}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button><span className="detail-revision">REV {selected.revision}</span></div>
