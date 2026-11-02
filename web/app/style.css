@@ -346,3 +346,19 @@ a,.link{color:#b3d5ff}
 .plate-actions{margin-top:2px;align-items:center}
 .plate-actions button{min-height:42px}
 @media(max-width:520px){.plate-settings{padding:12px}.plate-actions button{flex:1 1 auto}}
+
+/* Multiple plate gallery and per-recipe selector. */
+.plate-gallery{display:grid;gap:9px}
+.plate-gallery-item{display:flex;align-items:center;gap:12px;border:1px solid rgba(163,186,174,.25);border-radius:12px;padding:9px;background:rgba(114,145,128,.08)}
+.plate-gallery-item img{width:82px;height:82px;object-fit:contain;border-radius:9px;background:rgba(0,0,0,.18);flex:none}
+.plate-gallery-copy{display:grid;gap:4px;min-width:0;flex:1}
+.plate-gallery-copy strong{overflow-wrap:anywhere}
+.plate-gallery-copy small{opacity:.7;overflow-wrap:anywhere}
+.plate-gallery-actions{display:flex;gap:7px;flex-wrap:wrap}
+.plate-gallery-actions button{padding:7px 10px;font-size:.75rem;min-height:34px}
+.plate-register{display:grid;gap:10px;padding:14px;border:1px solid rgba(163,186,174,.26);border-radius:12px}
+.plate-register>strong{font-size:.98rem}
+.plate-register>button{justify-self:start}
+.dish-plate-picker{display:grid;gap:5px;margin:0 0 10px;font-size:.78rem;font-weight:600}
+.dish-plate-picker select{width:100%;min-width:0;padding:9px 10px;border:1px solid rgba(163,186,174,.33);border-radius:9px;background:#252b29;color:#f2f2f0;font:inherit;font-size:.88rem}
+@media(min-width:620px){.plate-gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
