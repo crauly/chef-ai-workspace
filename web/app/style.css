@@ -433,3 +433,27 @@ main.recipe-detail-page>div[hidden]{display:none!important}
 .bottom-nav a[href="#assist"]{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}
 .bottom-nav a[href="#assist"] span:last-child{font-size:.74rem}
 }
+
+/* Supplier master shares existing cards; no new visual design system. */
+.supplier-manager{display:grid;gap:12px}
+.supplier-manager form{display:grid;gap:10px}
+.supplier-manager form label{display:grid;gap:5px}
+.supplier-manager-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.supplier-manager-list li{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;border:1px solid rgba(163,186,174,.22);border-radius:10px;padding:11px}
+.supplier-manager-list li>div:first-child{display:grid;gap:4px;overflow-wrap:anywhere}
+.supplier-manager-list small{color:#aebfb6}
+
+/* Dedicated management route: retain brand, navigation and dark-green grouping. */
+.settings-page{padding-bottom:calc(110px + env(safe-area-inset-bottom,0px))}
+.settings-back{display:inline-block;margin:12px 0;color:#a9d9c3;text-decoration:none;font-weight:600}
+.settings-back:hover{text-decoration:underline}
+.settings-page .workspace-settings-section{margin-top:12px}
+.settings-page .workspace-settings-content{display:grid;gap:18px}
+.settings-page .bottom-nav a[aria-current="page"]{color:#b9ead4;background:rgba(106,185,146,.16)}
+.settings-page .bottom-nav .settings-voice-link{display:flex;align-items:center;justify-content:center;padding:8px;border-radius:50%;min-width:54px;min-height:54px;max-width:60px;border:1px solid rgba(212,235,222,.35);background:#253c34;color:#f0f7f2}
+.settings-page .bottom-nav a[aria-label="Management and settings"],.settings-page .bottom-nav a[aria-label="管理・設定"]{display:grid;justify-items:center;gap:2px}
+
+/* Consistent line icons for every footer destination; preserve central mic. */
+.bottom-nav a:not(.bottom-nav-mic),.bottom-nav button:not(.bottom-nav-mic){display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.bottom-nav .bottom-nav-icon{width:21px;height:21px;display:block;flex:none}
+.bottom-nav a:not(.bottom-nav-mic) span,.bottom-nav button:not(.bottom-nav-mic) span{font-size:.73rem;line-height:1.1}

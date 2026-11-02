@@ -5,10 +5,8 @@ import AIEditor,{type EditorHandle} from "./AIEditor";
 import DishImageSection from "./DishImageSection";
 import {getDishPreview} from "./dish-image-cache";
 import {recipeGaps} from "./recipe-gaps";
-import PlateSettingsSection from "./PlateSettingsSection";
 import VoiceWorkspace from "./VoiceWorkspace";
 import PriceBell from "./PriceBell";
-import SourcingSuggestions from "./SourcingSuggestions";
 import {request, startupRead, type Recipe} from "./types";
 type Item={id:string;title:string;revision:number;updated_at?:string};
 export default function Library(){
@@ -165,8 +163,7 @@ export default function Library(){
  {items.length===0&&!error&&!loadingList&&<p className="muted">{query?(locale==="ja"?"一致するレシピがありません。":"No recipes match this name."):t("empty")}</p>}
  <div className="toolbar"><button disabled={page===1} onClick={()=>setPage(p=>p-1)}>{t("previous")}</button><span>{t("page")} {page}</span><button disabled={items.length<20} onClick={()=>setPage(p=>p+1)}>{t("next")}</button></div>
  </section>
- <section id="assist" className="workspace-section workspace-settings-section" aria-labelledby="workspace-settings-heading"><div className="workspace-section-head"><div><h2 id="workspace-settings-heading">{locale==="ja"?"管理・設定":"Management & Settings"}</h2><p>{locale==="ja"?"食材・仕入先・価格と料理画像の設定":"Manage ingredients, suppliers, prices, and dish images"}</p></div></div><div className="workspace-settings-content"><SourcingSuggestions locale={locale}/>
- <details className="plate-settings"><summary>{locale==="ja"?"料理画像設定（デフォルト皿）":"Dish image settings (default plate)"}</summary><PlateSettingsSection locale={locale}/></details></div></section>
+
  </div>
  {selected&&<section className="recipe-detail" ref={detailRef} aria-label={t("detail")}> 
  <div className="detail-topbar"><button type="button" className="detail-back" onClick={backToLibrary}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button><span className="detail-revision">REV {selected.revision}</span></div>
