@@ -16,12 +16,12 @@ test("empty state shows placeholder, generate succeeds, enlarge closes", async (
   await page.route("**/api/dish-image", route => route.fulfill({json: {image: IMG}}));
   const detail = await openRecipe(page, "片栗粉のレシピ");
   const section = detail.getByRole("region", {name: "料理イメージ"});
-  await expect(section.getByText("🍽️")).toBeVisible();
+  await expect(section.getByText("料理画像はまだありません")).toBeVisible();
   await expect(section.getByText("一時プレビュー")).toBeVisible();
   await expect(section.locator("img")).toHaveCount(0);
-  await section.getByRole("button", {name: "料理画像を生成"}).click();
+  await section.getByRole("button", {name: "✦ 料理画像を生成"}).click();
   await expect(section.getByRole("img", {name: "生成した料理イメージ"})).toBeVisible();
-  await expect(section.getByRole("button", {name: "再生成"})).toBeVisible();
+  await expect(section.getByRole("button", {name: "↻ 再生成"})).toBeVisible();
   // Enlarge via tap, close via button.
   await section.getByRole("button", {name: "料理イメージを拡大表示"}).click();
   const dialog = page.getByRole("dialog", {name: "料理イメージの拡大表示"});
@@ -44,13 +44,13 @@ test("failure shows retry, regenerate issues a fresh request", async ({page}) =>
   });
   const detail = await openRecipe(page, "片栗粉のレシピ");
   const section = detail.getByRole("region", {name: "料理イメージ"});
-  await section.getByRole("button", {name: "料理画像を生成"}).click();
+  await section.getByRole("button", {name: "✦ 料理画像を生成"}).click();
   await expect(section.getByText("画像の生成に失敗しました")).toBeVisible();
   await expect(section.locator("img")).toHaveCount(0);
   await section.getByRole("button", {name: "再試行"}).click();
   await expect(section.getByRole("img", {name: "生成した料理イメージ"})).toBeVisible();
   expect(calls).toBe(2);
-  await section.getByRole("button", {name: "再生成"}).click();
+  await section.getByRole("button", {name: "↻ 再生成"}).click();
   await expect(section.getByRole("img", {name: "生成した料理イメージ"})).toBeVisible();
   expect(calls).toBe(3);
 });
@@ -61,7 +61,7 @@ test("stale response from a previous recipe is discarded on switch", async ({pag
   await page.route("**/api/dish-image", async route => {await gate; await route.fulfill({json: {image: IMG}});});
   const detail = await openRecipe(page, "片栗粉のレシピ");
   const section = detail.getByRole("region", {name: "料理イメージ"});
-  await section.getByRole("button", {name: "料理画像を生成"}).click();
+  await section.getByRole("button", {name: "✦ 料理画像を生成"}).click();
   await expect(section.getByText("画像を生成中")).toBeVisible();
   // Switch recipes while the first flight is still pending.
   await detail.getByRole("button", {name: "← レシピ一覧"}).click();
@@ -72,7 +72,7 @@ test("stale response from a previous recipe is discarded on switch", async ({pag
   await page.waitForTimeout(300);
   const pastaSection = pasta.getByRole("region", {name: "料理イメージ"});
   await expect(pastaSection.locator("img")).toHaveCount(0);
-  await expect(pastaSection.getByText("🍽️")).toBeVisible();
+  await expect(pastaSection.getByText("料理画像はまだありません")).toBeVisible();
 });
 
 test("390px mobile layout without overflow, edit flow intact", async ({page}) => {
@@ -80,7 +80,7 @@ test("390px mobile layout without overflow, edit flow intact", async ({page}) =>
   await page.route("**/api/dish-image", route => route.fulfill({json: {image: IMG}}));
   const detail = await openRecipe(page, "きのこのクリームスープ");
   const section = detail.getByRole("region", {name: "料理イメージ"});
-  await section.getByRole("button", {name: "料理画像を生成"}).click();
+  await section.getByRole("button", {name: "✦ 料理画像を生成"}).click();
   await expect(section.getByRole("img", {name: "生成した料理イメージ"})).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
