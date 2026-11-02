@@ -2,6 +2,7 @@
 import {useCallback,useEffect,useRef,useState} from "react";
 import {label, type Locale} from "./i18n";
 import AIEditor,{type EditorHandle} from "./AIEditor";
+import DishImageSection from "./DishImageSection";
 import VoiceWorkspace from "./VoiceWorkspace";
 import PriceBell from "./PriceBell";
 import SourcingSuggestions from "./SourcingSuggestions";
@@ -134,6 +135,7 @@ export default function Library(){
  {selected&&<section className="recipe-detail" aria-label={t("detail")}>
  <div className="detail-topbar"><button type="button" className="detail-back" onClick={()=>{setEditingId(null);setAiOpen(false);setSelected(null);window.scrollTo({top:0,behavior:"instant"});}}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button><span className="detail-revision">REV {selected.revision}</span></div>
  <div className="detail-heading"><p className="detail-eyebrow">{locale==="ja"?"RECIPE DETAIL":"RECIPE DETAIL"}</p><h2>{selected.title.value||t("detail")}</h2></div>
+ <DishImageSection key={selected.id} recipeId={selected.id} title={selected.title.value||""} names={selected.materials.map(m=>selected.display_names?.[m.id]?.display?.trim()||m.material_name.value||"")} locale={locale} disabled={busy}/>
  <div className="detail-metrics">
   <div><span>{locale==="ja"?"販売価格":"Selling price"}</span><strong>{selected.selling_price_jpy.value===null?"—":`¥${selected.selling_price_jpy.value}`}</strong></div>
   <div><span>{locale==="ja"?"材料原価":"Food cost"}</span><strong>{cost?.total_cost_jpy==null?"—":`¥${cost.total_cost_jpy}`}</strong></div>

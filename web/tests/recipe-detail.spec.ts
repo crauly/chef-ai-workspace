@@ -4,7 +4,7 @@ test.beforeEach(async ({request}) => {await request.post("http://127.0.0.1:8100/
 
 async function openDetail(page: Page) {
   await page.goto("/");
-  await page.locator("section.card", {hasText: "片栗粉のレシピ"}).getByRole("button", {name: "詳細を見る"}).click();
+  await page.getByRole("button", {name: "片栗粉のレシピの詳細を開く"}).click();
   const detail = page.locator("section.recipe-detail");
   await expect(detail).toBeVisible();
   return detail;
@@ -51,9 +51,9 @@ test("AI consult expands only on demand; mobile shows detail without overflow", 
   const detail = await openDetail(page);
   // AI editor stays collapsed until the consult button is pressed.
   await expect(page.getByLabel("料理人の指示", {exact: true})).toBeHidden();
-  await detail.getByRole("button", {name: "AIに変更を相談"}).click();
+  await detail.getByRole("button", {name: "◇ AIに変更相談"}).click();
   await expect(page.getByLabel("料理人の指示", {exact: true})).toBeVisible();
-  await detail.getByRole("button", {name: "AIに変更を相談"}).click();
+  await detail.getByRole("button", {name: "◇ AIに変更相談"}).click();
   await expect(page.getByLabel("料理人の指示", {exact: true})).toBeHidden();
 
   await page.setViewportSize({width: 390, height: 844});

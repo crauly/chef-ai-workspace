@@ -287,3 +287,18 @@ a,.link{color:#b3d5ff}
 .recipe-list-copy strong{font-size:1rem;line-height:1.35;overflow-wrap:anywhere}
 .recipe-list-copy small{font-size:.75rem;opacity:.7}
 .recipe-list-chevron{font-size:1.8rem;font-weight:300;opacity:.7;line-height:1}
+
+/* Detail dish illustration (Block 3 reuse): same translucent card tokens as
+   the approved detail UI, compact mobile-first, desktop intact. */
+.dish-image{margin:0 0 26px;border:1px solid rgba(163,186,174,.2);border-radius:12px;padding:14px;background:rgba(114,145,128,.1)}
+.dish-image-empty{display:grid;place-items:center;font-size:2.2rem;min-height:120px;border-radius:10px;border:1px dashed rgba(163,186,174,.35);background:rgba(114,145,128,.08)}
+.dish-image-open{display:block;width:100%;padding:0;border:0;background:none;cursor:zoom-in}
+.dish-image-open img{display:block;width:100%;max-height:320px;object-fit:cover;border-radius:10px}
+.dish-image-note{font-size:.75rem;opacity:.7;margin:10px 0 0}
+.dish-image-status{display:flex;align-items:center;gap:8px;margin:10px 0 0}
+.dish-image-fail{color:#f0b4b4;margin:10px 0 0}
+.dish-image-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.dish-image-overlay{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.72)}
+.dish-image-dialog{display:grid;gap:12px;justify-items:center;max-width:min(92vw,720px)}
+.dish-image-dialog img{max-width:100%;max-height:78vh;object-fit:contain;border-radius:12px}
+@media(max-width:520px){.dish-image-actions button{flex:1 1 auto}.dish-image-open img{max-height:260px}}

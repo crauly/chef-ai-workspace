@@ -5,6 +5,7 @@ import {request,type Recipe} from "./types";
 import {useVoiceCapture,type VoiceCaptureMeta} from "./useVoiceCapture";
 import {voiceCommand,type VoiceCommand} from "./voice-commands";
 import {logVoiceEvent} from "./voice-diagnostics";
+import {dishImagePrompt,isAbortError,dishCompletionKept} from "./dish-image";
 
 type Ingredient={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string;supplier:string};
 type Interpretation={source:string;suggestion:string;reason:string};
@@ -56,32 +57,10 @@ export function priceMissingNames(draft:Draft):string[]{
 // chef as a memo; formal supplier linkage uses the existing ledger path
 // (ingredient-assist -> offer observations -> observations/confirm, all
 // Human-Gate approved), never an automatic write.
-// Block 3 (dish image): build the single-shot illustration prompt from the
-// current draft plus an optional explicit hint. Pure helper (exported for
-// tests). The generated image is a preview only, never recipe evidence.
-export function dishImagePrompt(title:string,names:string[],hint:string):string{
- const dish=(title||"").trim()||"unspecified dish";
- let items=names.map(n=>n.trim()).filter(Boolean).slice(0,8);
- let extra=hint.trim().slice(0,200);
- const build=()=>`Appetizing food photograph of ${dish}`+(items.length?`, made with ${items.join(", ")}`:"")+(extra?`. ${extra}`:"");
- let prompt=build();
- // The route rejects the whole prompt past 500 chars: shed trailing
- // ingredients first (title + explicit hint carry the intent), then the
- // hint, so the UI never offers a request guaranteed to fail.
- while(prompt.length>500&&items.length>1){items=items.slice(0,-1);prompt=build();}
- if(prompt.length>500){extra="";prompt=build();}
- if(prompt.length>500)prompt=prompt.slice(0,500);
- return prompt;
-}
-// Block 3 guards (pure, exported for tests): an aborted flight is a normal
-// cancellation, never an API failure; a result belongs only to the draft it
-// started from, so a discarded/saved/replaced draft never receives it.
-export function isAbortError(err:unknown):boolean{
- return !!err&&typeof err==="object"&&"name" in err&&(err as {name?:unknown}).name==="AbortError";
-}
-export function dishCompletionKept(started:object|null,current:object|null,aborted:boolean):boolean{
- return !aborted&&started!==null&&started===current;
-}
+// Block 3 (dish image) pure helpers live in ./dish-image (shared with the
+// saved-recipe detail section). Re-exported here so existing imports keep
+// working; the generated image stays a preview, never recipe evidence.
+export {dishImagePrompt,isAbortError,dishCompletionKept} from "./dish-image";
 export function toSaveMaterials(draft:Draft){
  return draft.materials.map(m=>({name:m.name,
   quantity:m.quantity||null,unit:m.unit||null,
