@@ -583,7 +583,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
         {key:"photo-fail",active:photoFailed&&!photoAnalyzing,text:ja?"写真の解析に失敗しました。下書きは作成していません。":"Photo analysis failed. No draft was created."},
     {key:"done",active:!mic.transcribing&&!parsing&&!priceLoading&&!parseFailed&&!priceFailed&&turns.length>0&&draft!==null,text:ja?"処理完了：下書きに反映しました。":"Done: reflected in the draft."},
    ].filter(row=>row.active).slice(0,2);
-   return rows.length?<ul className="voice-status-list" role="status" aria-live="polite" aria-label={ja?"処理状況":"Processing status"}>{rows.map(row=><li key={row.key}>{["listen","transcribe","parse","price","photo","dish-image"].includes(row.key)?<span className="voice-spin" aria-hidden="true"/>:null}{row.text}</li>)}</ul>:null;
+   return rows.length?<ul className="voice-status-list" role="status" aria-live="polite" aria-label={ja?"処理状況":"Processing status"}>{rows.map(row=><li key={row.key} className={row.key==="price"?"status-price":row.key.endsWith("fail")?"status-error":"status-voice"}><span className="status-symbol" aria-hidden="true">{row.key==="price"?"⌕":row.key.endsWith("fail")?"!":row.key==="done"?"✓":"♩"}</span><span className="status-detail"><span className="status-label">{row.text}</span>{["listen","transcribe","parse","price","photo","dish-image"].includes(row.key)&&<span className="status-track" aria-hidden="true"><span/></span>}</span></li>)}</ul>:null;
   })()}
   <p aria-live="polite" role="status">{busy?(ja?"処理中 ⏳ ":"Working ⏳ "):""}{message}</p>
   {!sharedVoice&&<form onSubmit={event=>{event.preventDefault();if(manual.trim()){enqueue(manual);setManual("");}}}>
