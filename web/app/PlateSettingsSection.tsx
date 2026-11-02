@@ -1,97 +1,47 @@
 "use client";
-import {useRef,useState} from "react";
+import {useEffect,useState} from "react";
 import type {Locale} from "./i18n";
-import {clearPlate,isPlateImageValid,loadPlate,PLATE_MAX_BYTES,PLATE_NOTE_MAX,sanitizePlateNote,savePlate} from "./plate-settings";
-
-// Default plate registration (Block 3 follow-up). Device-local only: the
-// photo is kept in this browser's localStorage (max 1) and is sent to
-// POST /api/dish-image solely as part of an explicit generation request.
-// No server persistence, no shared access, no save-path change.
-function downscale(file:File,maxBytes:number):Promise<string>{
- return new Promise((resolve,reject)=>{
-  const url=URL.createObjectURL(file);
-  const img=new Image();
-  img.onload=()=>{
-   try{
-    const scale=Math.min(1,768/Math.max(img.width,img.height));
-    const w=Math.max(1,Math.round(img.width*scale)),h=Math.max(1,Math.round(img.height*scale));
-    const canvas=document.createElement("canvas");
-    canvas.width=w;canvas.height=h;
-    const ctx=canvas.getContext("2d");
-    if(!ctx)throw new Error("no_canvas");
-    ctx.drawImage(img,0,0,w,h);
-    URL.revokeObjectURL(url);
-    const out=canvas.toDataURL("image/jpeg",0.85);
-    if(!isPlateImageValid(out)||out.length*3/4>maxBytes)reject(new Error("too_large"));
-    else resolve(out);
-   }catch(err){URL.revokeObjectURL(url);reject(err);}
-  };
-  img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error("unreadable"));};
-  img.src=url;
- });
-}
+import {isPlateImageValid,PLATE_NOTE_MAX,PLATE_MAX_BYTES} from "./plate-settings";
+import {addPlate,loadPlates,makeDefault,removePlate,type Plate} from "./plate-library";
 export default function PlateSettingsSection({locale}:{locale:Locale}){
  const ja=locale==="ja";
- const [image,setImage]=useState<string|null>(()=>loadPlate().image);
- const [note,setNote]=useState(()=>loadPlate().note);
- const [error,setError]=useState("");
- const [saved,setSaved]=useState(false);
- const fileRef=useRef<HTMLInputElement|null>(null);
- async function onFile(file:File|null){
-  if(!file)return;
-  setError("");setSaved(false);
-  if(!["image/jpeg","image/png","image/webp"].includes(file.type)){
-   setError(ja?"対応形式はJPEG・PNG・WebPです":"Use JPEG, PNG, or WebP");
-   return;
-  }
-  if(file.size<=PLATE_MAX_BYTES){
-   const reader=new FileReader();
-   reader.onload=()=>{
-    const url=String(reader.result||"");
-    if(!isPlateImageValid(url))setError(ja?"画像が大きすぎます":"Image is too large");
-    else setImage(url);
-   };
-   reader.onerror=()=>setError(ja?"画像を読み取れませんでした":"Could not read the image");
-   reader.readAsDataURL(file);
-   return;
-  }
-  try{setImage(await downscale(file,PLATE_MAX_BYTES));}
-  catch{setError(ja?"画像が大きすぎます（3MB以下にしてください）":"Image is too large (keep it under 3 MB)");}
- }
- function onSave(){
-  setError("");
+ const [plates,setPlates]=useState<Plate[]>([]),[defaultId,setDefaultId]=useState<string|null>(null);
+ const [name,setName]=useState(""),[note,setNote]=useState(""),[image,setImage]=useState<string|null>(null),[error,setError]=useState("");
+ const [busy,setBusy]=useState(false);
+ async function refresh(){const data=await loadPlates();setPlates(data.plates);setDefaultId(data.defaultId);}
+ useEffect(()=>{void refresh().catch(()=>setError(ja?"皿を読み込めません":"Could not load plates"));},[]);
+ async function choose(file:File|null){
+  if(!file)return;setError("");
+  if(!["image/jpeg","image/png","image/webp"].includes(file.type)){setError(ja?"JPEG・PNG・WebPのみ対応":"JPEG/PNG/WebP only");return;}
+  // Downscale before storage; no artificial limit on number of plates.
   try{
-   savePlate({image,note:sanitizePlateNote(note)});
-   setSaved(true);
-  }catch(err){
-   setSaved(false);
-   setError(String(err)==="Error: storage_unavailable"
-    ?(ja?"この端末に保存できません":"Cannot save on this device")
-    :(ja?"画像が大きすぎます（3MB以下にしてください）":"Image is too large (keep it under 3 MB)"));
-  }
+   const bitmap=await createImageBitmap(file);
+   const scale=Math.min(1,900/Math.max(bitmap.width,bitmap.height));
+   const canvas=document.createElement("canvas");canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+   const ctx=canvas.getContext("2d");if(!ctx)throw new Error("canvas");
+   ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();
+   const data=canvas.toDataURL("image/jpeg",.85);
+   if(!isPlateImageValid(data))throw new Error("size");
+   setImage(data);
+  }catch{setError(ja?"写真を読み込めません。別の画像を選んでください":"Cannot read the photo");}
  }
- function onDelete(){
-  clearPlate();
-  setImage(null);setNote("");setSaved(false);setError("");
-  if(fileRef.current)fileRef.current.value="";
- }
+ async function act(fn:()=>Promise<void>){setBusy(true);setError("");try{await fn();await refresh();}catch{setError(ja?"保存に失敗しました。空き容量を確認してください":"Could not save; check device storage");}finally{setBusy(false);}}
  return <div className="plate-settings-body">
-  <div className="plate-settings-heading"><div><strong>{ja?"デフォルト皿":"Default plate"}</strong><p>{ja?"料理画像生成に使う皿の写真を登録":"Choose a plate photo for dish images"}</p></div><span className="plate-settings-status">{image?(ja?"写真を選択中":"Selected"):(ja?"未登録":"Not set")}</span></div>
-  <p className="plate-local-note">{ja?"このブラウザ内に保存します。同じブラウザの利用者は参照でき、別端末には同期されません。生成時のみ画像を送信します。":"Saved in this browser; other users of this browser may access it. Not synced across devices. Sent only when generating."}</p>
-  {image
-   ?<img className="plate-preview" src={image} alt={ja?"登録した皿のプレビュー":"Registered plate preview"}/>
-   :<p className="plate-empty">{ja?"皿は未登録です":"No plate registered"}</p>}
-  <label className="plate-file-label">{ja?"皿の写真を選ぶ・変更する":"Choose or replace plate photo"}
-   <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>void onFile(e.target.files?.[0]??null)}/>
-  </label>
-  <label className="plate-note-label">{ja?`補足情報（任意・${PLATE_NOTE_MAX}文字まで）`:`Note (optional, up to ${PLATE_NOTE_MAX} chars)`}
-   <input value={note} maxLength={PLATE_NOTE_MAX} placeholder={ja?"例：白い丸皿、マットな質感":"e.g. white round plate, matte texture"} onChange={e=>{setNote(e.target.value);setSaved(false);}}/>
-  </label>
-  {error&&<p role="alert" className="error">{error}</p>}
-  {saved&&<p role="status" className="muted">{ja?"保存しました":"Saved"}</p>}
-  <div className="plate-actions">
-   <button type="button" disabled={!image} onClick={onSave}>{ja?"保存":"Save"}</button>
-   <button type="button" className="secondary" disabled={!image&&!note} onClick={onDelete}>{ja?"登録を削除":"Delete registration"}</button>
+  <div className="plate-settings-heading"><div><strong>{ja?"登録したお皿":"Saved plates"}</strong><p>{ja?"料理ごとに使用する皿を選べます":"Choose a plate for each recipe"}</p></div><span className="plate-settings-status">{plates.length}{ja?"枚":" plates"}</span></div>
+  <p className="plate-local-note">{ja?"写真はこのブラウザのIndexedDBに保存され、他の端末とは同期されません。同じブラウザを使う人には見えます。生成時のみ画像を送信します。":"Photos stay in this browser (IndexedDB), not synced between devices; shared-browser users can access them. Sent only for generation."}</p>
+  {plates.length>0&&<div className="plate-gallery">{plates.map(p=><div className="plate-gallery-item" key={p.id}>
+   <img src={p.image} alt={p.name}/><div className="plate-gallery-copy"><strong>{p.name}</strong><small>{p.note}</small><div className="plate-gallery-actions">
+    <button type="button" disabled={busy||defaultId===p.id} onClick={()=>void act(()=>makeDefault(p.id))}>{defaultId===p.id?(ja?"デフォルト":"Default"):(ja?"標準に設定":"Set default")}</button>
+    <button type="button" className="secondary" disabled={busy} onClick={()=>void act(()=>removePlate(p.id))}>{ja?"削除":"Delete"}</button>
+   </div></div>
+  </div>)}</div>}
+  <div className="plate-register"><strong>{ja?"新しい皿を登録":"Register a new plate"}</strong>
+   <label className="plate-note-label">{ja?"皿の名前":"Plate name"}<input maxLength={60} value={name} onChange={e=>setName(e.target.value)} placeholder={ja?"例：白い丸皿 24cm":"e.g. white round plate"}/></label>
+   <label className="plate-file-label">{ja?"皿の写真":"Plate photo"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>void choose(e.target.files?.[0]??null)}/></label>
+   {image&&<img className="plate-preview" src={image} alt={ja?"登録予定の皿":"New plate preview"}/>}
+   <label className="plate-note-label">{ja?"補足（任意）":"Note (optional)"}<input maxLength={PLATE_NOTE_MAX} value={note} onChange={e=>setNote(e.target.value)}/></label>
+   <button type="button" disabled={busy||!name.trim()||!image} onClick={()=>void act(async()=>{await addPlate({name,image:image!,note});setImage(null);setName("");setNote("");})}>{ja?"この皿を登録":"Save plate"}</button>
   </div>
+  {error&&<p role="alert" className="error">{error}</p>}
  </div>;
 }
