@@ -665,8 +665,9 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     for(const material of draft.materials){
      const qty=Number(material.quantity),price=Number(material.price_jpy),basis=Number(material.price_quantity);
      const a=factor(material.unit),b=factor(material.price_unit);
-     const compatible=a!==null&&b!==null&&((["g","kg"].includes(material.unit)&&["g","kg"].includes(material.price_unit))||(["ml","L"].includes(material.unit)&&["ml","L"].includes(material.price_unit)));
-     if(material.quantity.trim()&&material.price_jpy.trim()&&material.price_quantity.trim()&&compatible&&Number.isFinite(qty)&&Number.isFinite(price)&&Number.isFinite(basis)&&basis>0&&qty>=0&&price>=0)partial+=qty*a!*price/(basis*b!);
+     const sameCountUnit=(material.unit==="個"||material.unit==="尾")&&material.unit===material.price_unit;
+     const compatible=sameCountUnit||(a!==null&&b!==null&&((["g","kg"].includes(material.unit)&&["g","kg"].includes(material.price_unit))||(["ml","L"].includes(material.unit)&&["ml","L"].includes(material.price_unit))));
+     if(material.quantity.trim()&&material.price_jpy.trim()&&material.price_quantity.trim()&&compatible&&Number.isFinite(qty)&&Number.isFinite(price)&&Number.isFinite(basis)&&basis>0&&qty>=0&&price>=0)partial+=qty*(sameCountUnit?1:a!)*price/(basis*(sameCountUnit?1:b!));
      else missing++;
     }
     const yen=(value:number)=>new Intl.NumberFormat(ja?"ja-JP":"en-US",{style:"currency",currency:"JPY",maximumFractionDigits:0}).format(value);
