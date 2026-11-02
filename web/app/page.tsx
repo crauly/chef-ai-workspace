@@ -146,13 +146,15 @@ export default function Library(){
  }
  return <main id="top" className={selected?"recipe-detail-page":""}><div hidden={Boolean(selected)}><header className="chef-header"><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><PriceBell locale={locale}/><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">Japanese</option><option value="en-US">English</option></select></label></div><div className="chef-brand"><img src="/chef-ai-mark.svg" alt="" width="58" height="58"/><h1>Chef AI</h1></div><p className="muted">{t("intro")}</p></header>
  </div><div hidden={Boolean(selected)}><VoiceWorkspace locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} onCreated={recipe=>{showDetail(recipe);setError("");void reload();}}/></div>
- <div hidden={Boolean(selected)}><div id="assist"><SupplierManager locale={locale}/><SourcingSuggestions locale={locale}/></div>
- <form onSubmit={create}><input aria-label={t("newName")} placeholder={t("newName")} value={draft} onChange={e=>setDraft(e.target.value)}/><button disabled={busy||!draft.trim()}>{t("create")}</button></form>
+ <div hidden={Boolean(selected)}>
+ <section className="workspace-section recipe-library-section" aria-labelledby="recipe-library-heading">
+ <div className="workspace-section-head"><div><h2 id="recipe-library-heading">{locale==="ja"?"レシピ一覧":"Recipes"}</h2><p>{locale==="ja"?"保存したレシピを検索・閲覧":"Search and browse saved recipes"}</p></div></div>
+ <div className="recipe-library-controls"><form onSubmit={create}><input aria-label={t("newName")} placeholder={t("newName")} value={draft} onChange={e=>setDraft(e.target.value)}/><button disabled={busy||!draft.trim()}>{t("create")}</button></form>
  <form onSubmit={e=>{e.preventDefault();search(searchInput);}}>
   <input aria-label={locale==="ja"?"レシピ名で検索":"Search recipes by name"} maxLength={200} value={searchInput} onChange={e=>setSearchInput(e.target.value)}/>
   <button type="submit" disabled={busy}>{locale==="ja"?"検索":"Search"}</button>
   {query&&<button type="button" disabled={busy} onClick={()=>search("")}>{locale==="ja"?"検索を解除":"Clear search"}</button>}
- </form>
+ </form></div>
  {query&&<p role="status">{locale==="ja"?"検索中の料理名":"Recipe search"}: {query}</p>}
  {waking&&<p role="status" aria-live="polite">{locale==="ja"?"サーバーを起動しています。接続を再試行しています…":"Starting the server. Retrying connection…"}</p>}
  {error&&<p role="alert" className="error">{error}</p>}
@@ -163,7 +165,9 @@ export default function Library(){
  </button>)}</div>
  {items.length===0&&!error&&!loadingList&&<p className="muted">{query?(locale==="ja"?"一致するレシピがありません。":"No recipes match this name."):t("empty")}</p>}
  <div className="toolbar"><button disabled={page===1} onClick={()=>setPage(p=>p-1)}>{t("previous")}</button><span>{t("page")} {page}</span><button disabled={items.length<20} onClick={()=>setPage(p=>p+1)}>{t("next")}</button></div>
- <details className="plate-settings"><summary>{locale==="ja"?"料理画像設定（デフォルト皿）":"Dish image settings (default plate)"}</summary><PlateSettingsSection locale={locale}/></details>
+ </section>
+ <section id="assist" className="workspace-section workspace-settings-section" aria-labelledby="workspace-settings-heading"><div className="workspace-section-head"><div><h2 id="workspace-settings-heading">{locale==="ja"?"管理・設定":"Management & Settings"}</h2><p>{locale==="ja"?"食材・仕入先・価格と料理画像の設定":"Manage ingredients, suppliers, prices, and dish images"}</p></div></div><div className="workspace-settings-content"><SupplierManager locale={locale}/><SourcingSuggestions locale={locale}/>
+ <details className="plate-settings"><summary>{locale==="ja"?"料理画像設定（デフォルト皿）":"Dish image settings (default plate)"}</summary><PlateSettingsSection locale={locale}/></details></div></section>
  </div>
  {selected&&<section className="recipe-detail" ref={detailRef} aria-label={t("detail")}> 
  <div className="detail-topbar"><button type="button" className="detail-back" onClick={backToLibrary}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button><span className="detail-revision">REV {selected.revision}</span></div>
