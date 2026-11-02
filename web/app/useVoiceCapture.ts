@@ -221,9 +221,32 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
       };
       stream.getTracks().forEach(track => {track.onended = () => {if (!closed && valid()) {logVoiceEvent("capture.disconnect", "microphone track ended");
           controls.current?.stop();fail(locale === "ja" ? "マイクが切断されました。受信済みの音声の処理後に再開してください。" : "Microphone disconnected. Resume after accepted audio finishes.");}};});
-    } catch {
-      logVoiceEvent("capture.error", "getUserMedia failed");
-      if (valid()) {abort(); fail(locale === "ja" ? "マイクを開始できません。権限と対応ブラウザを確認してください。" : "Could not start microphone. Check permission and browser support.");}
+    } catch (error: unknown) {
+      const name=error instanceof Error ? error.name : "UnknownError";
+      const detail=error instanceof Error ? error.message : String(error);
+      const kind=name==="NotAllowedError"||name==="PermissionDeniedError"?"permission":
+        name==="NotFoundError"||name==="DevicesNotFoundError"?"device":
+        name==="NotReadableError"||name==="TrackStartError"?"device_busy":
+        name==="SecurityError"?"security":"audio_init";
+      logVoiceEvent("capture.error", kind+": "+name+": "+detail.slice(0,180));
+      if (valid()) {
+        abort();
+        const jaMessages:Record<string,string>={
+          permission:"マイクのアクセスが許可されていません。このサイトのマイク権限を確認してください。",
+          device:"入力用マイクが見つかりません。接続を確認してください。",
+          device_busy:"マイクにアクセスできません。他のアプリの使用状況を確認してください。",
+          security:"このページではマイクを使用できません。HTTPSまたはlocalhostで開いてください。",
+          audio_init:"音声処理の初期化に失敗しました。ブラウザのコンソールと音声診断ログを確認してください。"
+        };
+        const enMessages:Record<string,string>={
+          permission:"Microphone permission denied for this site.",
+          device:"No input microphone found.",
+          device_busy:"Could not access microphone. Check whether another app is using it.",
+          security:"Microphone requires HTTPS or localhost.",
+          audio_init:"Audio initialization failed. Check the console and voice diagnostics."
+        };
+        fail(locale==="ja"?jaMessages[kind]:enMessages[kind]);
+      }
     }
   }
   return {recording, busy, supported, error,errorTick,notice,queued, start, stop, cancel, markReview};

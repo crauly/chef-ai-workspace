@@ -326,10 +326,21 @@ export function useRealtimeVoiceCapture(
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: true, noiseSuppression: true}});
-    } catch {
+    } catch (error: unknown) {
       yieldMicrophone(stopAll);
-      failReason(trace, "getUserMedia failed",
-        locale === "ja" ? "マイクを開始できません。権限と対応ブラウザを確認してください。" : "Could not start microphone. Check permission and browser support.");
+      const name = error instanceof Error ? error.name : "UnknownError";
+      const kind = name === "NotAllowedError" || name === "PermissionDeniedError" ? "permission"
+        : name === "NotFoundError" || name === "DevicesNotFoundError" ? "no_device"
+        : name === "NotReadableError" || name === "TrackStartError" ? "device_busy"
+        : name === "SecurityError" ? "security" : "unknown";
+      const messages: Record<string, [string, string]> = {
+        permission: ["このサイトのマイク利用が拒否されました。サイトごとの権限を確認してください。", "Microphone permission was denied for this site."],
+        no_device: ["使用できる入力マイクが見つかりません。", "No input microphone found."],
+        device_busy: ["マイクを開けません。別のアプリによる使用やデバイスの状態を確認してください。", "Could not open microphone. Check device usage."],
+        security: ["このページではマイクを利用できません。localhostまたはHTTPSで開いてください。", "Microphone requires localhost or HTTPS."],
+        unknown: ["マイク取得時に予期しないエラーが発生しました。音声診断ログを確認してください。", "Unexpected microphone access error. Check voice diagnostics."]
+      };
+      failReason(trace, "getUserMedia "+kind+" ("+name+")", messages[kind][locale==="ja"?0:1]);
       return;
     }
     if (stale()) {

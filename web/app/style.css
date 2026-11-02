@@ -367,3 +367,47 @@ a,.link{color:#b3d5ff}
 main.recipe-detail-page{display:block;width:100%;max-width:100%}
 main.recipe-detail-page>.recipe-detail{width:100%;max-width:780px;margin-inline:auto}
 main.recipe-detail-page>div[hidden]{display:none!important}
+
+
+/* Submitted-draft QA: compact cost summary and explicit image generation dialog. */
+.draft-cost-summary{border:1px solid rgba(211,177,100,.42);border-radius:14px;padding:14px;margin:13px 0;background:rgba(154,128,67,.08)}
+.draft-cost-summary>strong{display:block;margin-bottom:12px}
+.draft-cost-values{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.draft-cost-values>span{display:flex;flex-direction:column;font-size:.75rem;gap:5px;min-width:0}
+.draft-cost-values b{font-size:clamp(.95rem,3vw,1.18rem);overflow-wrap:anywhere}
+.draft-cost-summary p{margin:12px 0 0;font-size:.8rem;color:#e7c77e}
+.draft-image-actions{margin:12px 0 16px}
+.draft-image-launch{width:100%;padding:13px 16px;border:1px solid rgba(190,207,197,.35);border-radius:12px;color:#f1f0e9;font-weight:600;background:#303935;box-shadow:none;letter-spacing:.02em;transition:background .15s,border-color .15s}
+.draft-image-launch:hover,.draft-image-launch:focus-visible{background:#3b4741;border-color:#a9c2b0}
+.draft-image-launch:disabled{opacity:.5}
+.draft-image-modal-backdrop{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:20px;background:rgba(0,0,0,.7)}
+.draft-image-modal{background:#272a31;color:#f5f5f5;border:1px solid #657078;border-radius:19px;padding:22px;width:min(100%,440px);max-height:calc(100dvh - 40px);overflow:auto;box-shadow:0 18px 55px rgba(0,0,0,.55)}
+.draft-image-modal-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.draft-image-modal-head h3{margin:0}
+.draft-image-modal-head button{font-size:1.5rem;background:transparent;color:inherit;border:0}
+.draft-image-modal label{display:block;margin:16px 0 10px}
+.draft-image-modal textarea{display:block;width:100%;margin-top:8px;min-height:98px;box-sizing:border-box;background:#383c44;color:inherit;border:1px solid #7e858b;border-radius:10px;padding:12px;resize:vertical}
+.draft-image-modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
+.draft-image-modal-actions button{padding:10px 16px;border-radius:999px;border:1px solid #767a82}
+.draft-image-modal-actions button:last-child{background:#e5bd64;color:#221a0c;border-color:#e5bd64;font-weight:700}
+.draft-image-modal-actions button:disabled{opacity:.6}
+.voice-status-list{position:fixed;right:14px;bottom:calc(86px + env(safe-area-inset-bottom,0px));z-index:90;width:min(240px,calc(100vw - 34px));list-style:none;margin:0;padding:9px 11px;background:rgba(33,41,44,.86);border:1px solid rgba(182,201,195,.35);border-radius:19px;box-shadow:0 8px 28px rgba(0,0,0,.25);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);pointer-events:none;display:grid;gap:8px}
+.voice-status-list li{display:flex;align-items:center;gap:9px;color:#ecf3ef;min-width:0;padding:0}
+.voice-status-list .status-symbol{flex:0 0 27px;width:27px;height:27px;border-radius:50%;display:grid;place-items:center;background:rgba(35,136,212,.2);color:#63b8f7;font-size:1.15rem;font-weight:700}
+.voice-status-list .status-price .status-symbol{color:#65d69c;background:rgba(38,151,101,.2)}
+.voice-status-list .status-error .status-symbol{color:#ffb193;background:rgba(186,64,58,.2)}
+.voice-status-list .status-detail{display:grid;gap:5px;min-width:0;flex:1}
+.voice-status-list .status-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.76rem;font-weight:600;line-height:1.25}
+.voice-status-list .status-track{display:block;height:3px;border-radius:5px;background:rgba(226,239,238,.22);overflow:hidden;position:relative}
+.voice-status-list .status-track span{display:block;width:36%;height:100%;border-radius:5px;background:#58b6ef;animation:status-activity 1.6s ease-in-out infinite alternate}
+.voice-status-list .status-price .status-track span{background:#60ca98}
+@keyframes status-activity{from{transform:translateX(0)}to{transform:translateX(175%)}}
+@media(prefers-reduced-motion:reduce){.voice-status-list .status-track span{animation:none;width:100%;opacity:.55}}
+
+/* Saved recipe: discreet, keyboard/touch accessible incomplete-field disclosure. */
+.recipe-gap-disclosure{margin:10px 0 16px;border:1px solid rgba(195,166,103,.35);border-radius:11px;padding:9px 12px;background:rgba(169,129,63,.07)}
+.recipe-gap-disclosure summary{cursor:pointer;color:#dfbd83;font-size:.83rem;font-weight:600;list-style-position:inside}
+.recipe-gap-disclosure summary:hover{color:#f1d8a7}
+.recipe-gap-disclosure ul{margin:10px 0;padding-left:23px;color:#e7e5df;font-size:.85rem}
+.recipe-gap-disclosure li{padding:3px 0}
+.recipe-gap-disclosure p{font-size:.77rem;color:#b9c0bd;margin:8px 0 2px}
