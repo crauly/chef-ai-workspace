@@ -130,7 +130,7 @@ export default function Library(){
    const operations:Record<string,string>[]=[];
    if((editQty.trim()&&editQty.trim()!==line.quantity.value)||editUnit!==(line.unit||"g")||(confirmQty&&line.quantity.status==="assumed"))
      operations.push({op:"set_material_quantity",material_id:line.id,value:editQty.trim()||line.quantity.value||"",unit:editUnit});
-   if((editPrice.trim()&&editPrice.trim()!==(line.price_override?.amount_jpy.value||""))||editPriceQty!==(line.price_override?.per_quantity||"1")||editPriceUnit!==(line.price_override?.per_unit||line.unit||"g")||(confirmPrice&&line.price_override?.amount_jpy.status==="assumed"))
+   if(!line.ingredient_id&&((editPrice.trim()&&editPrice.trim()!==(line.price_override?.amount_jpy.value||""))||editPriceQty!==(line.price_override?.per_quantity||"1")||editPriceUnit!==(line.price_override?.per_unit||line.unit||"g")||(confirmPrice&&line.price_override?.amount_jpy.status==="assumed")))
      operations.push({op:"set_material_price",material_id:line.id,
        price_jpy:editPrice.trim()||line.price_override?.amount_jpy.value||"",
        price_quantity:editPriceQty,price_unit:editPriceUnit});
@@ -191,7 +191,7 @@ export default function Library(){
   if(!line)return null;
   const name=selected.display_names?.[line.id]?.display?.trim()||line.material_name.value?.trim()||t("unnamed");
   const qtyChanged=editQty.trim()!==line.quantity.value||editUnit!==(line.unit||"g");
-  const priceChanged=editPrice.trim()!==(line.price_override?.amount_jpy.value||"")||editPriceQty!==(line.price_override?.per_quantity||"1")||editPriceUnit!==(line.price_override?.per_unit||line.unit||"g");
+  const priceChanged=editPrice.trim()!==(line.price_override?.amount_jpy.value||"")||editPriceQty!==(line.price_override?.per_quantity||"1")||editPriceUnit!==(line.price_override?.per_unit||line.unit||"g"));
   return <div className="name-choice-overlay" onClick={()=>setEditingId(null)}>
    <section role="dialog" aria-modal="true" aria-label={locale==="ja"?`${name}を編集`:`Edit ${name}`} className="name-choice-dialog" onClick={e=>e.stopPropagation()}>
     <h4>{name}</h4>
@@ -200,11 +200,13 @@ export default function Library(){
     <div className="edit-modal-fields">
      <label>{locale==="ja"?"数量":"Quantity"}<input inputMode="decimal" value={editQty} onChange={e=>setEditQty(e.target.value)} disabled={busy}/></label>
      <label>Unit<select value={editUnit} onChange={e=>setEditUnit(e.target.value)} disabled={busy}><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option>{editUnit&&!["g","kg","ml","L"].includes(editUnit)&&<option value={editUnit}>{editUnit}</option>}</select></label>
+     {!line.ingredient_id&&<>
      <label>{locale==="ja"?"仕入単価（円）":"Price (JPY)"}<input inputMode="decimal" value={editPrice} onChange={e=>setEditPrice(e.target.value)} disabled={busy}/></label>
      <label>{locale==="ja"?"単価の基準数量":"Price per quantity"}<input inputMode="decimal" value={editPriceQty} onChange={e=>setEditPriceQty(e.target.value)} disabled={busy}/></label>
      <label>Price unit<select value={editPriceUnit} onChange={e=>setEditPriceUnit(e.target.value)} disabled={busy}><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option>{editPriceUnit&&!["g","kg","ml","L"].includes(editPriceUnit)&&<option value={editPriceUnit}>{editPriceUnit}</option>}</select></label>
+     </>}
      {line.quantity.status==="assumed"&&<label><input type="checkbox" checked={confirmQty} onChange={e=>setConfirmQty(e.target.checked)}/> {locale==="ja"?"現在の数量を明示確定":"Confirm current quantity"}</label>}
-     {line.price_override?.amount_jpy.status==="assumed"&&<label><input type="checkbox" checked={confirmPrice} onChange={e=>setConfirmPrice(e.target.checked)}/> {locale==="ja"?"現在の仕入価格を明示確定":"Confirm current price"}</label>}
+     {!line.ingredient_id&&line.price_override?.amount_jpy.status==="assumed"&&<label><input type="checkbox" checked={confirmPrice} onChange={e=>setConfirmPrice(e.target.checked)}/> {locale==="ja"?"現在の仕入価格を明示確定":"Confirm current price"}</label>}
     </div>
     <div className="actions"><button type="button" disabled={busy} onClick={()=>void submitEdit()}>{t("save")}</button>
     <button className="secondary" type="button" disabled={busy} onClick={()=>setEditingId(null)}>{t("close")}</button></div>
