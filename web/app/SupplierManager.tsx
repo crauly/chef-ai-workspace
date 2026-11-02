@@ -7,12 +7,13 @@ export default function SupplierManager({locale}:{locale:string}){
  const [name,setName]=useState(""),[note,setNote]=useState("");
  const [editing,setEditing]=useState<string|null>(null);
  const [busy,setBusy]=useState(false),[error,setError]=useState("");
+ const [page,setPage]=useState(1);
  async function load(){
-  const res=await fetch("/api/suppliers",{cache:"no-store"});
+  const res=await fetch(`/api/suppliers?page=${page}&page_size=50`,{cache:"no-store"});
   if(!res.ok)throw new Error(String(res.status));
   const data=await res.json() as {items:Supplier[]};setItems(data.items);
  }
- useEffect(()=>{void load().catch(()=>setError(ja?"仕入先を取得できません":"Could not load suppliers"));},[locale]);
+ useEffect(()=>{void load().catch(()=>setError(ja?"仕入先を取得できません":"Could not load suppliers"));},[locale,page]);
  function edit(item:Supplier){setEditing(item.id);setName(item.name);setNote(item.note??"");}
  function reset(){setEditing(null);setName("");setNote("");}
  async function save(e:React.FormEvent){
@@ -21,7 +22,7 @@ export default function SupplierManager({locale}:{locale:string}){
   try{
    const res=await fetch(editing?"/api/suppliers/"+editing:"/api/suppliers",{method:editing?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:name.trim(),note:note.trim()||null})});
    if(!res.ok)throw new Error(String(res.status));
-   await load();reset();
+   reset();await load();
   }catch{setError(ja?"仕入先を保存できませんでした":"Could not save supplier");}
   finally{setBusy(false);}
  }
@@ -42,6 +43,7 @@ export default function SupplierManager({locale}:{locale:string}){
    <div className="toolbar"><button disabled={busy||!name.trim()}>{editing?(ja?"変更を保存":"Save changes"):(ja?"仕入先を登録":"Add supplier")}</button>{editing&&<button type="button" onClick={reset}>{ja?"キャンセル":"Cancel"}</button>}</div>
   </form>
   <ul className="supplier-manager-list">{items.map(item=><li key={item.id}><div><strong>{item.name}</strong>{item.note&&<small>{item.note}</small>}</div><div className="toolbar"><button type="button" disabled={busy} onClick={()=>edit(item)}>{ja?"編集":"Edit"}</button><button type="button" disabled={busy} onClick={()=>void remove(item)}>{ja?"削除":"Delete"}</button></div></li>)}</ul>
+  <div className="toolbar"><button type="button" disabled={busy||page===1} onClick={()=>setPage(v=>v-1)}>{ja?"前へ":"Previous"}</button><span>{page}</span><button type="button" disabled={busy||items.length<50} onClick={()=>setPage(v=>v+1)}>{ja?"次へ":"Next"}</button></div>
   {!items.length&&!error&&<p className="muted">{ja?"登録済み仕入先はありません。":"No suppliers registered."}</p>}
  </section>;
 }
