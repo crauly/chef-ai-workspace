@@ -53,6 +53,33 @@ class VoiceFullRecipeTests(unittest.TestCase):
             "selling_price_jpy": "2200"
         }
 
+    def test_count_unit_piece_saves_and_costs(self):
+        body = self.payload()
+        body["title"] = "さくら卵のスクランブルエッグ"
+        body["materials"] = [{
+            "name": "さくら卵", "quantity": "3", "unit": "個",
+            "price_jpy": "20", "price_quantity": "1", "price_unit": "個",
+        }]
+        response = self.client.post("/demo/recipes/full", json=body, headers=self.headers)
+        self.assertEqual(response.status_code, 201, response.text)
+        recipe = response.json()
+        self.assertEqual(recipe["materials"][0]["unit"], "個")
+        snapshot = self.repo.snapshots[(self.owner, recipe["id"])]
+        self.assertEqual(snapshot["total_cost_jpy"], "60")
+
+    def test_count_and_weight_without_conversion_is_partial(self):
+        body = self.payload()
+        body["materials"] = [{
+            "name": "さくら卵", "quantity": "3", "unit": "個",
+            "price_jpy": "60", "price_quantity": "150", "price_unit": "g",
+        }]
+        response = self.client.post("/demo/recipes/full", json=body, headers=self.headers)
+        self.assertEqual(response.status_code, 201, response.text)
+        recipe = response.json()
+        snapshot = self.repo.snapshots[(self.owner, recipe["id"])]
+        self.assertTrue(snapshot["partial"])
+        self.assertIsNone(snapshot["total_cost_jpy"])
+
     def test_full_recipe_requires_authorized_session(self):
         response = self.client.post("/demo/recipes/full", json=self.payload())
         self.assertEqual(response.status_code, 403)
