@@ -20,7 +20,7 @@ export function voiceCommand(utterance: string): VoiceCommand {
   if (review.test(text) || /^review$/i.test(text) || /^(?:下書き|内容)(?:を)?見せて(?:ください)?$/.test(text)) return "review";
   const save = (s: string) => {
     const value = s.replace(/^(?:この内容で|この内容を|その内容で|これで|それで|内容を|内容で|この下書きを|下書きを|このレシピを|このレシピで|レシピを|登録内容を)/, "");
-    return /^(?:登録を確定|保存を確定|登録確定|保存確定|登録|保存|確定)(?:してください|して下さい|して|します|する|をお願いします|お願いします|をお願いいたします)?$/.test(value) ||
+    return /^(?:正式登録|本登録|レシピ登録|登録を確定|保存を確定|登録確定|保存確定|登録|保存|確定)(?:してください|して下さい|して|します|する|をお願いします|お願いします|をお願いいたします)?$/.test(value) ||
       /^(?:please)?(?:save|register|confirmsave)(?:please)?$/i.test(value);
   };
   if (save(text)) return "save";
