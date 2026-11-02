@@ -233,3 +233,16 @@ a,.link{color:#b3d5ff}
 .voice-spin{display:inline-block;width:.9em;height:.9em;flex:none;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:voice-spin .8s linear infinite}
 @keyframes voice-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.voice-spin{animation:none}}
+
+/* Recipe detail: readable rows + edit modal (mobile-first, desktop intact). */
+.recipe-detail{scroll-margin-top:12px}
+.detail-ingredients{list-style:none;margin:12px 0;padding:0;display:grid;gap:10px}
+.ingredient-row{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #e4e9e3;border-radius:10px;padding:12px 14px}
+.ingredient-main{flex:1;min-width:0;display:grid;gap:2px}
+.ingredient-price{color:#244a39}
+.icon-button{min-width:44px;min-height:44px;padding:8px 10px;border-radius:10px;background:#e3e9e1;color:#183b30;font-size:1.15rem;line-height:1}
+.edit-modal-fields{display:grid;gap:10px;margin:14px 0}
+.edit-modal-fields label{display:grid;gap:6px}
+.edit-modal-fields input,.edit-modal-fields select{width:100%}
+.edit-diff{background:#f5f3e9;border-radius:8px;padding:10px 12px;margin:12px 0;overflow-wrap:anywhere}
+@media(max-width:520px){.ingredient-row{align-items:flex-start;padding:12px}.ingredient-main{font-size:1.02rem}}

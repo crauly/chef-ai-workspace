@@ -2,7 +2,8 @@ import {test, expect} from "@playwright/test";
 const id = "11111111-1111-4111-8111-111111111111";
 test.beforeEach(async ({request}) => {await request.post("http://127.0.0.1:8100/test/reset");});
 test("Japanese chef reviews, explicitly approves, saves, recalculates and records a correction", async ({page, request}) => {
-  await page.goto("/"); await page.getByRole("button", {name: "詳細を見る"}).click();
+  await page.goto("/"); await page.getByRole("button", {name: "詳細を見る"}).first().click();
+  await page.getByRole("button", {name: "AIに変更を相談"}).click();
   await page.getByLabel("料理人の指示", {exact: true}).fill("片栗粉15g、売価1800円に");
   await page.getByRole("button", {name: "変更案を作る"}).click();
   const proposal = page.getByRole("region", {name: "提案の差分"});
@@ -22,13 +23,14 @@ test("Japanese chef reviews, explicitly approves, saves, recalculates and record
   await page.getByRole("button", {name: "訂正を確認して登録"}).click();
   await expect(page.getByRole("region",{name:"AIに変更を相談"}).getByRole("status")).toContainText("訂正履歴を登録しました");
   expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).corrections).toEqual([{heard: "澱粉", preferred: "片栗粉"}]);
-  await page.reload(); await page.getByRole("button", {name: "詳細を見る"}).click();
+  await page.reload(); await page.getByRole("button", {name: "詳細を見る"}).first().click();
   await expect(page.getByRole("region", {name: "Recipe cost summary"})).toContainText("¥15");
 });
 test("English mobile: edit/discard invalidates approval; empty, stale and unavailable proposals never save", async ({page, request}) => {
   await page.setViewportSize({width: 390, height: 844}); await page.goto("/");
   await page.getByLabel("Display language").selectOption("en-US");
-  await page.getByRole("button", {name: "View details"}).click();
+  await page.getByRole("button", {name: "View details"}).first().click();
+  await page.getByRole("button", {name: "Ask AI for a change"}).click();
   const input = page.getByLabel("Chef instruction", {exact: true});
   await input.fill("Change to 15g"); await page.getByRole("button", {name: "Suggest changes"}).click();
   await page.getByRole("checkbox").check(); await input.fill("Different instruction");
@@ -56,7 +58,8 @@ test("proxy gates anonymous calls, cross-origin writes, invalid IDs and private 
   expect(result.status()).toBe(502); expect(await result.text()).not.toContain("test-only-backend-token");
 });
 test("uncertain save retries the exact request ID without a second commit", async ({page, request}) => {
-  await page.goto("/"); await page.getByRole("button", {name: "詳細を見る"}).click();
+  await page.goto("/"); await page.getByRole("button", {name: "詳細を見る"}).first().click();
+  await page.getByRole("button", {name: "AIに変更を相談"}).click();
   await page.getByLabel("料理人の指示", {exact: true}).fill("片栗粉15g、売価1800円に");
   await page.getByRole("button", {name: "変更案を作る"}).click();
   await page.getByRole("checkbox").check();
@@ -75,7 +78,8 @@ test("uncertain save retries the exact request ID without a second commit", asyn
   expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).confirms).toHaveLength(1);
 });
 test("a concurrent revision refreshes the selected recipe and permits a fresh review without reopening", async ({page, request}) => {
-  await page.goto("/"); await page.getByRole("button", {name: "詳細を見る"}).click();
+  await page.goto("/"); await page.getByRole("button", {name: "詳細を見る"}).first().click();
+  await page.getByRole("button", {name: "AIに変更を相談"}).click();
   await page.getByLabel("料理人の指示", {exact: true}).fill("片栗粉15g、売価1800円に");
   await page.getByRole("button", {name: "変更案を作る"}).click(); await page.getByRole("checkbox").check();
   await request.post("http://127.0.0.1:8100/test/advance");

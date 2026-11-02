@@ -21,6 +21,16 @@ export default function Library(){
  const [waking,setWaking]=useState(false);
  const [cost,setCost]=useState<{partial:boolean;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean}|null>(null);
  const [food,setFood]=useState(""),[qty,setQty]=useState(""),[unit,setUnit]=useState("g"),[price,setPrice]=useState(""),[priceQty,setPriceQty]=useState("1"),[priceUnit,setPriceUnit]=useState("kg");
+ // Recipe detail editing (modal) + AI consult toggle. The modal only calls
+ // the existing /confirm path (saveOperations); the AI editor stays mounted
+ // while collapsed so the voice edit flow keeps working.
+ const [editingId,setEditingId]=useState<string|null>(null);
+ const [editQty,setEditQty]=useState(""),[editUnit,setEditUnit]=useState("g");
+ const [editPrice,setEditPrice]=useState(""),[editPriceQty,setEditPriceQty]=useState("1"),[editPriceUnit,setEditPriceUnit]=useState("g");
+ const [aiOpen,setAiOpen]=useState(false);
+ const detailRef=useRef<HTMLElement|null>(null);
+ const selectedId=selected?.id;
+ useEffect(()=>{if(selectedId)detailRef.current?.scrollIntoView({block:"start"});},[selectedId]);
  const [locale,setLocale]=useState<Locale>("ja");
  const t=(key:Parameters<typeof label>[1])=>label(locale,key);
  useEffect(()=>{const current=localStorage.getItem("chef-ui-locale");if(current==="ja"||current==="en-US"){setLocale(current);document.documentElement.lang=current;}},[]);
@@ -59,15 +69,15 @@ export default function Library(){
  try{const result=await request<{recipe:Recipe}>(`/api/recipes/${selected.id}/confirm`,{method:"POST",body:JSON.stringify({base_revision:selected.revision,request_id:crypto.randomUUID(),operations:[{op:"set_title",value:rename.trim()}],save_version:true})});setSelected(result.recipe);await reload();}
  catch(e){setError(String(e));}finally{setBusy(false);}}
 
- async function saveOperations(operations:Record<string,string>[]) {
-   if(!selected||busy)return;
+ async function saveOperations(operations:Record<string,string>[]):Promise<boolean> {
+   if(!selected||busy)return false;
    setBusy(true);
    try {
      const result=await request<{recipe:Recipe}>(`/api/recipes/${selected.id}/confirm`,{
        method:"POST",body:JSON.stringify({base_revision:selected.revision,
          request_id:crypto.randomUUID(),operations,save_version:true})});
-     setSelected(result.recipe);await reload();setError("");
-   }catch(e){setError(String(e));}finally{setBusy(false);}
+     setSelected(result.recipe);await reload();setError("");return true;
+   }catch(e){setError(String(e));return false;}finally{setBusy(false);}
  }
  async function addFood(e:React.FormEvent){e.preventDefault();
    if(!food.trim()||!qty.trim()||!price.trim()||!priceQty.trim())return;
@@ -75,12 +85,27 @@ export default function Library(){
      quantity:qty,unit,price_jpy:price,price_quantity:priceQty,price_unit:priceUnit}]);
    setFood("");setQty("");setPrice("");
  }
- async function updateQuantity(materialId:string,quantity:string,measure:string){
-   await saveOperations([{op:"set_material_quantity",material_id:materialId,value:quantity,unit:measure}]);
+ function openEdit(materialId:string){
+   const line=selected?.materials.find(m=>m.id===materialId);
+   if(!line||busy)return;
+   setEditQty(line.quantity.value||"");setEditUnit(line.unit||"g");
+   setEditPrice(line.price_override?.amount_jpy.value||"");
+   setEditPriceQty(line.price_override?.per_quantity||"1");
+   setEditPriceUnit(line.price_override?.per_unit||line.unit||"g");
+   setEditingId(materialId);
  }
- async function updatePrice(materialId:string,newPrice:string,perQuantity:string,perUnit:string){
-   await saveOperations([{op:"set_material_price",material_id:materialId,
-     price_jpy:newPrice,price_quantity:perQuantity,price_unit:perUnit}]);
+ async function submitEdit(){
+   const line=selected?.materials.find(m=>m.id===editingId);
+   if(!line)return;
+   const operations:Record<string,string>[]=[];
+   if((editQty.trim()&&editQty.trim()!==line.quantity.value)||editUnit!==(line.unit||"g"))
+     operations.push({op:"set_material_quantity",material_id:line.id,value:editQty.trim()||line.quantity.value||"",unit:editUnit});
+   if((editPrice.trim()&&editPrice.trim()!==(line.price_override?.amount_jpy.value||""))||editPriceQty!==(line.price_override?.per_quantity||"1")||editPriceUnit!==(line.price_override?.per_unit||line.unit||"g"))
+     operations.push({op:"set_material_price",material_id:line.id,
+       price_jpy:editPrice.trim()||line.price_override?.amount_jpy.value||"",
+       price_quantity:editPriceQty,price_unit:editPriceUnit});
+   if(!operations.length){setEditingId(null);return;}
+   if(await saveOperations(operations))setEditingId(null);
  }
  function browseByVoice(target:string):Promise<Recipe|null>{
   browseWaiter.current?.(null);
@@ -101,11 +126,39 @@ export default function Library(){
  <div id="recipes" className="grid" aria-busy={loadingList}>{items.map(item=><section className="card" key={item.id}><h2>{item.title}</h2><p className="muted">Version {item.revision}</p><button disabled={busy} onClick={()=>void open(item.id)}>{t("details")}</button></section>)}</div>
  {items.length===0&&!error&&!loadingList&&<p className="muted">{query?(locale==="ja"?"一致するレシピがありません。":"No recipes match this name."):t("empty")}</p>}
  <div className="toolbar"><button disabled={page===1} onClick={()=>setPage(p=>p-1)}>{t("previous")}</button><span>{t("page")} {page}</span><button disabled={items.length<20} onClick={()=>setPage(p=>p+1)}>{t("next")}</button></div>
- {selected&&<section className="card"><div className="toolbar"><h2>{t("detail")}</h2><button disabled={busy} onClick={()=>setSelected(null)}>{t("close")}</button></div>
+ {selected&&<section className="card recipe-detail" ref={detailRef} aria-label={t("detail")}><div className="toolbar"><h2>{selected.title.value||t("detail")}</h2><button disabled={busy} onClick={()=>setSelected(null)}>{t("close")}</button></div>
  <p className="tag">Revision {selected.revision}</p>
- <AIEditor key={selected.id} recipe={selected} locale={locale} control={editor} markReview={()=>reviewBoundary.current?.()??-1} onBusy={setBusy} onSaved={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");void reload();}} />
+ <button type="button" disabled={busy} aria-expanded={aiOpen} onClick={()=>setAiOpen(v=>!v)}>{t("aiInstruction")}</button>
+ <div hidden={!aiOpen}><AIEditor key={selected.id} recipe={selected} locale={locale} control={editor} markReview={()=>reviewBoundary.current?.()??-1} onBusy={b=>{setBusy(b);if(b)setAiOpen(true);}} onSaved={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");void reload();}} /></div>
  <form onSubmit={change}><input aria-label={t("rename")} value={rename} onChange={e=>setRename(e.target.value)}/><button disabled={busy||!rename.trim()}>{t("save")}</button></form>
- <h2>{t("ingredients")}</h2>{selected.materials.length===0?<p className="muted">{t("noIngredients")}</p>:<ul>{selected.materials.map(m=><li key={m.id}><strong>{selected.display_names?.[m.id]?.display?.trim() || m.material_name.value?.trim() || t("unnamed")}</strong> — {m.quantity.value??t("missing")} {m.unit??""}{m.quantity.status==="assumed"?` (${t("assumed")})`:m.quantity.status==="unresolved"?` (${t("unresolved")})`:""} <button disabled={busy} type="button" onClick={()=>{const v=prompt(locale==="ja"?"新しい数量":"New quantity",m.quantity.value||"");if(v!==null&&v.trim())void updateQuantity(m.id,v,m.unit||"g");}}>{locale==="ja"?"数量変更":"Edit qty"}</button> <button disabled={busy} type="button" onClick={()=>{const p=m.price_override;const v=prompt(locale==="ja"?"新しい仕入単価（円）":"New price JPY",p?.amount_jpy.value||"");if(v!==null&&v.trim())void updatePrice(m.id,v,p?.per_quantity||"1",p?.per_unit||m.unit||"g");}}>{locale==="ja"?"単価変更":"Edit price"}</button></li>)}</ul>}
+ <h2>{t("ingredients")}</h2>{selected.materials.length===0?<p className="muted">{t("noIngredients")}</p>:<ul className="detail-ingredients">{selected.materials.map(m=>{
+  const name=selected.display_names?.[m.id]?.display?.trim()||m.material_name.value?.trim()||t("unnamed");
+  const qtyMark=m.quantity.status==="assumed"?` (${t("assumed")})`:m.quantity.status==="unresolved"?` (${t("unresolved")})`:"";
+  const price=m.price_override;
+  const priceText=price?`${locale==="ja"?"仕入単価":"Purchase"} ¥${price.amount_jpy.value} / ${price.per_quantity}${price.per_unit}${price.amount_jpy.status==="assumed"?` (${t("assumed")})`:price.amount_jpy.status==="unresolved"?` (${t("unresolved")})`:""}`:(locale==="ja"?"仕入単価 未設定":"Purchase price not set");
+  return <li key={m.id} className="ingredient-row"><div className="ingredient-main"><strong>{name}</strong><span>{m.quantity.value??t("missing")} {m.unit??""}{qtyMark}</span><span className="ingredient-price">{priceText}</span></div><button className="icon-button" disabled={busy} type="button" aria-label={locale==="ja"?`${name}を編集`:`Edit ${name}`} onClick={()=>openEdit(m.id)}>✏️</button></li>;})}</ul>}
+ {editingId!==null&&(()=>{
+  const line=selected.materials.find(m=>m.id===editingId);
+  if(!line)return null;
+  const name=selected.display_names?.[line.id]?.display?.trim()||line.material_name.value?.trim()||t("unnamed");
+  const qtyChanged=editQty.trim()!==line.quantity.value||editUnit!==(line.unit||"g");
+  const priceChanged=editPrice.trim()!==(line.price_override?.amount_jpy.value||"")||editPriceQty!==(line.price_override?.per_quantity||"1")||editPriceUnit!==(line.price_override?.per_unit||line.unit||"g");
+  return <div className="name-choice-overlay" onClick={()=>setEditingId(null)}>
+   <section role="dialog" aria-modal="true" aria-label={locale==="ja"?`${name}を編集`:`Edit ${name}`} className="name-choice-dialog" onClick={e=>e.stopPropagation()}>
+    <h4>{name}</h4>
+    <p className="muted">{locale==="ja"?"現在":"Current"}: {line.quantity.value??t("missing")} {line.unit??""} ／ {line.price_override?`¥${line.price_override.amount_jpy.value} / ${line.price_override.per_quantity}${line.price_override.per_unit}`:(locale==="ja"?"仕入単価 未設定":"Purchase price not set")}</p>
+    {(qtyChanged||priceChanged)&&<p className="edit-diff">{locale==="ja"?"変更後":"After"}: {editQty.trim()||"?"} {editUnit}{priceChanged?` ／ ¥${editPrice.trim()||"?"} / ${editPriceQty}${editPriceUnit}`:""}</p>}
+    <div className="edit-modal-fields">
+     <label>{locale==="ja"?"数量":"Quantity"}<input inputMode="decimal" value={editQty} onChange={e=>setEditQty(e.target.value)} disabled={busy}/></label>
+     <label>Unit<select value={editUnit} onChange={e=>setEditUnit(e.target.value)} disabled={busy}><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option></select></label>
+     <label>{locale==="ja"?"仕入単価（円）":"Price (JPY)"}<input inputMode="decimal" value={editPrice} onChange={e=>setEditPrice(e.target.value)} disabled={busy}/></label>
+     <label>{locale==="ja"?"単価の基準数量":"Price per quantity"}<input inputMode="decimal" value={editPriceQty} onChange={e=>setEditPriceQty(e.target.value)} disabled={busy}/></label>
+     <label>Price unit<select value={editPriceUnit} onChange={e=>setEditPriceUnit(e.target.value)} disabled={busy}><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option></select></label>
+    </div>
+    <div className="actions"><button type="button" disabled={busy} onClick={()=>void submitEdit()}>{t("save")}</button>
+    <button className="secondary" type="button" disabled={busy} onClick={()=>setEditingId(null)}>{t("close")}</button></div>
+   </section>
+  </div>;})()}
  <form onSubmit={addFood} className="material-form">
  <fieldset><legend>{locale==="ja"?"食材":"Ingredient"}</legend>
  <input aria-label={locale==="ja"?"食材名":"Ingredient name"} placeholder={locale==="ja"?"食材名（例：片栗粉）":"Ingredient name"} value={food} onChange={e=>setFood(e.target.value)} required/>
