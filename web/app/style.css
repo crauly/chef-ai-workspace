@@ -412,6 +412,28 @@ main.recipe-detail-page>div[hidden]{display:none!important}
 .recipe-gap-disclosure li{padding:3px 0}
 .recipe-gap-disclosure p{font-size:.77rem;color:#b9c0bd;margin:8px 0 2px}
 
+/* Chef AI Workspace: purposeful, low-gradient grouping without altering the brand header. */
+.workspace-section{background:#182823;border:1px solid #345449;border-radius:19px;padding:clamp(14px,3vw,24px);margin:22px 0;color:#f2f5f0;scroll-margin-top:16px}
+.workspace-section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.workspace-section-head h2{margin:0;color:#f1f6f2;font-size:1.16rem;letter-spacing:.015em}
+.workspace-section-head p{margin:5px 0 0;color:#aabeb4;font-size:.84rem}
+.recipe-library-controls{display:grid;gap:11px}
+.recipe-library-controls form{display:flex;gap:8px;margin:0;align-items:stretch}
+.recipe-library-controls form input{flex:1;min-width:0}
+.recipe-library-controls form button{flex:none}
+.recipe-library-section .recipe-list{margin:16px 0}
+.workspace-settings-section{background:#15231f;border-color:#2c473c}
+.workspace-settings-content{display:grid;gap:16px}
+.workspace-settings-content #assist{display:contents}
+.workspace-settings-content .plate-settings{margin:0}
+.bottom-nav-settings-icon{font-size:1.3rem;line-height:1;display:block}
+@media(max-width:720px){
+.workspace-section{margin:15px 0;padding:15px 13px;border-radius:17px}
+.recipe-library-controls form{gap:6px}
+.bottom-nav a[href="#assist"]{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}
+.bottom-nav a[href="#assist"] span:last-child{font-size:.74rem}
+}
+
 /* Supplier master shares existing cards; no new visual design system. */
 .supplier-manager{display:grid;gap:12px}
 .supplier-manager form{display:grid;gap:10px}
