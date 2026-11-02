@@ -4,7 +4,7 @@ import SupplierManager from "../SupplierManager";
 import SourcingSuggestions from "../SourcingSuggestions";
 import PlateSettingsSection from "../PlateSettingsSection";
 import PriceBell from "../PriceBell";
-import {label,type Locale} from "../i18n";
+import {type Locale} from "../i18n";
 export default function SettingsPage(){
  const [locale,setLocale]=useState<Locale>("ja");
  useEffect(()=>{const stored=localStorage.getItem("chef-ui-locale");if(stored==="ja"||stored==="en-US"){setLocale(stored);document.documentElement.lang=stored;}},[]);
