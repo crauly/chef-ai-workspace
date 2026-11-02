@@ -30,7 +30,8 @@ export default function Library(){
  const [editPrice,setEditPrice]=useState(""),[editPriceQty,setEditPriceQty]=useState("1"),[editPriceUnit,setEditPriceUnit]=useState("g");
  const [aiOpen,setAiOpen]=useState(false);
  const [confirmQty,setConfirmQty]=useState(false),[confirmPrice,setConfirmPrice]=useState(false);
- useEffect(()=>{if(selected?.id)window.scrollTo({top:0,behavior:"instant"});},[selected?.id]);
+ const detailRef=useRef<HTMLElement|null>(null);
+ useEffect(()=>{if(selected?.id)detailRef.current?.scrollIntoView({block:"start",behavior:"instant"});},[selected?.id]);
 
  const [locale,setLocale]=useState<Locale>("ja");
  const t=(key:Parameters<typeof label>[1])=>label(locale,key);
@@ -132,7 +133,7 @@ export default function Library(){
  {items.length===0&&!error&&!loadingList&&<p className="muted">{query?(locale==="ja"?"一致するレシピがありません。":"No recipes match this name."):t("empty")}</p>}
  <div className="toolbar"><button disabled={page===1} onClick={()=>setPage(p=>p-1)}>{t("previous")}</button><span>{t("page")} {page}</span><button disabled={items.length<20} onClick={()=>setPage(p=>p+1)}>{t("next")}</button></div>
  </div>
- {selected&&<section className="recipe-detail" aria-label={t("detail")}>
+ {selected&&<section className="recipe-detail" ref={detailRef} aria-label={t("detail")}> 
  <div className="detail-topbar"><button type="button" className="detail-back" onClick={()=>{setEditingId(null);setAiOpen(false);setSelected(null);window.scrollTo({top:0,behavior:"instant"});}}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button><span className="detail-revision">REV {selected.revision}</span></div>
  <div className="detail-heading"><p className="detail-eyebrow">{locale==="ja"?"RECIPE DETAIL":"RECIPE DETAIL"}</p><h2>{selected.title.value||t("detail")}</h2></div>
  <DishImageSection key={selected.id} recipeId={selected.id} title={selected.title.value||""} names={selected.materials.map(m=>selected.display_names?.[m.id]?.display?.trim()||m.material_name.value||"")} locale={locale} disabled={busy}/>
