@@ -4,6 +4,7 @@ import {label, type Locale} from "./i18n";
 import AIEditor,{type EditorHandle} from "./AIEditor";
 import DishImageSection from "./DishImageSection";
 import {getDishPreview} from "./dish-image-cache";
+import {recipeGaps} from "./recipe-gaps";
 import PlateSettingsSection from "./PlateSettingsSection";
 import VoiceWorkspace from "./VoiceWorkspace";
 import PriceBell from "./PriceBell";
@@ -166,6 +167,11 @@ export default function Library(){
  {selected&&<section className="recipe-detail" ref={detailRef} aria-label={t("detail")}> 
  <div className="detail-topbar"><button type="button" className="detail-back" onClick={backToLibrary}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button><span className="detail-revision">REV {selected.revision}</span></div>
  <div className="detail-heading"><p className="detail-eyebrow">{locale==="ja"?"RECIPE DETAIL":"RECIPE DETAIL"}</p><h2>{selected.title.value||t("detail")}</h2></div>
+ {recipeGaps(selected).length>0&&<details className="recipe-gap-disclosure">
+  <summary title={locale==="ja"?"不足情報を確認":"View incomplete fields"}><span aria-hidden="true">⚠</span> {locale==="ja"?"未確定情報":"Incomplete details"} · {recipeGaps(selected).length}{locale==="ja"?"件":""}</summary>
+  <ul>{recipeGaps(selected).map((gap,index)=><li key={index}>{gap}</li>)}</ul>
+  <p>{locale==="ja"?"内容は保存されています。編集画面で後から補完できます。":"The recipe is saved. You can fill in these fields later."}</p>
+ </details>
  <DishImageSection key={selected.id} recipeId={selected.id} title={selected.title.value||""} names={selected.materials.map(m=>selected.display_names?.[m.id]?.display?.trim()||m.material_name.value||"")} locale={locale} disabled={busy}/>
  <div className="detail-metrics" role="region" aria-label="Recipe cost summary">
   <div><span>{locale==="ja"?"販売価格":"Selling price"}</span><strong>{selected.selling_price_jpy.value===null?"—":`¥${selected.selling_price_jpy.value}`}</strong></div>
