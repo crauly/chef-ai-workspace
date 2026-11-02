@@ -9,6 +9,7 @@ import PlateSettingsSection from "./PlateSettingsSection";
 import VoiceWorkspace from "./VoiceWorkspace";
 import PriceBell from "./PriceBell";
 import SourcingSuggestions from "./SourcingSuggestions";
+import SupplierManager from "./SupplierManager";
 import {request, startupRead, type Recipe} from "./types";
 type Item={id:string;title:string;revision:number;updated_at?:string};
 export default function Library(){
@@ -145,7 +146,7 @@ export default function Library(){
  }
  return <main id="top" className={selected?"recipe-detail-page":""}><div hidden={Boolean(selected)}><header className="chef-header"><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><PriceBell locale={locale}/><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">Japanese</option><option value="en-US">English</option></select></label></div><div className="chef-brand"><img src="/chef-ai-mark.svg" alt="" width="58" height="58"/><h1>Chef AI</h1></div><p className="muted">{t("intro")}</p></header>
  </div><div hidden={Boolean(selected)}><VoiceWorkspace locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} onCreated={recipe=>{showDetail(recipe);setError("");void reload();}}/></div>
- <div hidden={Boolean(selected)}><div id="assist"><SourcingSuggestions locale={locale}/></div>
+ <div hidden={Boolean(selected)}><div id="assist"><SupplierManager locale={locale}/><SourcingSuggestions locale={locale}/></div>
  <form onSubmit={create}><input aria-label={t("newName")} placeholder={t("newName")} value={draft} onChange={e=>setDraft(e.target.value)}/><button disabled={busy||!draft.trim()}>{t("create")}</button></form>
  <form onSubmit={e=>{e.preventDefault();search(searchInput);}}>
   <input aria-label={locale==="ja"?"レシピ名で検索":"Search recipes by name"} maxLength={200} value={searchInput} onChange={e=>setSearchInput(e.target.value)}/>
