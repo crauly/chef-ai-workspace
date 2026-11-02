@@ -123,7 +123,7 @@ createServer(async (req, res) => {
       found.name = body.name.trim(); found.note = body.note ?? null;
       return send(200, found);
     }
-    if (req.method === "DELETE") return send(204, {});
+    if (req.method === "DELETE") { suppliers = suppliers.filter(row => row.id !== supplierId); return send(204, {}); }
   }
   return send(200, recipe);
 }).listen(8100, "127.0.0.1");
