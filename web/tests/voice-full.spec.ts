@@ -50,6 +50,7 @@ test("count-based egg quantity and unit remain intact through voice save",async(
  await entry.fill("スクランブルエッグ、さくら卵3個。卵は1個20円。売価800円");
  await page.getByRole("button",{name:"反映"}).click();
  await expect(page.getByText("さくら卵 — 3個")).toBeVisible();
+ await expect(page.getByText(/原価サマリー.*¥60/)).toBeVisible();
  await expect(page.getByRole("button",{name:"レシピを登録"})).toBeEnabled();
  await page.getByRole("button",{name:"レシピを登録"}).click();
  await expect(page.getByText("レシピを保存しました。")).toBeVisible();
