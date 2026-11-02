@@ -139,10 +139,11 @@ class SupabasePersistence:
             raise RuntimeError("Unexpected supplier insert response")
         return rows[0]["id"]
 
-    def list_owned_suppliers(self, owner_id, limit=50):
+    def list_owned_suppliers(self, owner_id, limit=50, offset=0):
         response = (self.client.table("suppliers")
                     .select("id,name,note").eq("owner_id", owner_id)
-                    .order("name").limit(min(max(limit, 1), 100)).execute())
+                    .order("name").order("id")
+                    .range(max(offset, 0), max(offset, 0) + min(max(limit, 1), 100) - 1).execute())
         return response.data or []
 
     def update_owned_supplier(self, owner_id, supplier_id, name, note=None):
