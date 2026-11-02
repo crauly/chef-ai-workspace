@@ -11,8 +11,11 @@ test("explicit registration carries its generated preview to the saved recipe wi
   selling_price_jpy:"3800",notes:[],missing:[]
  }}));
  await page.route("**/api/recipes/full",async route=>{
-  saves++;const body=route.request().postDataJSON();recipeId=body.request_id;
-  await route.fulfill({status:201,json:{id:recipeId,title:{value:body.title,status:"confirmed"},materials:[],revision:0,selling_price_jpy:{value:"3800",status:"confirmed"}}});
+  saves++;
+  // Forward the real request to the fixture backend. The test must never
+  // invent a successful save response that bypasses backend persistence.
+  const body=route.request().postDataJSON();recipeId=body.request_id;
+  await route.continue();
  });
  await page.goto("/");
  const entry=page.getByLabel("音声認識できない場合の入力");
@@ -29,6 +32,8 @@ test("explicit registration carries its generated preview to the saved recipe wi
  // A request reaching the route is not the same as the application completing
  // the save. Ensure the formal save has finished before checking the cache.
  await expect(page.getByRole("region",{name:"Recipe cost summary"})).toBeVisible();
+ await expect(page.getByRole("heading",{name:"鴨胸肉のロティ"})).toBeVisible();
+ await expect(page.getByText("鴨胸肉",{exact:true})).toBeVisible();
  await expect(page).toHaveURL(new RegExp("/recipes/"+recipeId+"$"));
  // First verify the actual detail UI; it uses the same cache reader as production.
  const detailImage=page.getByRole("region",{name:"料理イメージ"}).getByRole("img",{name:"生成した料理イメージ"});
@@ -50,5 +55,10 @@ test("explicit registration carries its generated preview to the saved recipe wi
  },recipeId);
  expect(cache.keys,JSON.stringify({recipeId,cache,detailImageCount:await detailImage.count(),images,saves})).toContain(recipeId);
  await expect(detailImage).toHaveAttribute("src",IMG);
+ const stored=await page.request.get(`/api/recipes/${recipeId}`);
+ expect(stored.ok()).toBe(true);
+ const result=await stored.json();
+ expect(result.title.value).toBe("鴨胸肉のロティ");
+ expect(result.materials[0].material_name.value).toBe("鴨胸肉");
  expect(images).toBe(1);
 });
