@@ -159,12 +159,16 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    dataTurns.current=snapshot.turns;parsedTurns.current=snapshot.turns.length;
    setTurns(snapshot.turns.slice(-30));setDraft(snapshot.draft);
    dishPreviewRef.current=snapshot.image;setDishImageUrl(snapshot.image);
+   requestId.current=snapshot.requestId??null;
+   if(snapshot.draft.research_state==="deferred"&&snapshot.draft.pending_research?.length){
+    void enrichPrices(snapshot.draft,revision.current,epoch.current,"restored-draft");
+   }
   }).catch(()=>{}).finally(()=>{if(!cancelled)setRestored(true);});
   return()=>{cancelled=true;};
  },[]);
  useEffect(()=>{
   if(!restored)return;
-  const snapshot:WorkingDraftSnapshot<Draft>|null=draft?{draft,turns:[...dataTurns.current],image:dishPreviewRef.current}:null;
+  const snapshot:WorkingDraftSnapshot<Draft>|null=draft?{draft,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current}:null;
   void saveWorkingDraft(snapshot).catch(()=>{if(alive.current)say(ja?"下書きを端末に保存できませんでした。":"Could not persist the working draft on this device.");});
  },[draft,restored,dishImageUrl]);
 
@@ -397,6 +401,9 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   if(phaseRef.current!=="review"||!d||!mode||reviewed.current!==d||saveModeFor(d)!==mode)return;
   voice.cancel();setStage("saving");if(!draining.current)setBusy(true);say("承認された内容を保存しています…");
   if(!requestId.current)requestId.current=crypto.randomUUID();
+  // Persist the stable idempotency key before invoking the remote mutation.
+  try{await saveWorkingDraft({draft:d,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current});}
+  catch{setStage("dictating");say("保存IDを端末に保持できません。安全のため登録を中止しました。");return;}
   try{
    const recipe=await request<Recipe>("/api/recipes/full",{method:"POST",body:JSON.stringify({request_id:requestId.current,title:d.title,materials:toSaveMaterials(d),selling_price_jpy:d.selling_price_jpy||null})});
    if(!alive.current)return;
@@ -648,11 +655,11 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    {draft.interpretations?.map((item,index)=><p key={index}>料理の文脈からの解釈案：{item.source} → {item.suggestion}（{item.reason}）</p>)}
    {(()=>{
     let partial=0,missing=0;
-    const factor=(unit:string)=>unit==="kg"||unit==="l"?1000:unit==="g"||unit==="ml"?1:null;
+    const factor=(unit:string)=>unit==="kg"||unit==="L"?1000:unit==="g"||unit==="ml"?1:null;
     for(const material of draft.materials){
      const qty=Number(material.quantity),price=Number(material.price_jpy),basis=Number(material.price_quantity);
      const a=factor(material.unit),b=factor(material.price_unit);
-     const compatible=a!==null&&b!==null&&((["g","kg"].includes(material.unit)&&["g","kg"].includes(material.price_unit))||(["ml","l"].includes(material.unit)&&["ml","l"].includes(material.price_unit)));
+     const compatible=a!==null&&b!==null&&((["g","kg"].includes(material.unit)&&["g","kg"].includes(material.price_unit))||(["ml","L"].includes(material.unit)&&["ml","L"].includes(material.price_unit)));
      if(material.quantity.trim()&&material.price_jpy.trim()&&material.price_quantity.trim()&&compatible&&Number.isFinite(qty)&&Number.isFinite(price)&&Number.isFinite(basis)&&basis>0&&qty>=0&&price>=0)partial+=qty*a!*price/(basis*b!);
      else missing++;
     }
