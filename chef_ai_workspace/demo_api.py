@@ -128,6 +128,54 @@ class AssistRequestBody(BaseModel):
     name: str = Field(min_length=1, max_length=200)
 
 
+class SupplierBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=200)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+@router.get("/suppliers")
+def list_demo_suppliers(ctx=Depends(demo_context)):
+    owner, repository = ctx
+    return {"items": repository.list_owned_suppliers(owner)}
+
+
+@router.post("/suppliers", status_code=201)
+def create_demo_supplier(body: SupplierBody, ctx=Depends(demo_context)):
+    owner, repository = ctx
+    if not body.name.strip():
+        raise HTTPException(422, "Supplier name required")
+    supplier_id = repository.create_owned_supplier(owner, body.name, body.note)
+    return {"id": supplier_id, "name": body.name.strip(), "note": body.note}
+
+
+@router.put("/suppliers/{supplier_id}")
+def update_demo_supplier(supplier_id: UUID, body: SupplierBody, ctx=Depends(demo_context)):
+    owner, repository = ctx
+    updater = getattr(repository, "update_owned_supplier", None)
+    if not callable(updater):
+        raise HTTPException(503, "Supplier update not supported")
+    try:
+        return updater(owner, str(supplier_id), body.name, body.note)
+    except ValueError as exc:
+        raise HTTPException(404 if "not owned" in str(exc) else 422, str(exc)) from exc
+
+
+@router.delete("/suppliers/{supplier_id}", status_code=204)
+def delete_demo_supplier(supplier_id: UUID, ctx=Depends(demo_context)):
+    owner, repository = ctx
+    remover = getattr(repository, "delete_owned_supplier", None)
+    if not callable(remover):
+        raise HTTPException(503, "Supplier deletion not supported")
+    try:
+        remover(owner, str(supplier_id))
+    except ValueError as exc:
+        msg = str(exc)
+        raise HTTPException(404 if "not owned" in msg else 409, msg) from exc
+    from fastapi import Response
+    return Response(status_code=204)
+
+
 @router.get("/ingredients/search")
 def search_demo_ingredients(q: str = Query(default="", max_length=200),
                             limit: int = Query(default=20, ge=1, le=50),
