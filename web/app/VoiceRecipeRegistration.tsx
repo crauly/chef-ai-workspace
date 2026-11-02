@@ -6,6 +6,7 @@ import {useVoiceCapture,type VoiceCaptureMeta} from "./useVoiceCapture";
 import {voiceCommand,type VoiceCommand} from "./voice-commands";
 import {logVoiceEvent} from "./voice-diagnostics";
 import {dishImagePrompt,isAbortError,dishCompletionKept} from "./dish-image";
+import {storeDishPreview} from "./dish-image-cache";
 
 type Ingredient={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string;supplier:string};
 type Interpretation={source:string;suggestion:string;reason:string};
@@ -111,6 +112,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  const [dishHint,setDishHint]=useState("");
  const [dishModalOpen,setDishModalOpen]=useState(false);
  const [dishImageUrl,setDishImageUrl]=useState<string|null>(null);
+ const dishPreviewRef=useRef<string|null>(null);
  const [dishGenerating,setDishGenerating]=useState(false),[dishFailed,setDishFailed]=useState(false);
  const dishAbort=useRef<AbortController|null>(null);
  // Pipeline status (drives the status list; each flag is set only while its
@@ -147,7 +149,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  function sayPhoto(text:string){if(alive.current)setMessage(ja?text:(photoMessages[text]??text));}
  function clear(){
   if(phaseRef.current==="saving")return;
-  epoch.current++;revision.current++;semanticAbort.current?.abort();priceAbort.current?.abort();photoAbort.current?.abort();priceEpoch.current++;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);setParsing(false);setParseFailed(false);setPriceFailed(false);setPhotoAnalyzing(false);setPhotoFailed(false);dishAbort.current?.abort();setDishGenerating(false);setDishFailed(false);setDishImageUrl(null);voice.cancel();inbox.current=[];
+  epoch.current++;revision.current++;semanticAbort.current?.abort();priceAbort.current?.abort();photoAbort.current?.abort();priceEpoch.current++;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);setParsing(false);setParseFailed(false);setPriceFailed(false);setPhotoAnalyzing(false);setPhotoFailed(false);dishAbort.current?.abort();setDishGenerating(false);setDishFailed(false);dishPreviewRef.current=null;setDishImageUrl(null);voice.cancel();inbox.current=[];
   setCorrectionIndex(null);setPriceDetailIndex(null);setUnmatchedDetailIndex(null);dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);requestId.current=null;
   setStage("dictating");logVoiceEvent("draft.discarded.explicit","explicit cancel",clearTrace.current);clearTrace.current="";onDiscarded?.();say("下書きを破棄しました。新しいレシピを話してください。");
  }
@@ -362,6 +364,17 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   try{
    const recipe=await request<Recipe>("/api/recipes/full",{method:"POST",body:JSON.stringify({request_id:requestId.current,title:d.title,materials:toSaveMaterials(d),selling_price_jpy:d.selling_price_jpy||null})});
    if(!alive.current)return;
+   // Associate the optional preview only after the formal save succeeded.
+   // Local cache failure must never retry or roll back the confirmed recipe.
+   const preview=dishPreviewRef.current;
+   let imageRetained=true;
+   if(preview){
+    try{imageRetained=await storeDishPreview(recipe.id,preview);}
+    catch{imageRetained=false;}
+    logVoiceEvent(imageRetained?"dish-image.persisted":"dish-image.persist.fail",
+      imageRetained?"saved-recipe local cache":"browser cache unavailable");
+   }
+   if(!alive.current)return;
    epoch.current++;revision.current++;inbox.current=[];
    dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);requestId.current=null;setStage("dictating");
    // Spoken purchase sources travel with the save callback: the workspace
@@ -371,8 +384,8 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    // Dish preview belongs to the saved recipe only: abort its flight and
    // clear preview/failure so neither survives into the next recipe (this
    // panel stays mounted while hidden). The saved draft itself is untouched.
-   dishAbort.current?.abort();dishAbort.current=null;setDishGenerating(false);setDishFailed(false);setDishImageUrl(null);setDishHint("");
-   say(mode==="confirmed"?(sharedVoice?"保存済みです。":"レシピを保存しました。"):"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。");onCreated(recipe,mode,suppliers);
+   dishAbort.current?.abort();dishAbort.current=null;setDishGenerating(false);setDishFailed(false);dishPreviewRef.current=null;setDishImageUrl(null);setDishHint("");
+   say((mode==="confirmed"?(sharedVoice?"保存済みです。":"レシピを保存しました。"):"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。")+(imageRetained?"":" 料理画像はこのブラウザに保存できませんでした。"));onCreated(recipe,mode,suppliers);
   }catch{setStage("review");say("保存結果を確認できませんでした。再送時も同じ登録IDを使います。一覧を確認してから再試行してください。");}
   finally{if(alive.current&&!draining.current)setBusy(false);}
  }
@@ -500,6 +513,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    if(!alive.current||!dishCompletionKept(started,draftRef.current,controller.signal.aborted))return;
    // Preview only: the draft object is untouched (no revision/epoch bump),
    // so a late voice/price result can never be clobbered by an image.
+   dishPreviewRef.current=out.image;
    setDishImageUrl(out.image);
    logVoiceEvent("dish-image.ok","preview ready; draft kept",traceId);
    say(ja?"料理イメージを生成しました。":"Dish image generated.");
