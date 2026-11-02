@@ -364,6 +364,6 @@ a,.link{color:#b3d5ff}
 @media(min-width:620px){.plate-gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* Detail route: recipe is the first visible content; retain voice controls below it. */
-main.recipe-detail-page{display:flex;flex-direction:column}
-main.recipe-detail-page>.recipe-detail{order:-1}
+main.recipe-detail-page{display:block;width:100%;max-width:100%}
+main.recipe-detail-page>.recipe-detail{width:100%;max-width:780px;margin-inline:auto}
 main.recipe-detail-page>div[hidden]{display:none!important}
