@@ -110,8 +110,11 @@ test("combined prompt never exceeds the route 500-char cap", async () => {
   // Intent survives the budget: title head stays, request is non-empty.
   expect(long).toContain("トマトパスタ");
   expect(long.length).toBeGreaterThan(0);
-  // Short inputs are unchanged (no silent truncation).
-  expect(dishImagePrompt("t", ["a"], "")).toBe("Appetizing food photograph of t, made with a");
+  // All callers share the plated-food-only harness.
+  const natural = dishImagePrompt("t", ["a"], "clean serving");
+  expect(natural).toContain("finished plated dish");
+  expect(natural).toContain("No raw or scattered ingredients, packaging");
+  expect(natural).toContain("clean serving");
 });
 
 test("abort is cancellation, not failure; stale results never land", async () => {
