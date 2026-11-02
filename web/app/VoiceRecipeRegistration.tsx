@@ -449,7 +449,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
      else if(input.command==="save"){
       // Stale microphone audio presents the draft but never commits it.
       // Explicit manual input and button taps register in one action.
-      if(input.staleVoice)showReview(input.traceId);else await register();
+      if(input.staleVoice){say(ja?"確認前に発話された保存指示は実行しません。最新の内容を確認してから、もう一度保存を指示してください。":"Ignored an earlier save request. Review the current draft and request saving again.");}else await register();
      }else if(input.command==="hold"){
       reviewed.current=null;setStage("dictating");say("保存せず、下書きを保持します。");
      }
