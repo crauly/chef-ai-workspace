@@ -19,8 +19,9 @@ test("detail shows dish/ingredients/prices, pencil opens modal, qty+price edit s
   // Old prompt-based buttons are gone; pencil icon opens the modal.
   await expect(detail.getByRole("button", {name: "数量変更"})).toHaveCount(0);
   await expect(detail.getByRole("button", {name: "単価変更"})).toHaveCount(0);
-  // No image placeholder when no image is registered.
-  await expect(detail.locator("img")).toHaveCount(0);
+  // Unsaved dish-image preview starts with a placeholder and no generated image.
+  await expect(detail.getByRole("region", {name: "料理イメージ"}).getByText("🍽️")).toBeVisible();
+  await expect(detail.getByRole("region", {name: "料理イメージ"}).locator("img")).toHaveCount(0);
 
   // Quantity edit via modal.
   await detail.getByRole("button", {name: "片栗粉を編集"}).click();
