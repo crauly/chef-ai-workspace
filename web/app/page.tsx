@@ -171,7 +171,7 @@ export default function Library(){
   <summary title={locale==="ja"?"不足情報を確認":"View incomplete fields"}><span aria-hidden="true">⚠</span> {locale==="ja"?"未確定情報":"Incomplete details"} · {recipeGaps(selected).length}{locale==="ja"?"件":""}</summary>
   <ul>{recipeGaps(selected).map((gap,index)=><li key={index}>{gap}</li>)}</ul>
   <p>{locale==="ja"?"内容は保存されています。編集画面で後から補完できます。":"The recipe is saved. You can fill in these fields later."}</p>
- </details>
+ </details>}
  <DishImageSection key={selected.id} recipeId={selected.id} title={selected.title.value||""} names={selected.materials.map(m=>selected.display_names?.[m.id]?.display?.trim()||m.material_name.value||"")} locale={locale} disabled={busy}/>
  <div className="detail-metrics" role="region" aria-label="Recipe cost summary">
   <div><span>{locale==="ja"?"販売価格":"Selling price"}</span><strong>{selected.selling_price_jpy.value===null?"—":`¥${selected.selling_price_jpy.value}`}</strong></div>
