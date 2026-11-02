@@ -3,7 +3,7 @@
 // parse() behind the Human Gate. Structured Output guarantees shape only;
 // all semantic checks (units, decimals, missing facts blocking approval)
 // stay here. Both routes import this; neither may weaken it to pass tests.
-const units=new Set(["g","kg","ml","L"]);
+const units=new Set(["g","kg","ml","L","個","尾"]);
 const decimal=/^(?:0|[1-9]\d*)(?:\.\d+)?$/;
 export type DraftMaterial={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string;supplier:string};
 export type NameCorrection={material_name:string;heard:string;candidates:{name:string;reason:string}[]};
