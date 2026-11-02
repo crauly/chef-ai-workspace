@@ -194,3 +194,30 @@ test("detail section without a plate reports standard generation and sends no ph
   await expect(section.getByRole("img", {name: "生成した料理イメージ"})).toBeVisible();
   expect(JSON.parse(sentBody).image).toBeUndefined();
 });
+
+test("two registered plates can be chosen per recipe, including no plate", async ({page}) => {
+ await page.goto("/");
+ const settings=page.locator("details.plate-settings");
+ await settings.locator("summary").click();
+ const file=settings.locator('input[type="file"]');
+ for(const name of ["白皿","黒皿"]){
+  await settings.getByPlaceholder(/白い丸皿/).fill(name);
+  await file.setInputFiles({name:"plate.png",mimeType:"image/png",buffer:Buffer.from(TINY_PNG.split(",")[1],"base64")});
+  await expect(settings.getByRole("img",{name:"登録予定の皿"})).toBeVisible();
+  await settings.getByRole("button",{name:"この皿を登録"}).click();
+  await expect(settings.getByText(name,{exact:true})).toBeVisible();
+ }
+ await page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"}).click();
+ const picker=page.getByLabel("使用する皿");
+ await expect(picker.locator("option")).toHaveCount(3);
+ await expect(picker).not.toHaveValue("auto");
+ await picker.selectOption({label:"黒皿"});
+ let sent="";
+ await page.route("**/api/dish-image", route=>{sent=route.request().postData()??"";return route.fulfill({json:{image:TINY_PNG}});});
+ await page.getByRole("button",{name:"✦ 料理画像を生成"}).click();
+ await expect(page.getByRole("img",{name:"生成した料理イメージ"})).toBeVisible();
+ expect(JSON.parse(sent).image).toBe(TINY_PNG);
+ await picker.selectOption("auto");
+ await page.getByRole("button",{name:"↻ 再生成"}).click();
+ await expect.poll(()=>JSON.parse(sent).image).toBeUndefined();
+});
