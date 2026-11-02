@@ -7,14 +7,14 @@ test("fixture formal registration creates a distinct recipe and keeps seeded dat
  const input={request_id:id,title:"じゃがいものピュレ",selling_price_jpy:null,
   materials:[{name:"じゃがいも",quantity:"200",unit:"g",price_jpy:null,price_quantity:null,price_unit:null},
    {name:"塩",quantity:null,unit:null,price_jpy:null,price_quantity:null,price_unit:null}]};
- const first=await request.post("/api/recipes/full",{data:input});
+ const first=await request.post("/api/recipes/full",{data:input,headers:{Origin:"http://localhost:3100"}});
  expect(first.status()).toBe(201);
  const result=await first.json();
  expect(result.id).toBe(id);
  expect(result.title.value).toBe(input.title);
  expect(result.materials.map((m:{material_name:{value:string}})=>m.material_name.value)).toEqual(["じゃがいも","塩"]);
  expect(result.materials[1].quantity.value).toBeNull();
- const retry=await request.post("/api/recipes/full",{data:input});
+ const retry=await request.post("/api/recipes/full",{data:input,headers:{Origin:"http://localhost:3100"}});
  expect(retry.ok()).toBe(true);
  expect((await retry.json()).id).toBe(id);
  const detail=await request.get("/api/recipes/"+id);
