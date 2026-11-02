@@ -585,7 +585,6 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    // before it starts, and voice vs. price stages stay independent.
    const mic=sharedVoice?.mic??{recording:capture.recording,transcribing:capture.busy||capture.queued>0,queued:capture.queued};
    const rows:{key:string;active:boolean;text:string}[]=[
-    {key:"listen",active:mic.recording&&!mic.transcribing&&!parsing,text:ja?"音声受付中…":"Receiving audio…"},
     {key:"transcribe",active:mic.transcribing,text:ja?`文字起こし中…${mic.queued>0?`（ほか${mic.queued}件処理待ち）`:""}`:`Transcribing…${mic.queued>0?` (${mic.queued} queued)`:""}`},
     {key:"parse",active:parsing,text:ja?"レシピ解析中…":"Analyzing recipe…"},
     {key:"photo",active:photoAnalyzing,text:ja?"写真を解析中…":"Analyzing photo…"},
