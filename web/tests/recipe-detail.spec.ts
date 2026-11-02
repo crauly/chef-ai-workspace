@@ -62,3 +62,17 @@ test("AI consult expands only on demand; mobile shows detail without overflow", 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
 });
+
+test("recipe detail has standalone URL, clean top viewport, and supports reload and back", async ({page}) => {
+ await page.setViewportSize({width:390,height:844});
+ await page.goto("/");
+ await page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"}).click();
+ await expect(page).toHaveURL(/\/recipes\/[^/]+$/);
+ await expect(page.getByRole("heading",{name:"片栗粉のレシピ"})).toBeVisible();
+ await expect(page.getByRole("heading",{name:"音声操作"})).toBeHidden();
+ await page.reload();
+ await expect(page.getByRole("heading",{name:"片栗粉のレシピ"})).toBeVisible();
+ await page.getByRole("button",{name:"← レシピ一覧"}).click();
+ await expect(page).toHaveURL("/");
+ await expect(page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"})).toBeVisible();
+});
