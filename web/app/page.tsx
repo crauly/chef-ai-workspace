@@ -3,6 +3,7 @@ import {useCallback,useEffect,useRef,useState} from "react";
 import {label, type Locale} from "./i18n";
 import AIEditor,{type EditorHandle} from "./AIEditor";
 import DishImageSection from "./DishImageSection";
+import {getDishPreview} from "./dish-image-cache";
 import PlateSettingsSection from "./PlateSettingsSection";
 import VoiceWorkspace from "./VoiceWorkspace";
 import PriceBell from "./PriceBell";
@@ -11,6 +12,20 @@ import {request, startupRead, type Recipe} from "./types";
 type Item={id:string;title:string;revision:number;updated_at?:string};
 export default function Library(){
  const [items,setItems]=useState<Item[]>([]),[selected,setSelected]=useState<Recipe|null>(null);
+ const [thumbnails,setThumbnails]=useState<Record<string,string>>({});
+ useEffect(()=>{
+  if(selected)return;
+  let active=true;
+  const ids=items.map(item=>item.id);
+  setThumbnails({});
+  void Promise.all(ids.map(async id=>{
+   try{return [id,await getDishPreview(id)] as const;}
+   catch{return [id,null] as const;}
+  })).then(images=>{
+   if(active)setThumbnails(Object.fromEntries(images.filter((entry):entry is readonly [string,string]=>entry[1]!==null)));
+  });
+  return()=>{active=false;};
+ },[items,selected]);
  const [draft,setDraft]=useState(""),[rename,setRename]=useState(""),[error,setError]=useState("");
  const [busy,setBusy]=useState(false),[page,setPage]=useState(1);
  const [query,setQuery]=useState(""),[searchInput,setSearchInput]=useState("");
@@ -140,7 +155,7 @@ export default function Library(){
  {waking&&<p role="status" aria-live="polite">{locale==="ja"?"サーバーを起動しています。接続を再試行しています…":"Starting the server. Retrying connection…"}</p>}
  {error&&<p role="alert" className="error">{error}</p>}
  <div id="recipes" className="recipe-list" aria-busy={loadingList}>{items.map(item=><button key={item.id} className="recipe-list-item" disabled={busy} onClick={()=>void open(item.id)} aria-label={locale==="ja"?`${item.title}の詳細を開く`:`View ${item.title}`}>
-  <span className="recipe-list-thumbnail" aria-hidden="true"><span>♨</span></span>
+  <span className="recipe-list-thumbnail" aria-hidden="true">{thumbnails[item.id]?<img src={thumbnails[item.id]} alt="" loading="lazy" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span>♨</span>}</span>
   <span className="recipe-list-copy"><strong>{item.title}</strong><small>{locale==="ja"?"レシピ":"Recipe"} · Rev {item.revision}</small></span>
   <span className="recipe-list-chevron" aria-hidden="true">›</span>
  </button>)}</div>
