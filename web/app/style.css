@@ -328,3 +328,21 @@ a,.link{color:#b3d5ff}
 .plate-file-label,.plate-note-label{display:grid;gap:6px;font-size:.85rem}
 .plate-note-label input{padding:8px 10px;border-radius:8px;border:1px solid rgba(163,186,174,.3);background:rgba(0,0,0,.25);color:inherit}
 .plate-actions{display:flex;gap:10px;flex-wrap:wrap}
+
+/* Default plate settings — compact, readable and distinct from recipe details. */
+.plate-settings{max-width:780px;margin:16px auto 10px;padding:12px 15px}
+.plate-settings>summary{min-height:34px;display:list-item;align-content:center}
+.plate-settings[open]{background:rgba(114,145,128,.11)}
+.plate-settings-body{gap:14px;margin-top:15px}
+.plate-settings-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.plate-settings-heading strong{font-size:1rem}
+.plate-settings-heading p{font-size:.77rem;opacity:.76;margin:3px 0 0}
+.plate-settings-status{flex:none;border:1px solid rgba(163,186,174,.28);border-radius:999px;padding:4px 10px;font-size:.73rem}
+.plate-local-note{font-size:.76rem;line-height:1.55;margin:0;opacity:.72}
+.plate-empty{padding:22px 12px;margin:0;text-align:center;border:1px dashed rgba(163,186,174,.32);border-radius:10px;font-size:.86rem;opacity:.8}
+.plate-preview{width:100%;max-width:380px;max-height:260px;object-fit:contain;background:rgba(0,0,0,.17)}
+.plate-file-label,.plate-note-label{font-weight:600;gap:8px}
+.plate-file-label input{width:100%;max-width:100%;font-size:.8rem}
+.plate-actions{margin-top:2px;align-items:center}
+.plate-actions button{min-height:42px}
+@media(max-width:520px){.plate-settings{padding:12px}.plate-actions button{flex:1 1 auto}}
