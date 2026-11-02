@@ -32,15 +32,14 @@ export default function Library(){
  const [aiOpen,setAiOpen]=useState(false);
  const [confirmQty,setConfirmQty]=useState(false),[confirmPrice,setConfirmPrice]=useState(false);
  const detailRef=useRef<HTMLElement|null>(null);
- const [routeReady,setRouteReady]=useState(false);
  useEffect(()=>{
   let active=true;
   const sync=async()=>{
    const match=window.location.pathname.match(/^\/recipes\/([^/]+)\/?$/);
-   if(!match){setSelected(null);setRouteReady(true);return;}
+   if(!match){setSelected(null);return;}
    try{const recipe=await request<Recipe>(`/api/recipes/${encodeURIComponent(decodeURIComponent(match[1]))}`);
     if(active&&window.location.pathname===`/recipes/${encodeURIComponent(recipe.id)}`){setSelected(recipe);setRename(recipe.title.value||"");setError("");}}
-   catch(e){if(active)setError(String(e));}finally{if(active)setRouteReady(true);}
+   catch(e){if(active)setError(String(e));}
   };
   void sync();window.addEventListener("popstate",sync);
   return()=>{active=false;window.removeEventListener("popstate",sync);};
