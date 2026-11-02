@@ -4,18 +4,23 @@
 // (DishImageSection) reuse these so no second image system is introduced.
 // The generated image is a preview only, never recipe evidence.
 export function dishImagePrompt(title:string,names:string[],hint:string):string{
+ // One shared visual contract for draft and saved-recipe images.
+ // Names inform the finished dish only: they are NOT instructions to
+ // arrange ingredient packets or loose ingredients around the plate.
+ const prefix="Natural editorial restaurant photograph of the finished plated dish: ";
+ const rules=". Only the prepared food on one simple plate, on a plain table. Close framing, soft daylight, realistic textures and colors, unretouched camera photo. No raw or scattered ingredients, packaging, labels, brands, utensils, props, extra plates, text, artificial gloss or stylized advertising.";
  const dish=(title||"").trim()||"unspecified dish";
- let items=names.map(n=>n.trim()).filter(Boolean).slice(0,8);
- let extra=hint.trim().slice(0,200);
- const build=()=>`Appetizing food photograph of ${dish}`+(items.length?`, made with ${items.join(", ")}`:"")+(extra?`. ${extra}`:"");
- let prompt=build();
- // The route rejects the whole prompt past 500 chars: shed trailing
- // ingredients first (title + explicit hint carry the intent), then the
- // hint, so the UI never offers a request guaranteed to fail.
- while(prompt.length>500&&items.length>1){items=items.slice(0,-1);prompt=build();}
- if(prompt.length>500){extra="";prompt=build();}
- if(prompt.length>500)prompt=prompt.slice(0,500);
- return prompt;
+ const items=names.map(n=>n.trim()).filter(Boolean).slice(0,8);
+ const extra=hint.trim().slice(0,200);
+ // Preserve the photographic constraints even for oversized user inputs.
+ const budget=500-prefix.length-rules.length;
+ let subject=dish.slice(0,Math.max(1,budget));
+ if(subject.length+extra.length+4<=budget&&extra)subject+=`. ${extra}`;
+ if(items.length&&subject.length+12<budget){
+  const context=` (made with ${items.join(", ")})`;
+  subject+=context.slice(0,Math.max(0,budget-subject.length));
+ }
+ return prefix+subject+rules;
 }
 // An aborted flight is a normal cancellation, never an API failure; a
 // result belongs only to the recipe/draft it started from, so a
