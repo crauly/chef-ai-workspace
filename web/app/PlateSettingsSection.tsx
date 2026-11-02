@@ -76,11 +76,12 @@ export default function PlateSettingsSection({locale}:{locale:Locale}){
   if(fileRef.current)fileRef.current.value="";
  }
  return <div className="plate-settings-body">
-  <p className="muted">{ja?"いつも使う皿の写真を1枚登録します。この端末だけに保存され、画像生成時に参照されます。":"Register one photo of your usual plate. It stays on this device and is referenced when generating images."}</p>
+  <div className="plate-settings-heading"><div><strong>{ja?"デフォルト皿":"Default plate"}</strong><p>{ja?"料理画像生成に使う皿の写真を登録":"Choose a plate photo for dish images"}</p></div><span className="plate-settings-status">{image?(ja?"写真を選択中":"Selected"):(ja?"未登録":"Not set")}</span></div>
+  <p className="plate-local-note">{ja?"このブラウザ内に保存します。同じブラウザの利用者は参照でき、別端末には同期されません。生成時のみ画像を送信します。":"Saved in this browser; other users of this browser may access it. Not synced across devices. Sent only when generating."}</p>
   {image
    ?<img className="plate-preview" src={image} alt={ja?"登録した皿のプレビュー":"Registered plate preview"}/>
-   :<p className="muted">{ja?"皿は未登録です":"No plate registered"}</p>}
-  <label className="plate-file-label">{ja?"皿の写真を選ぶ":"Choose a plate photo"}
+   :<p className="plate-empty">{ja?"皿は未登録です":"No plate registered"}</p>}
+  <label className="plate-file-label">{ja?"皿の写真を選ぶ・変更する":"Choose or replace plate photo"}
    <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>void onFile(e.target.files?.[0]??null)}/>
   </label>
   <label className="plate-note-label">{ja?`補足情報（任意・${PLATE_NOTE_MAX}文字まで）`:`Note (optional, up to ${PLATE_NOTE_MAX} chars)`}
@@ -90,8 +91,7 @@ export default function PlateSettingsSection({locale}:{locale:Locale}){
   {saved&&<p role="status" className="muted">{ja?"保存しました":"Saved"}</p>}
   <div className="plate-actions">
    <button type="button" disabled={!image} onClick={onSave}>{ja?"保存":"Save"}</button>
-   <button type="button" className="secondary" disabled={!image&&!note} onClick={onDelete}>{ja?"削除":"Delete"}</button>
-   {image&&<button type="button" className="secondary" onClick={()=>{setImage(null);setSaved(false);if(fileRef.current)fileRef.current.value="";}}>{ja?"写真を変更":"Replace photo"}</button>}
+   <button type="button" className="secondary" disabled={!image&&!note} onClick={onDelete}>{ja?"登録を削除":"Delete registration"}</button>
   </div>
  </div>;
 }
