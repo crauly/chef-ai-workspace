@@ -302,3 +302,22 @@ a,.link{color:#b3d5ff}
 .dish-image-dialog{display:grid;gap:12px;justify-items:center;max-width:min(92vw,720px)}
 .dish-image-dialog img{max-width:100%;max-height:78vh;object-fit:contain;border-radius:12px}
 @media(max-width:520px){.dish-image-actions button{flex:1 1 auto}.dish-image-open img{max-height:260px}}
+
+/* Dish-image visual refinement: prioritize photography, keep controls compact. */
+.recipe-detail .dish-image{margin-bottom:22px;padding:12px;border-radius:15px;background:rgba(105,132,116,.1);border-color:rgba(163,186,174,.23)}
+.dish-image-header{display:flex;align-items:start;justify-content:space-between;gap:12px;margin:0 0 11px}
+.dish-image-header h3{margin:0;color:inherit;font-size:.98rem;font-weight:700;line-height:1.35}
+.dish-image-header p{margin:3px 0 0;font-size:.75rem;opacity:.68}
+.dish-image-label{font-size:.7rem;border:1px solid rgba(163,186,174,.32);border-radius:999px;padding:3px 9px;white-space:nowrap}
+.recipe-detail .dish-image-empty{min-height:124px;gap:5px;align-content:center;background:rgba(112,141,123,.08);border:1px dashed rgba(163,186,174,.29);font-size:.83rem;opacity:.9}
+.dish-image-placeholder-symbol{font-size:1.55rem;font-weight:300;opacity:.6}
+.recipe-detail .dish-image-open img{width:100%;aspect-ratio:16/10;max-height:340px;object-fit:cover;border-radius:10px}
+.recipe-detail .dish-image-actions{margin-top:11px}
+.recipe-detail .dish-image-primary{padding:10px 15px;font-size:.88rem;min-height:43px;background:#2b694e;color:#fff;border-radius:10px}
+.recipe-detail .dish-image-primary:disabled{opacity:.5}
+.recipe-detail .dish-image-note{margin:9px 1px 0;font-size:.71rem;line-height:1.4;opacity:.65}
+.dish-image-overlay{z-index:120}
+.dish-image-dialog{position:relative;width:min(94vw,880px);max-height:90dvh}
+.dish-image-dialog img{max-height:84dvh;object-fit:contain}
+.dish-image-close{position:absolute;right:5px;top:5px;display:grid;place-items:center;width:42px;height:42px;padding:0;border-radius:999px;background:rgba(0,0,0,.7);color:white;font-size:1.8rem}
+@media(max-width:520px){.recipe-detail .dish-image{padding:10px}.recipe-detail .dish-image-open img{max-height:260px}.recipe-detail .dish-image-actions button{flex:unset}.dish-image-header p{font-size:.72rem}}
