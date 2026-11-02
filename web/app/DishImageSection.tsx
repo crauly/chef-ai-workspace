@@ -26,6 +26,7 @@ export default function DishImageSection({recipeId,title,names,locale,disabled}:
  const [selectedPlateId,setSelectedPlateId]=useState<string>("auto");
  const flight=useRef<AbortController|null>(null);
  const owner=useRef(recipeId);
+ const plateSelectionInitialized=useRef(false);
  // Recipe switch: abort the in-flight request and drop its state. The
  // abort is a normal cancellation, never surfaced as an API failure.
  useEffect(()=>{
@@ -38,7 +39,7 @@ export default function DishImageSection({recipeId,title,names,locale,disabled}:
  // section saves, deletes, or another tab changes the same key.
  useEffect(()=>{
   let active=true;
-  const sync=async()=>{try{const data=await loadPlates();if(!active)return;setPlates(data.plates);setDefaultId(data.defaultId);setSelectedPlateId(previous=>previous==="auto"||!data.plates.some(p=>p.id===previous)?data.defaultId??"auto":previous);}catch{/* local storage unavailable: generate without plate */}};
+  const sync=async()=>{try{const data=await loadPlates();if(!active)return;setPlates(data.plates);setDefaultId(data.defaultId);setSelectedPlateId(previous=>{if(!plateSelectionInitialized.current){plateSelectionInitialized.current=true;return data.defaultId??"auto";}return previous==="auto"||data.plates.some(p=>p.id===previous)?previous:data.defaultId??"auto";});}catch{/* local storage unavailable: generate without plate */}};
   void sync();
   window.addEventListener(PLATE_LIBRARY_CHANGED,sync);
   return()=>{active=false;window.removeEventListener(PLATE_LIBRARY_CHANGED,sync);};
