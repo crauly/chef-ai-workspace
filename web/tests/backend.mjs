@@ -1,5 +1,6 @@
 // Isolated browser-test backend. No Supabase connection or real inference.
 import {createServer} from "node:http";
+import {randomUUID} from "node:crypto";
 const id = "11111111-1111-4111-8111-111111111111", materialId = "22222222-2222-4222-8222-222222222222";
 const id2 = "33333333-3333-4333-8333-333333333333", id3 = "44444444-4444-4444-8444-444444444444";
 const tracked = value => ({value, status: "confirmed", origin: "user"});
@@ -41,6 +42,35 @@ createServer(async (req, res) => {
     listQueries.push({q, page});
     const items = browseItems.filter(item => item.title.toLowerCase().includes(q.toLowerCase()));
     return send(200, {items: items.slice((page - 1) * size, page * size)});
+  }
+  // Fixture-only equivalent of POST /demo/recipes/full: honor the submitted
+  // recipe ID and content, never return the unrelated seeded test recipe.
+  if (path === "/demo/recipes/full" && req.method === "POST") {
+    const uuid = /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i;
+    if (!uuid.test(body.request_id ?? "") || typeof body.title !== "string" || !body.title.trim() ||
+        !Array.isArray(body.materials) || body.materials.length > 40) return send(422,{detail:"invalid recipe"});
+    if (recipes[body.request_id]) return send(200,recipes[body.request_id]);
+    const materials=[];
+    for (const entry of body.materials) {
+      if (typeof entry.name !== "string" || !entry.name.trim()) return send(422,{detail:"missing ingredient name"});
+      const hasQuantity=entry.quantity!=null && entry.quantity!=="";
+      const hasUnit=entry.unit!=null && entry.unit!=="";
+      const priceFields=[entry.price_jpy,entry.price_quantity,entry.price_unit];
+      const priced=priceFields.every(value=>value!=null&&value!=="");
+      if (hasQuantity!==hasUnit || (priceFields.some(value=>value!=null&&value!=="")&&!priced) ||
+          (priced&&!hasQuantity)) return send(422,{detail:"incomplete quantity or price tuple"});
+      materials.push({
+        id:crypto.randomUUID(),material_name:tracked(entry.name.trim()),
+        quantity:hasQuantity?tracked(String(entry.quantity)):{value:null,status:"unresolved",origin:"system"},
+        unit:hasUnit?entry.unit:null,price_mode:"override",
+        price_override:priced?{amount_jpy:tracked(String(entry.price_jpy)),per_quantity:String(entry.price_quantity),per_unit:entry.price_unit}:null
+      });
+    }
+    const created={id:body.request_id,title:tracked(body.title.trim()),revision:0,materials,
+      selling_price_jpy:body.selling_price_jpy==null?{value:null,status:"unresolved",origin:"system"}:tracked(String(body.selling_price_jpy))};
+    recipes[created.id]=created;
+    browseItems.unshift({id:created.id,title:created.title.value,revision:0});
+    return send(201,created);
   }
   const targetId = (path.match(/^\/demo\/recipes\/([^/]+)\//) || [])[1];
   const target = (targetId && recipes[targetId]) || recipe;
