@@ -600,7 +600,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   <details className="voice-help"><summary>{ja?"登録の使い方":"How to register"}</summary>
   <p>{ja?"料理名、食材、分量、仕入単価、売価を自然な言葉で伝えてください。料理の文脈を解釈し、変更案を下書きで確認できます。":"Describe the dish, ingredients, quantities, purchase prices and selling price naturally. Review the interpreted recipe as a draft."}</p>
   <p>{ja?"下書きは自動保存されます。入力内容を見ながら編集し、「登録」「保存」で正式登録します。「破棄」で下書きを削除します。":"Ask to review the draft before saving. An explicit approval is required to save; discarding removes the draft."}</p>
-  <p>{ja?"仕入単価だけが不明でも、確認後に価格未確定として保存できます（推測・ゼロ埋めしません）。確定保存と未確定保存は確認画面で区別されます。":"If only purchase prices are missing, you may approve saving with unconfirmed prices. Missing prices are never guessed or set to zero."}</p>
+  <p>{ja?"仕入単価だけが不明でも、価格を推測・ゼロ埋めせず、価格未確定のレシピとして登録できます。":"If only purchase prices are missing, you can register with unconfirmed costs. Missing prices are never guessed or set to zero."}</p>
   <p>{ja?"音声はMetaへ送信して文字起こしします。録音は保存しません。発話の間を約1秒空けると解釈します。":"Audio is sent to Meta and not stored. Pause for about one second between turns."}</p>
   </details>
   {!sharedVoice&&<><button type="button" disabled={!voice.recording&&(voice.supported===false||voice.busy||phase==="saving")} onClick={voice.recording?voice.stop:()=>void voice.start()} aria-pressed={voice.recording}>{voice.recording?(ja?"■ マイクを停止":"■ Stop microphone"):(ja?"🎙 音声操作を開始":"🎙 Start voice control")}</button>
@@ -752,7 +752,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    </div>}
    {draft.missing.length>0&&<p role="alert">不足情報：{draft.missing.join("、")}</p>}
    {draft.notes.length>0&&<p role="alert">要確認：{draft.notes.join("、")}</p>}
-   <p>{phase==="review"?(reviewMode.current==="unconfirmed"?(ja?"確認待ち（価格未確定）：数量は確定、価格は未確定として保存します。よければ明示承認してください。":"Pending review: quantities are confirmed, but purchase prices are unconfirmed. Explicitly approve to save."):(ja?"確認待ち：内容が正しければ、保存を明示承認してください。":"Pending review: explicitly approve saving if the details are correct.")):(ja?"まだ保存されていません。":"Not saved yet.")}</p>
+   <p>{ja?"下書きは自動保存されています。正式登録は「登録」または「保存」で行います。":"Draft is auto-saved. Say register or save to publish it as a recipe."}</p>
    {sharedVoice&&<><p role="status">{sharedVoice.captureMessage}</p><a href="#voice-controls">音声操作・再開へ戻る</a></>}
    <button type="button" disabled={busy||!eligible||phase==="saving"} onClick={()=>void register()}>{ja?"レシピを登録":"Register recipe"}</button>
    <button type="button" disabled={phase==="saving"} onClick={clear}>{ja?"下書きを破棄":"Discard draft"}</button>
