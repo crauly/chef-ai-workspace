@@ -199,10 +199,10 @@ export default function Library(){
     {(qtyChanged||priceChanged)&&<p className="edit-diff">{locale==="ja"?"変更後":"After"}: {editQty.trim()||"?"} {editUnit}{priceChanged?` ／ ¥${editPrice.trim()||"?"} / ${editPriceQty}${editPriceUnit}`:""}</p>}
     <div className="edit-modal-fields">
      <label>{locale==="ja"?"数量":"Quantity"}<input inputMode="decimal" value={editQty} onChange={e=>setEditQty(e.target.value)} disabled={busy}/></label>
-     <label>Unit<select value={editUnit} onChange={e=>setEditUnit(e.target.value)} disabled={busy}><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option>{editUnit&&!["g","kg","ml","L"].includes(editUnit)&&<option value={editUnit}>{editUnit}</option>}</select></label>
+     <label>Unit<select value={editUnit} onChange={e=>setEditUnit(e.target.value)} disabled={busy}><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option><option value="個">個</option><option value="尾">尾</option>{editUnit&&!["g","kg","ml","L"].includes(editUnit)&&<option value={editUnit}>{editUnit}</option>}</select></label>
      <label>{locale==="ja"?"仕入単価（円）":"Price (JPY)"}<input inputMode="decimal" value={editPrice} onChange={e=>setEditPrice(e.target.value)} disabled={busy}/></label>
      <label>{locale==="ja"?"単価の基準数量":"Price per quantity"}<input inputMode="decimal" value={editPriceQty} onChange={e=>setEditPriceQty(e.target.value)} disabled={busy}/></label>
-     <label>Price unit<select value={editPriceUnit} onChange={e=>setEditPriceUnit(e.target.value)} disabled={busy}><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option>{editPriceUnit&&!["g","kg","ml","L"].includes(editPriceUnit)&&<option value={editPriceUnit}>{editPriceUnit}</option>}</select></label>
+     <label>Price unit<select value={editPriceUnit} onChange={e=>setEditPriceUnit(e.target.value)} disabled={busy}><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option><option value="個">個</option><option value="尾">尾</option>{editPriceUnit&&!["g","kg","ml","L"].includes(editPriceUnit)&&<option value={editPriceUnit}>{editPriceUnit}</option>}</select></label>
      {line.quantity.status==="assumed"&&<label><input type="checkbox" checked={confirmQty} onChange={e=>setConfirmQty(e.target.checked)}/> {locale==="ja"?"現在の数量を明示確定":"Confirm current quantity"}</label>}
      {line.price_override?.amount_jpy.status==="assumed"&&<label><input type="checkbox" checked={confirmPrice} onChange={e=>setConfirmPrice(e.target.checked)}/> {locale==="ja"?"現在の仕入価格を明示確定":"Confirm current price"}</label>}
     </div>
@@ -216,12 +216,12 @@ export default function Library(){
  </fieldset>
  <fieldset><legend>{locale==="ja"?"分量":"Quantity"}</legend>
  <input aria-label={locale==="ja"?"数量":"Quantity"} placeholder={locale==="ja"?"数量":"Quantity"} inputMode="decimal" value={qty} onChange={e=>setQty(e.target.value)} required/>
- <select aria-label="Unit" value={unit} onChange={e=>setUnit(e.target.value)}><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option></select>
+ <select aria-label="Unit" value={unit} onChange={e=>setUnit(e.target.value)}><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option><option value="個">個</option><option value="尾">尾</option></select>
  </fieldset>
  <fieldset><legend>{locale==="ja"?"仕入単価":"Unit price"}</legend>
  <input aria-label={locale==="ja"?"仕入単価（円）":"Price (JPY)"} placeholder={locale==="ja"?"仕入単価 ¥":"Price ¥"} inputMode="decimal" value={price} onChange={e=>setPrice(e.target.value)} required/>
  <input aria-label={locale==="ja"?"単価の基準数量":"Price per quantity"} placeholder="1" inputMode="decimal" value={priceQty} onChange={e=>setPriceQty(e.target.value)} required/>
- <select aria-label="Price unit" value={priceUnit} onChange={e=>setPriceUnit(e.target.value)}><option value="kg">kg</option><option value="g">g</option><option value="L">L</option><option value="ml">ml</option></select>
+ <select aria-label="Price unit" value={priceUnit} onChange={e=>setPriceUnit(e.target.value)}><option value="kg">kg</option><option value="g">g</option><option value="L">L</option><option value="個">個</option><option value="尾">尾</option><option value="ml">ml</option></select>
  </fieldset>
  <button disabled={busy||!food.trim()||!qty.trim()||!price.trim()}>{locale==="ja"?"食材を追加":"Add ingredient"}</button>
  </form></details>
