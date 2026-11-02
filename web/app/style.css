@@ -362,3 +362,8 @@ a,.link{color:#b3d5ff}
 .dish-plate-picker{display:grid;gap:5px;margin:0 0 10px;font-size:.78rem;font-weight:600}
 .dish-plate-picker select{width:100%;min-width:0;padding:9px 10px;border:1px solid rgba(163,186,174,.33);border-radius:9px;background:#252b29;color:#f2f2f0;font:inherit;font-size:.88rem}
 @media(min-width:620px){.plate-gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Detail route: recipe is the first visible content; retain voice controls below it. */
+main.recipe-detail-page{display:flex;flex-direction:column}
+main.recipe-detail-page>.recipe-detail{order:-1}
+main.recipe-detail-page>div[hidden]{display:none!important}
