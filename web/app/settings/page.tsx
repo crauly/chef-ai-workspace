@@ -1,3 +1,4 @@
+import NavIcon from "../NavIcon";
 "use client";
 import {useEffect,useState} from "react";
 import SupplierManager from "../SupplierManager";
@@ -22,11 +23,11 @@ export default function SettingsPage(){
    </div>
   </section>
   <nav aria-label={ja?"主要":"Primary"} className="bottom-nav">
-   <a href="/">{ja?"ホーム":"Home"}</a>
-   <a href="/#recipes">{ja?"レシピ":"Recipes"}</a>
+   <a href="/"><NavIcon name="home"/><span>{ja?"ホーム":"Home"}</span></a>
+   <a href="/#recipes"><NavIcon name="recipes"/><span>{ja?"レシピ":"Recipes"}</span></a>
    <a href="/" className="bottom-nav-mic settings-voice-link" aria-label={ja?"音声操作画面へ戻る":"Go to voice controls"}><svg viewBox="0 0 24 24" aria-hidden="true" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5m-4 0h8"/></svg></a>
-   <a href="/">{ja?"下書き":"Draft"}</a>
-   <a href="/settings" aria-current="page" aria-label={ja?"管理・設定":"Management and settings"}><span className="bottom-nav-settings-icon" aria-hidden="true">⚙</span><span>{ja?"設定":"Settings"}</span></a>
+   <a href="/"><NavIcon name="draft"/><span>{ja?"下書き":"Draft"}</span></a>
+   <a href="/settings" aria-current="page" aria-label={ja?"管理・設定":"Management and settings"}><NavIcon name="settings"/><span>{ja?"設定":"Settings"}</span></a>
   </nav>
  </main>;
 }
