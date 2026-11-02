@@ -32,7 +32,21 @@ export default function Library(){
  const [aiOpen,setAiOpen]=useState(false);
  const [confirmQty,setConfirmQty]=useState(false),[confirmPrice,setConfirmPrice]=useState(false);
  const detailRef=useRef<HTMLElement|null>(null);
- useEffect(()=>{if(selected?.id)detailRef.current?.scrollIntoView({block:"start",behavior:"instant"});},[selected?.id]);
+ const [routeReady,setRouteReady]=useState(false);
+ useEffect(()=>{
+  let active=true;
+  const sync=async()=>{
+   const match=window.location.pathname.match(/^\/recipes\/([^/]+)\/?$/);
+   if(!match){setSelected(null);setRouteReady(true);return;}
+   try{const recipe=await request<Recipe>(`/api/recipes/${encodeURIComponent(decodeURIComponent(match[1]))}`);
+    if(active&&window.location.pathname===`/recipes/${encodeURIComponent(recipe.id)}`){setSelected(recipe);setRename(recipe.title.value||"");setError("");}}
+   catch(e){if(active)setError(String(e));}finally{if(active)setRouteReady(true);}
+  };
+  void sync();window.addEventListener("popstate",sync);
+  return()=>{active=false;window.removeEventListener("popstate",sync);};
+ },[]);
+ function showDetail(recipe:Recipe){setSelected(recipe);setRename(recipe.title.value||"");window.history.pushState(null,"",`/recipes/${encodeURIComponent(recipe.id)}`);window.scrollTo({top:0,behavior:"instant"});}
+ function backToLibrary(){setEditingId(null);setAiOpen(false);setSelected(null);window.history.pushState(null,"","/");window.scrollTo({top:0,behavior:"instant"});}
 
  const [locale,setLocale]=useState<Locale>("ja");
  const t=(key:Parameters<typeof label>[1])=>label(locale,key);
@@ -49,7 +63,7 @@ export default function Library(){
        if(fromVoice)voiceTarget.current=null;
        if(fromVoice&&page===1&&result.items.length===1){
          const recipe=await request<Recipe>(`/api/recipes/${result.items[0].id}`);
-         if(current===listRequest.current){setSelected(recipe);setRename(recipe.title.value||"");}
+         if(current===listRequest.current){showDetail(recipe);}
        }
        if(fromVoice&&result.items.length!==1){browseWaiter.current?.(null);browseWaiter.current=null;}
      }
@@ -65,9 +79,9 @@ export default function Library(){
    if(page===1&&query===name.trim())void reload();
  }
  async function create(e:React.FormEvent){e.preventDefault();if(!draft.trim())return;setBusy(true);
- try{const recipe=await request<Recipe>("/api/recipes",{method:"POST",body:JSON.stringify({title:draft.trim()})});setDraft("");if(page===1){await reload();}else{setPage(1);}setSelected(recipe);setRename(recipe.title.value||"");}
+ try{const recipe=await request<Recipe>("/api/recipes",{method:"POST",body:JSON.stringify({title:draft.trim()})});setDraft("");if(page===1){await reload();}else{setPage(1);}showDetail(recipe);}
  catch(e){setError(String(e));}finally{setBusy(false);}}
- async function open(id:string){if(busy)return;setBusy(true);try{const recipe=await request<Recipe>(`/api/recipes/${id}`);setSelected(recipe);setRename(recipe.title.value||"");setError("");}catch(e){setError(String(e));}finally{setBusy(false);}}
+ async function open(id:string){if(busy)return;setBusy(true);try{const recipe=await request<Recipe>(`/api/recipes/${id}`);showDetail(recipe);setError("");}catch(e){setError(String(e));}finally{setBusy(false);}}
  async function change(e:React.FormEvent){e.preventDefault();if(!selected||!rename.trim())return;setBusy(true);
  try{const result=await request<{recipe:Recipe}>(`/api/recipes/${selected.id}/confirm`,{method:"POST",body:JSON.stringify({base_revision:selected.revision,request_id:crypto.randomUUID(),operations:[{op:"set_title",value:rename.trim()}],save_version:true})});setSelected(result.recipe);await reload();}
  catch(e){setError(String(e));}finally{setBusy(false);}}
@@ -114,8 +128,8 @@ export default function Library(){
   browseWaiter.current?.(null);
   return new Promise(resolve=>{browseWaiter.current=resolve;search(target,true);});
  }
- return <main id="top"><header className="chef-header"><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><PriceBell locale={locale}/><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">Japanese</option><option value="en-US">English</option></select></label></div><div className="chef-brand"><img src="/chef-ai-mark.svg" alt="" width="58" height="58"/><h1>Chef AI</h1></div><p className="muted">{t("intro")}</p></header>
- <VoiceWorkspace locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} onCreated={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");setError("");void reload();}}/>
+ return <main id="top" className={selected?"recipe-detail-page":""}><div hidden={Boolean(selected)}><header className="chef-header"><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><PriceBell locale={locale}/><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">Japanese</option><option value="en-US">English</option></select></label></div><div className="chef-brand"><img src="/chef-ai-mark.svg" alt="" width="58" height="58"/><h1>Chef AI</h1></div><p className="muted">{t("intro")}</p></header>
+ </div><div hidden={Boolean(selected)}><VoiceWorkspace locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} onCreated={recipe=>{showDetail(recipe);setError("");void reload();}}/></div>
  <div hidden={Boolean(selected)}><div id="assist"><SourcingSuggestions locale={locale}/></div>
  <form onSubmit={create}><input aria-label={t("newName")} placeholder={t("newName")} value={draft} onChange={e=>setDraft(e.target.value)}/><button disabled={busy||!draft.trim()}>{t("create")}</button></form>
  <form onSubmit={e=>{e.preventDefault();search(searchInput);}}>
@@ -136,7 +150,7 @@ export default function Library(){
  <details className="plate-settings"><summary>{locale==="ja"?"料理画像設定（デフォルト皿）":"Dish image settings (default plate)"}</summary><PlateSettingsSection locale={locale}/></details>
  </div>
  {selected&&<section className="recipe-detail" ref={detailRef} aria-label={t("detail")}> 
- <div className="detail-topbar"><button type="button" className="detail-back" onClick={()=>{setEditingId(null);setAiOpen(false);setSelected(null);window.scrollTo({top:0,behavior:"instant"});}}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button><span className="detail-revision">REV {selected.revision}</span></div>
+ <div className="detail-topbar"><button type="button" className="detail-back" onClick={backToLibrary}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button><span className="detail-revision">REV {selected.revision}</span></div>
  <div className="detail-heading"><p className="detail-eyebrow">{locale==="ja"?"RECIPE DETAIL":"RECIPE DETAIL"}</p><h2>{selected.title.value||t("detail")}</h2></div>
  <DishImageSection key={selected.id} recipeId={selected.id} title={selected.title.value||""} names={selected.materials.map(m=>selected.display_names?.[m.id]?.display?.trim()||m.material_name.value||"")} locale={locale} disabled={busy}/>
  <div className="detail-metrics" role="region" aria-label="Recipe cost summary">
