@@ -7,6 +7,7 @@ import {voiceCommand,type VoiceCommand} from "./voice-commands";
 import {logVoiceEvent} from "./voice-diagnostics";
 import {dishImagePrompt,isAbortError,dishCompletionKept} from "./dish-image";
 import {storeDishPreview} from "./dish-image-cache";
+import {loadWorkingDraft,saveWorkingDraft,type WorkingDraftSnapshot} from "./working-draft-cache";
 
 type Ingredient={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string;supplier:string};
 type Interpretation={source:string;suggestion:string;reason:string};
@@ -113,6 +114,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  const [dishModalOpen,setDishModalOpen]=useState(false);
  const [dishImageUrl,setDishImageUrl]=useState<string|null>(null);
  const dishPreviewRef=useRef<string|null>(null);
+ const [restored,setRestored]=useState(false);
  const [dishGenerating,setDishGenerating]=useState(false),[dishFailed,setDishFailed]=useState(false);
  const dishAbort=useRef<AbortController|null>(null);
  // Pipeline status (drives the status list; each flag is set only while its
@@ -142,6 +144,25 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   reviewed.current=null;inbox.current=inbox.current.filter(input=>input.command==="data");setStage("dictating");
  }}));
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;semanticAbort.current?.abort();priceAbort.current?.abort();photoAbort.current?.abort();dishAbort.current?.abort();inbox.current=[];};},[]);
+ // Restore only working data, never approval or saving state. A restored draft
+ // must pass the ordinary review/Human Gate again.
+ useEffect(()=>{
+  let cancelled=false;
+  void loadWorkingDraft().then(snapshot=>{
+   if(cancelled||!alive.current||!snapshot||draftRef.current||dataTurns.current.length)return;
+   draftRef.current=snapshot.draft;parseBase.current=snapshot.draft;
+   dataTurns.current=snapshot.turns;parsedTurns.current=snapshot.turns.length;
+   setTurns(snapshot.turns.slice(-30));setDraft(snapshot.draft);
+   dishPreviewRef.current=snapshot.image;setDishImageUrl(snapshot.image);
+  }).catch(()=>{}).finally(()=>{if(!cancelled)setRestored(true);});
+  return()=>{cancelled=true;};
+ },[]);
+ useEffect(()=>{
+  if(!restored)return;
+  const snapshot:WorkingDraftSnapshot|null=draft?{draft,turns:[...dataTurns.current],image:dishPreviewRef.current}:null;
+  void saveWorkingDraft(snapshot).catch(()=>{if(alive.current)say(ja?"下書きを端末に保存できませんでした。":"Could not persist the working draft on this device.");});
+ },[draft,restored,dishImageUrl]);
+
  function setStage(next:"dictating"|"review"|"saving"){phaseRef.current=next;setPhase(next);}
  const englishMessages:Record<string,string>={"下書きを破棄しました。新しいレシピを話してください。":"Draft discarded. Describe a new recipe.","Museが料理の文脈・数量・価格を解釈しています…":"Muse is interpreting the dish, quantities and prices…","料理の解釈に失敗しました。保存していません。「解析を再試行」か補助入力で再開できます。":"Could not interpret the recipe. Nothing was saved. Retry analysis or use manual input.","確認用の下書きを表示しました。料理名・食材・数量・価格を確認し、正しければもう一度「保存してください」と話すか、承認して保存を押してください。":"Draft ready to review. Check the dish, ingredients, quantities and prices, then explicitly approve saving.","承認された内容を保存しています…":"Saving approved recipe…","保存済みです。":"Already saved.","レシピを保存しました。":"Recipe saved.","価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"Saved with unconfirmed purchase prices. Unknown prices are not set to zero; only partial costs are shown.","保存結果を確認できませんでした。再送時も同じ登録IDを使います。一覧を確認してから再試行してください。":"Could not confirm the save result. The same request ID is used for retries; check the recipe list first.","保存せず、下書きを保持します。":"Not saved. Draft preserved."};
  function say(text:string){if(alive.current)setMessage(ja?text:(englishMessages[text]??text));}
