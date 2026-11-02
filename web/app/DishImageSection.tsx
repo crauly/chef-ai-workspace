@@ -69,7 +69,7 @@ export default function DishImageSection({recipeId,title,names,locale,disabled}:
   {failed&&!generating&&<p className="dish-image-fail" role="alert">{ja?"画像の生成に失敗しました。レシピは変更されていません。":"Image generation failed. The recipe is unchanged."}</p>}
   <div className="dish-image-actions">
    <button type="button" className="dish-image-primary" disabled={disabled||generating} onClick={()=>void generate()}>
-    {generating?(ja?"生成中…":"Generating…"):image?(ja?"↻ 再生成":"↻ Regenerate"):(ja?"✦ 料理画像を生成":"✦ Generate dish image")}</button>
+    {generating?(ja?"生成中…":"Generating…"):image?(ja?"↻ 再生成":"↻ Regenerate"):failed?(ja?"再試行":"Retry"):(ja?"✦ 料理画像を生成":"✦ Generate dish image")}</button>
   </div>
   <p className="dish-image-note">{ja?"一時プレビュー · レシピには保存されません":"Temporary preview · Not saved to the recipe"}</p>
   {enlarged&&image&&<div className="dish-image-overlay" onClick={()=>setEnlarged(false)}>
