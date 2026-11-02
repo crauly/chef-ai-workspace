@@ -113,8 +113,8 @@ export default function Library(){
   return new Promise(resolve=>{browseWaiter.current=resolve;search(target,true);});
  }
  return <main id="top"><header className="chef-header"><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><PriceBell locale={locale}/><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">Japanese</option><option value="en-US">English</option></select></label></div><div className="chef-brand"><img src="/chef-ai-mark.svg" alt="" width="58" height="58"/><h1>Chef AI</h1></div><p className="muted">{t("intro")}</p></header>
- <div hidden={Boolean(selected)}><VoiceWorkspace locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} onCreated={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");setError("");void reload();}}/>
- <div id="assist"><SourcingSuggestions locale={locale}/></div>
+ <VoiceWorkspace locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} onCreated={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");setError("");void reload();}}/>
+ <div hidden={Boolean(selected)}><div id="assist"><SourcingSuggestions locale={locale}/></div>
  <form onSubmit={create}><input aria-label={t("newName")} placeholder={t("newName")} value={draft} onChange={e=>setDraft(e.target.value)}/><button disabled={busy||!draft.trim()}>{t("create")}</button></form>
  <form onSubmit={e=>{e.preventDefault();search(searchInput);}}>
   <input aria-label={locale==="ja"?"レシピ名で検索":"Search recipes by name"} maxLength={200} value={searchInput} onChange={e=>setSearchInput(e.target.value)}/>
@@ -136,7 +136,7 @@ export default function Library(){
  <div className="detail-topbar"><button type="button" className="detail-back" onClick={()=>{setEditingId(null);setAiOpen(false);setSelected(null);window.scrollTo({top:0,behavior:"instant"});}}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button><span className="detail-revision">REV {selected.revision}</span></div>
  <div className="detail-heading"><p className="detail-eyebrow">{locale==="ja"?"RECIPE DETAIL":"RECIPE DETAIL"}</p><h2>{selected.title.value||t("detail")}</h2></div>
  <DishImageSection key={selected.id} recipeId={selected.id} title={selected.title.value||""} names={selected.materials.map(m=>selected.display_names?.[m.id]?.display?.trim()||m.material_name.value||"")} locale={locale} disabled={busy}/>
- <div className="detail-metrics">
+ <div className="detail-metrics" role="region" aria-label="Recipe cost summary">
   <div><span>{locale==="ja"?"販売価格":"Selling price"}</span><strong>{selected.selling_price_jpy.value===null?"—":`¥${selected.selling_price_jpy.value}`}</strong></div>
   <div><span>{locale==="ja"?"材料原価":"Food cost"}</span><strong>{cost?.total_cost_jpy==null?"—":`¥${cost.total_cost_jpy}`}</strong></div>
   <div><span>{locale==="ja"?"原価率":"Cost rate"}</span><strong>{cost?.cost_rate_pct==null?"—":`${cost.cost_rate_pct}%`}</strong></div>
