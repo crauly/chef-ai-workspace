@@ -625,12 +625,12 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    ].filter(row=>row.active).slice(0,2);
    return rows.length?<ul className="voice-status-list" role="status" aria-live="polite" aria-label={ja?"処理状況":"Processing status"}>{rows.map(row=><li key={row.key} className={row.key==="price"?"status-price":row.key.endsWith("fail")?"status-error":"status-voice"}><span className="status-symbol" aria-hidden="true">{row.key==="price"?"⌕":row.key.endsWith("fail")?"!":row.key==="done"?"✓":"♩"}</span><span className="status-detail"><span className="status-label">{row.text}</span>{["listen","transcribe","parse","price","photo","dish-image"].includes(row.key)&&<span className="status-track" aria-hidden="true"><span/></span>}</span></li>)}</ul>:null;
   })()}
-  <p aria-live="polite" role="status">{busy?(ja?"処理中 ⏳ ":"Working ⏳ "):""}{message}</p>
+  <details className="voice-detail-message"><summary>{ja?"処理メッセージ":"Processing details"}</summary><p aria-live="polite" role="status">{busy?(ja?"処理中 ⏳ ":"Working ⏳ "):""}{message}</p></details>
   {!sharedVoice&&<form onSubmit={event=>{event.preventDefault();if(manual.trim()){enqueue(manual);setManual("");}}}>
    <input aria-label={ja?"音声認識できない場合の入力":"Manual input when voice recognition is unavailable"} value={manual} onChange={event=>setManual(event.target.value)} placeholder={ja?"音声認識できないときの補助入力":"Type when voice recognition is unavailable"} disabled={phase==="saving"}/>
    <button type="submit" disabled={!manual.trim()||phase==="saving"}>{ja?"反映":"Apply"}</button>
   </form>}
-  <button type="button" disabled={busy||!dataTurns.current.length||phase==="saving"} onClick={retry}>{ja?"解析を再試行":"Retry analysis"}</button>
+  {parseFailed&&<button type="button" disabled={busy||!dataTurns.current.length||phase==="saving"} onClick={retry}>{ja?"解析を再試行":"Retry analysis"}</button>}
 
 
   {draft&&<div id="draft" aria-label="未保存のレシピ下書き">
@@ -652,11 +652,11 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
      else missing++;
     }
     const yen=(value:number)=>new Intl.NumberFormat(ja?"ja-JP":"en-US",{style:"currency",currency:"JPY",maximumFractionDigits:0}).format(value);
-    return <section className="draft-cost-summary" aria-label={ja?"下書き原価サマリー":"Draft cost summary"}>
-     <strong>{ja?"原価サマリー":"Cost summary"}</strong>
+    return <details className="draft-cost-summary" aria-label={ja?"下書き原価サマリー":"Draft cost summary"}>
+     <summary>{ja?"原価サマリー":"Cost summary"} — {yen(partial)}{missing?(ja?"（部分原価）":" (partial)"):""}</summary>
      <div className="draft-cost-values"><span>{ja?(missing?"部分原価合計":"原価合計"):(missing?"Partial cost":"Total cost")}<b>{yen(partial)}</b></span><span>{ja?"売価":"Selling price"}<b>{draft.selling_price_jpy?yen(Number(draft.selling_price_jpy)):"—"}</b></span><span>{ja?"原価率":"Cost rate"}<b>{!missing&&partial>=0&&Number(draft.selling_price_jpy)>0?((partial/Number(draft.selling_price_jpy))*100).toFixed(1)+"%":(ja?"未確定":"Unconfirmed")}</b></span></div>
      {missing>0&&<p>{ja?`価格または換算条件が未確定の食材が${missing}件あるため、部分原価です。`:`${missing} ingredients have unresolved costs or conversions; showing partial cost.`}</p>}
-    </section>;
+    </details>;
    })()}
    <div className="draft-image-actions">
     <button type="button" className="draft-image-launch" onClick={()=>setDishModalOpen(true)} disabled={phase==="saving"||dishGenerating}>{dishImageUrl?(ja?"✦ 料理画像を再生成":"✦ Regenerate dish image"):(ja?"✦ 料理画像を生成":"✦ Generate dish image")}</button>
