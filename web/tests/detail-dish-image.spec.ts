@@ -17,7 +17,7 @@ test("empty state shows placeholder, generate succeeds, enlarge closes", async (
   const detail = await openRecipe(page, "片栗粉のレシピ");
   const section = detail.getByRole("region", {name: "料理イメージ"});
   await expect(section.getByText("料理画像はまだありません")).toBeVisible();
-  await expect(section.getByText("一時プレビュー")).toBeVisible();
+  await expect(section.getByText("レシピのクラウド保存とは別のプレビューです")).toBeVisible();
   await expect(section.locator("img")).toHaveCount(0);
   await section.getByRole("button", {name: "✦ 料理画像を生成"}).click();
   await expect(section.getByRole("img", {name: "生成した料理イメージ"})).toBeVisible();

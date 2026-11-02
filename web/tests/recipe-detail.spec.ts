@@ -69,7 +69,7 @@ test("recipe detail has standalone URL, clean top viewport, and supports reload 
  await page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"}).click();
  await expect(page).toHaveURL(/\/recipes\/[^/]+$/);
  await expect(page.getByRole("heading",{name:"片栗粉のレシピ"})).toBeVisible();
- await expect(page.getByRole("heading",{name:"音声操作"})).toBeHidden();
+ await expect(page.getByRole("heading",{name:"音声操作"})).toBeVisible();
  await page.reload();
  await expect(page.getByRole("heading",{name:"片栗粉のレシピ"})).toBeVisible();
  await page.getByRole("button",{name:"← レシピ一覧"}).click();
