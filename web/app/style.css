@@ -403,3 +403,11 @@ main.recipe-detail-page>div[hidden]{display:none!important}
 .voice-status-list .status-price .status-track span{background:#60ca98}
 @keyframes status-activity{from{transform:translateX(0)}to{transform:translateX(175%)}}
 @media(prefers-reduced-motion:reduce){.voice-status-list .status-track span{animation:none;width:100%;opacity:.55}}
+
+/* Saved recipe: discreet, keyboard/touch accessible incomplete-field disclosure. */
+.recipe-gap-disclosure{margin:10px 0 16px;border:1px solid rgba(195,166,103,.35);border-radius:11px;padding:9px 12px;background:rgba(169,129,63,.07)}
+.recipe-gap-disclosure summary{cursor:pointer;color:#dfbd83;font-size:.83rem;font-weight:600;list-style-position:inside}
+.recipe-gap-disclosure summary:hover{color:#f1d8a7}
+.recipe-gap-disclosure ul{margin:10px 0;padding-left:23px;color:#e7e5df;font-size:.85rem}
+.recipe-gap-disclosure li{padding:3px 0}
+.recipe-gap-disclosure p{font-size:.77rem;color:#b9c0bd;margin:8px 0 2px}
