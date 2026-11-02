@@ -81,7 +81,7 @@ Output only JSON with exactly title, materials, selling_price_jpy, notes, interp
   // price basis is meaningless and is reset as well. Matching uses left
   // token boundaries, so memo "2000g" never confirms a guessed "200".
   const esc=(v:string)=>v.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-  const QTY_UNIT="(?:g|kg|ml|l|L|グラム|キログラム|キロ|ミリリットル|リットル)";
+  const QTY_UNIT="(?:g|kg|ml|l|L|グラム|キログラム|キロ|ミリリットル|リットル|個|ヶ|こ|コ|尾)";
   const YEN="(?:円|¥)";
   const SEG_BOUNDARY=/[、，。,\n。]/;
   // Row mentions: every position where a known material row is named
@@ -123,7 +123,7 @@ Output only JSON with exactly title, materials, selling_price_jpy, notes, interp
   // quantity unit. Unknown/empty model units fall back to any marker
   // (the model asserted no unit to contradict).
   const UNIT_ALIAS:Record<string,string>={g:"(?:g|グラム)",kg:"(?:kg|キログラム|キロ)",
-   ml:"(?:ml|ミリリットル)",l:"(?:l|L|リットル)",L:"(?:l|L|リットル)"};
+   ml:"(?:ml|ミリリットル)",l:"(?:l|L|リットル)",L:"(?:l|L|リットル)",個:"(?:個|ヶ|こ|コ)",尾:"尾"};
   const unitMarker=(unit:string)=>UNIT_ALIAS[unit]??QTY_UNIT;
   const qtyStated=(name:string,value:string,unit:string)=>attributed(name,value,unitMarker(unit));
   const priceStated=(name:string,value:string)=>attributed(name,value,YEN);
