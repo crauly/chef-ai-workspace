@@ -145,6 +145,27 @@ class SupabasePersistence:
                     .order("name").limit(min(max(limit, 1), 100)).execute())
         return response.data or []
 
+    def update_owned_supplier(self, owner_id, supplier_id, name, note=None):
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Supplier name required")
+        rows = (self.client.table("suppliers").update({"name": name.strip(), "note": note})
+                .eq("owner_id", owner_id).eq("id", supplier_id).execute()).data or []
+        if not rows:
+            raise ValueError("Supplier not owned by caller")
+        return rows[0]
+
+    def delete_owned_supplier(self, owner_id, supplier_id):
+        # Never silently detach purchase history from its supplier.
+        owned = (self.client.table("suppliers").select("id").eq("owner_id", owner_id)
+                 .eq("id", supplier_id).limit(1).execute()).data or []
+        if not owned:
+            raise ValueError("Supplier not owned by caller")
+        offers = (self.client.table("offers").select("id").eq("owner_id", owner_id)
+                  .eq("supplier_id", supplier_id).limit(1).execute()).data or []
+        if offers:
+            raise ValueError("Supplier is used by purchase offers")
+        self.client.table("suppliers").delete().eq("owner_id", owner_id).eq("id", supplier_id).execute()
+
     def create_owned_offer(self, owner_id, ingredient_id, supplier_id=None,
                            product_url=None, package_quantity=None,
                            package_unit=None, shipping_note=None):
