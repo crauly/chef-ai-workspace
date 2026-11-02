@@ -5,6 +5,7 @@ import {isPlateImageValid, loadPlate, parsePlateDataUrl, sanitizePlateNote, save
 
 const PASSWORD = "test-only-preview-password-32-characters";
 const TINY_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+const KURO_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGPg4uICAABAAB9egfgSAAAAAElFTkSuQmCC";
 function authed(url: string, body: unknown) {
   return new NextRequest(url, {method: "POST",
     headers: {Origin: "http://localhost",
@@ -173,7 +174,8 @@ test("detail section reports plate status and attaches the photo on generate", a
   await page.goto("/");
   const detail = await openRecipe(page, "片栗粉のレシピ");
   const section = detail.getByRole("region", {name: "料理イメージ"});
-  await expect(section.getByLabel("使用する皿")).toHaveValue(await section.getByLabel("使用する皿").locator("option").nth(1).getAttribute("value"));
+  const migratedValue = await section.getByLabel("使用する皿").locator("option").nth(1).getAttribute("value");
+  await expect(section.getByLabel("使用する皿")).toHaveValue(migratedValue ?? "");
   await section.getByRole("button", {name: "✦ 料理画像を生成"}).click();
   await expect(section.getByRole("img", {name: "生成した料理イメージ"})).toBeVisible();
   const sent = JSON.parse(sentBody);
@@ -196,17 +198,26 @@ test("detail section without a plate reports standard generation and sends no ph
 });
 
 test("two registered plates can be chosen per recipe, including no plate", async ({page}) => {
+ await page.setViewportSize({width: 390, height: 844});
  await page.goto("/");
  const settings=page.locator("details.plate-settings");
  await settings.locator("summary").click();
  const file=settings.locator('input[type="file"]');
- for(const name of ["白皿","黒皿"]){
+ for(const [name, url] of [["白皿", TINY_PNG], ["黒皿", KURO_PNG]] as const){
   await settings.getByPlaceholder(/白い丸皿/).fill(name);
-  await file.setInputFiles({name:"plate.png",mimeType:"image/png",buffer:Buffer.from(TINY_PNG.split(",")[1],"base64")});
+  await file.setInputFiles({name:"plate.png",mimeType:"image/png",buffer:Buffer.from(url.split(",")[1],"base64")});
   await expect(settings.getByRole("img",{name:"登録予定の皿"})).toBeVisible();
   await settings.getByRole("button",{name:"この皿を登録"}).click();
   await expect(settings.getByText(name,{exact:true})).toBeVisible();
  }
+ const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+ expect(overflow).toBeLessThanOrEqual(1);
+ await page.screenshot({path: "test-results/plate-gallery-390px.png"});
+ async function gallerySrc(name: string) {
+  return await settings.locator(".plate-gallery-item", {hasText: name}).locator("img").getAttribute("src");
+ }
+ const shiroSrc = await gallerySrc("白皿");
+ const kuroSrc = await gallerySrc("黒皿");
  await page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"}).click();
  const picker=page.getByLabel("使用する皿");
  await expect(picker.locator("option")).toHaveCount(3);
@@ -216,7 +227,8 @@ test("two registered plates can be chosen per recipe, including no plate", async
  await page.route("**/api/dish-image", route=>{sent=route.request().postData()??"";return route.fulfill({json:{image:TINY_PNG}});});
  await page.getByRole("button",{name:"✦ 料理画像を生成"}).click();
  await expect(page.getByRole("img",{name:"生成した料理イメージ"})).toBeVisible();
- expect(JSON.parse(sent).image).toBe(TINY_PNG);
+ expect(JSON.parse(sent).image).toBe(kuroSrc);
+ expect(JSON.parse(sent).image).not.toBe(shiroSrc);
  await picker.selectOption("auto");
  await page.getByRole("button",{name:"↻ 再生成"}).click();
  await expect.poll(()=>JSON.parse(sent).image).toBeUndefined();

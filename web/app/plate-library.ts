@@ -15,18 +15,27 @@ async function withStore<T>(storeName:string,mode:IDBTransactionMode,fn:(s:IDBOb
  finally{db.close();}
 }
 async function rawList():Promise<Plate[]>{return (await withStore<Plate[]>(STORE,"readonly",s=>s.getAll())).sort((a,b)=>a.createdAt-b.createdAt);}
-export async function loadPlates():Promise<{plates:Plate[];defaultId:string|null}>{
- let plates=await rawList();
+// Settings and detail sections mount together, so concurrent loadPlates
+// calls must share one migration: otherwise two readers can both see an
+// empty gallery and copy the legacy plate twice. A rejected run clears the
+// lock so the next call retries instead of reusing the failure.
+async function ensureMigrated():Promise<void>{
  const migrated=await withStore<boolean|undefined>(META,"readonly",s=>s.get("legacy-migrated"));
- if(!migrated){
-  const old=loadPlate();
-  if(old.image&&isPlateImageValid(old.image)&&!plates.length){
-   await withStore(STORE,"readwrite",s=>s.put({id:crypto.randomUUID(),name:"デフォルト皿",image:old.image,note:old.note,createdAt:Date.now()} as Plate));
-   plates=await rawList();
-   await withStore(META,"readwrite",s=>s.put(plates[0].id,"default-id"));
-  }
-  await withStore(META,"readwrite",s=>s.put(true,"legacy-migrated"));
+ if(migrated)return;
+ const old=loadPlate();
+ const plates=await rawList();
+ if(old.image&&isPlateImageValid(old.image)&&!plates.length){
+  await withStore(STORE,"readwrite",s=>s.put({id:crypto.randomUUID(),name:"デフォルト皿",image:old.image,note:old.note,createdAt:Date.now()} as Plate));
+  const after=await rawList();
+  await withStore(META,"readwrite",s=>s.put(after[0].id,"default-id"));
  }
+ await withStore(META,"readwrite",s=>s.put(true,"legacy-migrated"));
+}
+let migrationDone:Promise<void>|null=null;
+export async function loadPlates():Promise<{plates:Plate[];defaultId:string|null}>{
+ if(!migrationDone)migrationDone=ensureMigrated().catch(err=>{migrationDone=null;throw err;});
+ await migrationDone;
+ const plates=await rawList();
  const id=await withStore<string|undefined>(META,"readonly",s=>s.get("default-id"));
  return {plates,defaultId:id&&plates.some(p=>p.id===id)?id:(plates[0]?.id??null)};
 }
