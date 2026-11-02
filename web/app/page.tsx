@@ -29,6 +29,7 @@ export default function Library(){
  const [editPrice,setEditPrice]=useState(""),[editPriceQty,setEditPriceQty]=useState("1"),[editPriceUnit,setEditPriceUnit]=useState("g");
  const [aiOpen,setAiOpen]=useState(false);
  const [confirmQty,setConfirmQty]=useState(false),[confirmPrice,setConfirmPrice]=useState(false);
+ useEffect(()=>{if(selected?.id)window.scrollTo({top:0,behavior:"instant"});},[selected?.id]);
 
  const [locale,setLocale]=useState<Locale>("ja");
  const t=(key:Parameters<typeof label>[1])=>label(locale,key);
@@ -126,15 +127,21 @@ export default function Library(){
  {items.length===0&&!error&&!loadingList&&<p className="muted">{query?(locale==="ja"?"一致するレシピがありません。":"No recipes match this name."):t("empty")}</p>}
  <div className="toolbar"><button disabled={page===1} onClick={()=>setPage(p=>p-1)}>{t("previous")}</button><span>{t("page")} {page}</span><button disabled={items.length<20} onClick={()=>setPage(p=>p+1)}>{t("next")}</button></div>
  </div>
- {selected&&<section className="card recipe-detail" aria-label={t("detail")}><div className="toolbar"><button type="button" className="secondary" onClick={()=>{setEditingId(null);setAiOpen(false);setSelected(null);}}>{locale==="ja"?"← レシピ一覧へ":"← Back to recipes"}</button><span className="tag">レシピ詳細</span></div><h2 className="text-2xl font-semibold mt-4 mb-1">{selected.title.value||t("detail")}</h2>
- <p className="tag">Revision {selected.revision}</p>
+ {selected&&<section className="recipe-detail" aria-label={t("detail")}>
+ <div className="detail-topbar"><button type="button" className="detail-back" onClick={()=>{setEditingId(null);setAiOpen(false);setSelected(null);window.scrollTo({top:0,behavior:"instant"});}}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button><span className="detail-revision">REV {selected.revision}</span></div>
+ <div className="detail-heading"><p className="detail-eyebrow">{locale==="ja"?"RECIPE DETAIL":"RECIPE DETAIL"}</p><h2>{selected.title.value||t("detail")}</h2></div>
+ <div className="detail-metrics">
+  <div><span>{locale==="ja"?"販売価格":"Selling price"}</span><strong>{selected.selling_price_jpy.value===null?"—":`¥${selected.selling_price_jpy.value}`}</strong></div>
+  <div><span>{locale==="ja"?"材料原価":"Food cost"}</span><strong>{cost?.total_cost_jpy==null?"—":`¥${cost.total_cost_jpy}`}</strong></div>
+  <div><span>{locale==="ja"?"原価率":"Cost rate"}</span><strong>{cost?.cost_rate_pct==null?"—":`${cost.cost_rate_pct}%`}</strong></div>
+ </div>
 
- <h2>{t("ingredients")}</h2>{selected.materials.length===0?<p className="muted">{t("noIngredients")}</p>:<ul className="detail-ingredients">{selected.materials.map(m=>{
+ <div className="detail-section-heading"><h3>{t("ingredients")}</h3><span>{selected.materials.length}{locale==="ja"?"品目":" items"}</span></div>{selected.materials.length===0?<p className="muted">{t("noIngredients")}</p>:<ul className="detail-ingredients">{selected.materials.map(m=>{
   const name=selected.display_names?.[m.id]?.display?.trim()||m.material_name.value?.trim()||t("unnamed");
   const qtyMark=m.quantity.status==="assumed"?` (${t("assumed")})`:m.quantity.status==="unresolved"?` (${t("unresolved")})`:"";
   const price=m.price_override;
   const priceText=price?`${locale==="ja"?"仕入単価":"Purchase"} ¥${price.amount_jpy.value} / ${price.per_quantity}${price.per_unit}${price.amount_jpy.status==="assumed"?` (${t("assumed")})`:price.amount_jpy.status==="unresolved"?` (${t("unresolved")})`:""}`:m.price_mode==="inherit"?(locale==="ja"?"共通食材の継承価格（詳細値は未取得）":"Inherited ingredient price (not loaded)"):(locale==="ja"?"仕入単価 未設定":"Purchase price not set");
-  return <li key={m.id} className="ingredient-row"><div className="ingredient-main"><strong>{name}</strong><span>{m.quantity.value??t("missing")} {m.unit??""}{qtyMark}</span><span className="ingredient-price">{priceText}</span></div><button className="icon-button" disabled={busy} type="button" aria-label={locale==="ja"?`${name}を編集`:`Edit ${name}`} onClick={()=>openEdit(m.id)}>✏️</button></li>;})}</ul>}
+  return <li key={m.id} className="ingredient-row"><div className="ingredient-main"><strong>{name}</strong><div className="detail-ingredient-data"><span className="detail-ingredient-qty">{m.quantity.value??t("missing")} {m.unit??""}{qtyMark}</span><span className="ingredient-price">{priceText}</span></div></div><button className="icon-button" disabled={busy} type="button" aria-label={locale==="ja"?`${name}を編集`:`Edit ${name}`} onClick={()=>openEdit(m.id)}>✏️</button></li>;})}</ul>}
  {editingId!==null&&(()=>{
   const line=selected.materials.find(m=>m.id===editingId);
   if(!line)return null;
@@ -159,7 +166,7 @@ export default function Library(){
     <button className="secondary" type="button" disabled={busy} onClick={()=>setEditingId(null)}>{t("close")}</button></div>
    </section>
   </div>;})()}
- <details className="mt-5"><summary className="cursor-pointer font-medium">{locale==="ja"?"食材を追加":"Add ingredient"}</summary><form onSubmit={addFood} className="material-form">
+ <details className="detail-action"><summary>{locale==="ja"?"＋ 食材を追加":"＋ Add ingredient"}</summary><form onSubmit={addFood} className="material-form">
  <fieldset><legend>{locale==="ja"?"食材":"Ingredient"}</legend>
  <input aria-label={locale==="ja"?"食材名":"Ingredient name"} placeholder={locale==="ja"?"食材名（例：片栗粉）":"Ingredient name"} value={food} onChange={e=>setFood(e.target.value)} required/>
  </fieldset>
@@ -174,10 +181,9 @@ export default function Library(){
  </fieldset>
  <button disabled={busy||!food.trim()||!qty.trim()||!price.trim()}>{locale==="ja"?"食材を追加":"Add ingredient"}</button>
  </form></details>
- {cost&&<section aria-label="Recipe cost summary" className="cost-summary"><strong>{locale==="ja"?"現在の原価":"Current food cost"}: {cost.total_cost_jpy===null?(locale==="ja"?"要確認":"Needs review"):`¥${cost.total_cost_jpy}`}</strong><span>{locale==="ja"?"原価率":"Food cost %"}: {cost.cost_rate_pct===null?"—":`${cost.cost_rate_pct}%`}{cost.estimated?` (${t("assumed")})`:""}</span></section>}
- <p className="muted">{t("price")}: {selected.selling_price_jpy.value??t("missing")}{selected.selling_price_jpy.status==="assumed"?` (${t("assumed")})`:selected.selling_price_jpy.status==="unresolved"?` (${t("unresolved")})`:""}</p>
- <details className="mt-5"><summary className="cursor-pointer font-medium">{locale==="ja"?"料理名を変更":"Rename recipe"}</summary><form onSubmit={change}><input aria-label={t("rename")} value={rename} onChange={e=>setRename(e.target.value)}/><button disabled={busy||!rename.trim()}>{t("save")}</button></form></details>
- <button type="button" disabled={busy} aria-expanded={aiOpen} onClick={()=>setAiOpen(v=>!v)} className="mt-5">{locale==="ja"?"AIに変更相談":"Ask AI to edit"}</button>
+ {cost?.estimated&&<p className="detail-estimate">{locale==="ja"?"原価に推定値が含まれます":"Cost includes estimates"}</p>}
+ <details className="detail-action"><summary>{locale==="ja"?"✎ 料理名を変更":"✎ Rename recipe"}</summary><form onSubmit={change}><input aria-label={t("rename")} value={rename} onChange={e=>setRename(e.target.value)}/><button disabled={busy||!rename.trim()}>{t("save")}</button></form></details>
+ <button type="button" disabled={busy} aria-expanded={aiOpen} onClick={()=>setAiOpen(v=>!v)} className="detail-ai-button">{locale==="ja"?"◇ AIに変更相談":"◇ Ask AI to edit"}</button>
  <div hidden={!aiOpen}><AIEditor key={selected.id} recipe={selected} locale={locale} control={editor} markReview={()=>reviewBoundary.current?.()??-1} onBusy={b=>{setBusy(b);if(b)setAiOpen(true);}} onSaved={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");void reload();}} /></div>
  </section>}</main>;
 }
