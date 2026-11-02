@@ -191,7 +191,7 @@ export default function Library(){
   if(!line)return null;
   const name=selected.display_names?.[line.id]?.display?.trim()||line.material_name.value?.trim()||t("unnamed");
   const qtyChanged=editQty.trim()!==line.quantity.value||editUnit!==(line.unit||"g");
-  const priceChanged=editPrice.trim()!==(line.price_override?.amount_jpy.value||"")||editPriceQty!==(line.price_override?.per_quantity||"1")||editPriceUnit!==(line.price_override?.per_unit||line.unit||"g"));
+  const priceChanged=!line.ingredient_id&&(editPrice.trim()!==(line.price_override?.amount_jpy.value||"")||editPriceQty!==(line.price_override?.per_quantity||"1")||editPriceUnit!==(line.price_override?.per_unit||line.unit||"g"));
   return <div className="name-choice-overlay" onClick={()=>setEditingId(null)}>
    <section role="dialog" aria-modal="true" aria-label={locale==="ja"?`${name}を編集`:`Edit ${name}`} className="name-choice-dialog" onClick={e=>e.stopPropagation()}>
     <h4>{name}</h4>
