@@ -135,9 +135,12 @@ class SupplierBody(BaseModel):
 
 
 @router.get("/suppliers")
-def list_demo_suppliers(ctx=Depends(demo_context)):
+def list_demo_suppliers(page: int = Query(default=1, ge=1),
+                        page_size: int = Query(default=50, ge=1, le=100),
+                        ctx=Depends(demo_context)):
     owner, repository = ctx
-    return {"items": repository.list_owned_suppliers(owner)}
+    return {"items": repository.list_owned_suppliers(owner, limit=page_size, offset=(page-1)*page_size),
+            "page": page, "page_size": page_size}
 
 
 @router.post("/suppliers", status_code=201)
