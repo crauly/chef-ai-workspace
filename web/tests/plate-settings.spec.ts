@@ -157,8 +157,8 @@ test("settings section is reachable from the library view and starts empty", asy
   const settings = page.locator("details.plate-settings");
   await expect(settings.getByText("料理画像設定（デフォルト皿）")).toBeVisible();
   await settings.getByText("料理画像設定（デフォルト皿）").click();
-  await expect(settings.getByText("皿は未登録です")).toBeVisible();
-  await expect(settings.getByRole("button", {name: "保存"})).toBeDisabled();
+  await expect(settings.getByText("新しい皿を登録")).toBeVisible();
+  await expect(settings.getByRole("button", {name: "この皿を登録"})).toBeDisabled();
 });
 
 test("detail section reports plate status and attaches the photo on generate", async ({page}) => {
@@ -173,7 +173,7 @@ test("detail section reports plate status and attaches the photo on generate", a
   await page.goto("/");
   const detail = await openRecipe(page, "片栗粉のレシピ");
   const section = detail.getByRole("region", {name: "料理イメージ"});
-  await expect(section.getByText("デフォルト皿を使用します")).toBeVisible();
+  await expect(section.getByLabel("使用する皿")).toHaveValue(await section.getByLabel("使用する皿").locator("option").nth(1).getAttribute("value"));
   await section.getByRole("button", {name: "✦ 料理画像を生成"}).click();
   await expect(section.getByRole("img", {name: "生成した料理イメージ"})).toBeVisible();
   const sent = JSON.parse(sentBody);
@@ -189,7 +189,7 @@ test("detail section without a plate reports standard generation and sends no ph
   });
   const detail = await openRecipe(page, "片栗粉のレシピ");
   const section = detail.getByRole("region", {name: "料理イメージ"});
-  await expect(section.getByText("デフォルト皿未登録")).toBeVisible();
+  await expect(section.getByLabel("使用する皿")).toHaveValue("auto");
   await section.getByRole("button", {name: "✦ 料理画像を生成"}).click();
   await expect(section.getByRole("img", {name: "生成した料理イメージ"})).toBeVisible();
   expect(JSON.parse(sentBody).image).toBeUndefined();
