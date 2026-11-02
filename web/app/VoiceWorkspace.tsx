@@ -249,7 +249,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    <a href="#recipes">{locale==="ja"?"レシピ":"Recipes"}</a>
    <button type="button" className="bottom-nav-mic" aria-label={locale==="ja"?"下部の音声操作":"Bottom voice control"} aria-pressed={micRecording} disabled={micDisabled} onClick={toggleMic}>{micRecording?<span aria-hidden="true" className="stop-glyph"/>:<MicrophoneGlyph/>}</button>
    <button type="button" onClick={()=>void revealDraft()}>{locale==="ja"?"下書き":"Draft"}</button>
-   <a href="#assist">{locale==="ja"?"その他":"More"}</a>
+   <a href="#assist" aria-label={locale==="ja"?"管理・設定":"Management and settings"}><span className="bottom-nav-settings-icon" aria-hidden="true">⚙</span><span>{locale==="ja"?"設定":"Settings"}</span></a>
   </nav>
  </>;
 }
