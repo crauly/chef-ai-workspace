@@ -17,8 +17,13 @@ export function dishImagePrompt(title:string,names:string[],hint:string):string{
  let subject=dish.slice(0,Math.max(1,budget));
  if(subject.length+extra.length+4<=budget&&extra)subject+=`. ${extra}`;
  if(items.length&&subject.length+12<budget){
-  const context=` (made with ${items.join(", ")})`;
-  subject+=context.slice(0,Math.max(0,budget-subject.length));
+  let context="";
+  for(const item of items){
+   const next=context?`${context}, ${item}`:item;
+   if(subject.length+next.length+14>budget)break;
+   context=next;
+  }
+  if(context)subject+=` (made with ${context})`;
  }
  return prefix+subject+rules;
 }
