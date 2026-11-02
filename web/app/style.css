@@ -377,7 +377,8 @@ main.recipe-detail-page>div[hidden]{display:none!important}
 .draft-cost-values b{font-size:clamp(.95rem,3vw,1.18rem);overflow-wrap:anywhere}
 .draft-cost-summary p{margin:12px 0 0;font-size:.8rem;color:#e7c77e}
 .draft-image-actions{margin:12px 0 16px}
-.draft-image-launch{width:100%;padding:12px 16px;border:1px solid #eed48e;border-radius:14px;color:#221a0c;font-weight:700;background:linear-gradient(135deg,#fae3a6,#d9ad51);box-shadow:0 3px 12px rgba(0,0,0,.15)}
+.draft-image-launch{width:100%;padding:13px 16px;border:1px solid rgba(190,207,197,.35);border-radius:12px;color:#f1f0e9;font-weight:600;background:#303935;box-shadow:none;letter-spacing:.02em;transition:background .15s,border-color .15s}
+.draft-image-launch:hover,.draft-image-launch:focus-visible{background:#3b4741;border-color:#a9c2b0}
 .draft-image-launch:disabled{opacity:.5}
 .draft-image-modal-backdrop{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:20px;background:rgba(0,0,0,.7)}
 .draft-image-modal{background:#272a31;color:#f5f5f5;border:1px solid #657078;border-radius:19px;padding:22px;width:min(100%,440px);max-height:calc(100dvh - 40px);overflow:auto;box-shadow:0 18px 55px rgba(0,0,0,.55)}
@@ -390,5 +391,15 @@ main.recipe-detail-page>div[hidden]{display:none!important}
 .draft-image-modal-actions button{padding:10px 16px;border-radius:999px;border:1px solid #767a82}
 .draft-image-modal-actions button:last-child{background:#e5bd64;color:#221a0c;border-color:#e5bd64;font-weight:700}
 .draft-image-modal-actions button:disabled{opacity:.6}
-.voice-status-list{position:fixed;right:16px;bottom:86px;z-index:90;list-style:none;margin:0;padding:7px 10px;max-width:min(285px,calc(100vw - 36px));background:rgba(28,35,40,.81);border:1px solid rgba(189,210,206,.25);border-radius:15px;box-shadow:0 6px 22px rgba(0,0,0,.3);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);pointer-events:none}
-.voice-status-list li{display:flex;align-items:center;gap:8px;font-size:.78rem;line-height:1.4;padding:3px 2px;color:#eef7f5}
+.voice-status-list{position:fixed;right:14px;bottom:calc(86px + env(safe-area-inset-bottom,0px));z-index:90;width:min(240px,calc(100vw - 34px));list-style:none;margin:0;padding:9px 11px;background:rgba(33,41,44,.86);border:1px solid rgba(182,201,195,.35);border-radius:19px;box-shadow:0 8px 28px rgba(0,0,0,.25);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);pointer-events:none;display:grid;gap:8px}
+.voice-status-list li{display:flex;align-items:center;gap:9px;color:#ecf3ef;min-width:0;padding:0}
+.voice-status-list .status-symbol{flex:0 0 27px;width:27px;height:27px;border-radius:50%;display:grid;place-items:center;background:rgba(35,136,212,.2);color:#63b8f7;font-size:1.15rem;font-weight:700}
+.voice-status-list .status-price .status-symbol{color:#65d69c;background:rgba(38,151,101,.2)}
+.voice-status-list .status-error .status-symbol{color:#ffb193;background:rgba(186,64,58,.2)}
+.voice-status-list .status-detail{display:grid;gap:5px;min-width:0;flex:1}
+.voice-status-list .status-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.76rem;font-weight:600;line-height:1.25}
+.voice-status-list .status-track{display:block;height:3px;border-radius:5px;background:rgba(226,239,238,.22);overflow:hidden;position:relative}
+.voice-status-list .status-track span{display:block;width:36%;height:100%;border-radius:5px;background:#58b6ef;animation:status-activity 1.6s ease-in-out infinite alternate}
+.voice-status-list .status-price .status-track span{background:#60ca98}
+@keyframes status-activity{from{transform:translateX(0)}to{transform:translateX(175%)}}
+@media(prefers-reduced-motion:reduce){.voice-status-list .status-track span{animation:none;width:100%;opacity:.55}}
