@@ -131,6 +131,15 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
   if(currentMode.current!=="create")return;
   document.getElementById("draft")?.scrollIntoView({block:"start"});
  }
+ useEffect(()=>{
+  if(window.location.hash!=="#open-draft")return;
+  // A cross-page Draft action must use the same guarded mode transition
+  // as the footer button; an anchor alone could expose the wrong mode.
+  void revealDraft().then(()=>{
+   if(window.location.hash==="#open-draft")
+    window.history.replaceState(null,"",window.location.pathname+window.location.search);
+  });
+ },[]);
  function receive(text:string,meta?:VoiceCaptureMeta){
   if(!text.trim())return;
   if(registration.current?.isSaving()){feedback("承認された下書きを保存中です。完了後に続きをお願いします。",true);return;}
