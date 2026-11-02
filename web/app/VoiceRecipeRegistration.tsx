@@ -109,6 +109,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  // save. dishGenerating mirrors its own flight; dishFailed latches the last
  // failure; dishImageUrl is a preview (illustration, never saved as evidence).
  const [dishHint,setDishHint]=useState("");
+ const [dishModalOpen,setDishModalOpen]=useState(false);
  const [dishImageUrl,setDishImageUrl]=useState<string|null>(null);
  const [dishGenerating,setDishGenerating]=useState(false),[dishFailed,setDishFailed]=useState(false);
  const dishAbort=useRef<AbortController|null>(null);
@@ -581,7 +582,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     {key:"dish-image-fail",active:dishFailed&&!dishGenerating,text:ja?"画像の生成に失敗しました。下書きは保持しています。":"Image generation failed. The draft is kept."},
         {key:"photo-fail",active:photoFailed&&!photoAnalyzing,text:ja?"写真の解析に失敗しました。下書きは作成していません。":"Photo analysis failed. No draft was created."},
     {key:"done",active:!mic.transcribing&&!parsing&&!priceLoading&&!parseFailed&&!priceFailed&&turns.length>0&&draft!==null,text:ja?"処理完了：下書きに反映しました。":"Done: reflected in the draft."},
-   ].filter(row=>row.active);
+   ].filter(row=>row.active).slice(0,2);
    return rows.length?<ul className="voice-status-list" role="status" aria-live="polite" aria-label={ja?"処理状況":"Processing status"}>{rows.map(row=><li key={row.key}>{["listen","transcribe","parse","price","photo","dish-image"].includes(row.key)?<span className="voice-spin" aria-hidden="true"/>:null}{row.text}</li>)}</ul>:null;
   })()}
   <p aria-live="polite" role="status">{busy?(ja?"処理中 ⏳ ":"Working ⏳ "):""}{message}</p>
@@ -604,12 +605,35 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    })()}
    <h3>{ja?"未保存の下書き：":"Unsaved draft: "}{draft.title||(ja?"料理名未設定":"Untitled recipe")}</h3>
    {draft.interpretations?.map((item,index)=><p key={index}>料理の文脈からの解釈案：{item.source} → {item.suggestion}（{item.reason}）</p>)}
-   <p>{ja?"売価：":"Selling price: "}{draft.selling_price_jpy?("¥"+draft.selling_price_jpy):(ja?"未設定（売価なしでも保存できます）":"Not set (optional)")}</p>
-   <div>
-    <label>{ja?"料理イメージの指示（任意）":"Dish image hint (optional)"}<input aria-label={ja?"料理イメージの指示（任意）":"Dish image hint (optional)"} value={dishHint} onChange={event=>setDishHint(event.target.value)} maxLength={200} placeholder={ja?"例：和風の盛り付け":"e.g. rustic plating"} disabled={phase==="saving"||dishGenerating}/></label>
-    <button type="button" onClick={()=>void generateDishImage()} disabled={phase==="saving"||dishGenerating}>{ja?"画像を生成":"Generate image"}</button>
+   {(()=>{
+    let partial=0,missing=0;
+    const factor=(unit:string)=>unit==="kg"||unit==="l"?1000:unit==="g"||unit==="ml"?1:null;
+    for(const material of draft.materials){
+     const qty=Number(material.quantity),price=Number(material.price_jpy),basis=Number(material.price_quantity);
+     const a=factor(material.unit),b=factor(material.price_unit);
+     const compatible=a!==null&&b!==null&&((["g","kg"].includes(material.unit)&&["g","kg"].includes(material.price_unit))||(["ml","l"].includes(material.unit)&&["ml","l"].includes(material.price_unit)));
+     if(material.quantity.trim()&&material.price_jpy.trim()&&material.price_quantity.trim()&&compatible&&Number.isFinite(qty)&&Number.isFinite(price)&&Number.isFinite(basis)&&basis>0&&qty>=0&&price>=0)partial+=qty*a!*price/(basis*b!);
+     else missing++;
+    }
+    const yen=(value:number)=>new Intl.NumberFormat(ja?"ja-JP":"en-US",{style:"currency",currency:"JPY",maximumFractionDigits:0}).format(value);
+    return <section className="draft-cost-summary" aria-label={ja?"下書き原価サマリー":"Draft cost summary"}>
+     <strong>{ja?"原価サマリー":"Cost summary"}</strong>
+     <div className="draft-cost-values"><span>{ja?(missing?"部分原価合計":"原価合計"):(missing?"Partial cost":"Total cost")}<b>{yen(partial)}</b></span><span>{ja?"売価":"Selling price"}<b>{draft.selling_price_jpy?yen(Number(draft.selling_price_jpy)):"—"}</b></span><span>{ja?"原価率":"Cost rate"}<b>{!missing&&partial>=0&&Number(draft.selling_price_jpy)>0?((partial/Number(draft.selling_price_jpy))*100).toFixed(1)+"%":(ja?"未確定":"Unconfirmed")}</b></span></div>
+     {missing>0&&<p>{ja?`価格または換算条件が未確定の食材が${missing}件あるため、部分原価です。`:`${missing} ingredients have unresolved costs or conversions; showing partial cost.`}</p>}
+    </section>;
+   })()}
+   <div className="draft-image-actions">
+    <button type="button" className="draft-image-launch" onClick={()=>setDishModalOpen(true)} disabled={phase==="saving"||dishGenerating}>{dishImageUrl?(ja?"✦ 料理画像を再生成":"✦ Regenerate dish image"):(ja?"✦ 料理画像を生成":"✦ Generate dish image")}</button>
     {dishImageUrl&&<div><img src={dishImageUrl} alt={ja?"生成した料理イメージ":"Generated dish image"} style={{maxWidth:"100%"}}/><p className="muted">{ja?"生成画像はイメージです。数量・価格・完成写真の証拠にはなりません。":"Generated image is an illustration, not evidence for quantities, prices, or the finished dish."}</p></div>}
    </div>
+   {dishModalOpen&&<div className="draft-image-modal-backdrop" onClick={()=>{if(!dishGenerating)setDishModalOpen(false);}}>
+    <section role="dialog" aria-modal="true" aria-label={ja?"料理イメージを生成":"Generate dish image"} className="draft-image-modal" onClick={event=>event.stopPropagation()}>
+     <div className="draft-image-modal-head"><h3>{ja?"✦ 料理イメージを生成":"✦ Generate dish image"}</h3><button type="button" aria-label={ja?"閉じる":"Close"} disabled={dishGenerating} onClick={()=>setDishModalOpen(false)}>×</button></div>
+     <p>{ja?"レシピの内容をもとに完成料理のイメージを生成します。":"Generate a plated dish image from the recipe."}</p>
+     <label>{ja?"料理イメージの指示（任意）":"Dish image hint (optional)"}<textarea value={dishHint} onChange={event=>setDishHint(event.target.value)} maxLength={200} rows={3} placeholder={ja?"例：赤ワインソースは控えめ、白い皿に美しく盛り付ける":"e.g. Elegant plating on a white plate"} disabled={dishGenerating}/></label>
+     <div className="draft-image-modal-actions"><button type="button" disabled={dishGenerating} onClick={()=>setDishModalOpen(false)}>{ja?"キャンセル":"Cancel"}</button><button type="button" disabled={dishGenerating} onClick={()=>{setDishModalOpen(false);void generateDishImage();}}>{ja?"✦ 画像を生成":"✦ Generate image"}</button></div>
+    </section>
+   </div>}
    <ul>{draft.materials.map((material,index)=>{
     const priced=Boolean(material.price_jpy&&material.price_quantity&&material.price_unit);
     const provisional=draft.provisional_prices?.[index];
