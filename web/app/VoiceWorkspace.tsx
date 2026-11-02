@@ -1,5 +1,6 @@
-import NavIcon from "./NavIcon";
 "use client";
+import NavIcon from "./NavIcon";
+
 import {useEffect,useRef,useState,type RefObject} from "react";
 import type {Locale} from "./i18n";
 import {request,type Recipe} from "./types";
