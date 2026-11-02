@@ -3,7 +3,7 @@ const IMG="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAA
 
 test.beforeEach(async ({request})=>{await request.post("http://127.0.0.1:8100/test/reset");});
 
-test("approved voice draft carries its generated preview to the saved recipe without another model call",async({page})=>{
+test("explicit registration carries its generated preview to the saved recipe without another model call",async({page})=>{
  let images=0,saves=0,recipeId="";
  await page.route("**/api/dish-image",route=>{images++;return route.fulfill({json:{image:IMG}});});
  await page.route("**/api/voice-recipe",route=>route.fulfill({json:{
@@ -22,8 +22,7 @@ test("approved voice draft carries its generated preview to the saved recipe wit
  await page.getByRole("button",{name:/料理画像を生成/}).click();
  await page.getByRole("dialog",{name:"料理イメージを生成"}).getByRole("button",{name:/画像を生成/}).click();
  await expect(page.getByRole("img",{name:"生成した料理イメージ"})).toBeVisible();
- await entry.fill("内容を確認");await page.getByRole("button",{name:"反映"}).click();
- await expect(page.getByRole("button",{name:"内容を承認して保存"})).toBeEnabled();
+ // The explicit register command itself authorizes persistence: no review round trip.
  expect(saves).toBe(0);
  await entry.fill("保存してください");await page.getByRole("button",{name:"反映"}).click();
  await expect.poll(()=>saves).toBe(1);
