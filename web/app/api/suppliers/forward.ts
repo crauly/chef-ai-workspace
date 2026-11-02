@@ -11,6 +11,7 @@ export async function supplierForward(req:NextRequest,id?:string){
  if(!base||!token)return fail(503);
  try{
   const target=new URL("/demo/suppliers"+(id?"/"+id:""),base);
+  if(!id&&req.method==="GET")for(const key of ["page","page_size"]){const v=req.nextUrl.searchParams.get(key);if(v)target.searchParams.set(key,v);}
   const body=req.method==="POST"||req.method==="PUT"?await req.text():undefined;
   if(body&&body.length>4096)return fail(413);
   const response=await fetch(target,{method:req.method,headers:{"X-Demo-Access":token,"Content-Type":"application/json"},body,cache:"no-store",redirect:"error",signal:AbortSignal.timeout(20000)});
