@@ -36,13 +36,12 @@ export type SaveMode="confirmed"|"unconfirmed";
 // a missing name, quantity/unit, title, or any note keeps saving blocked.
 const PRICE_SUFFIX="の仕入単価・基準数量・単位";
 export function saveModeFor(draft:Draft):SaveMode|null{
- if(!draft.title.trim()||draft.notes.length)return null;
- let priceOnly=false;
- for(const entry of draft.missing){
-  if(entry.endsWith(PRICE_SUFFIX)){priceOnly=true;continue;}
-  return null;
- }
- return priceOnly?"unconfirmed":"confirmed";
+ // Formal registration requires an actual recipe identity and named materials,
+ // not complete estimates. Unknown quantities and prices stay unresolved.
+ if(!draft.title.trim()||draft.materials.some(m=>!m.name.trim()))return null;
+ return draft.missing.length||draft.notes.length||
+   draft.materials.some(m=>!m.quantity||!m.unit||!m.price_jpy||!m.price_quantity||!m.price_unit)
+   ?"unconfirmed":"confirmed";
 }
 export function priceMissingNames(draft:Draft):string[]{
  const names=new Set<string>();
@@ -64,10 +63,16 @@ export function priceMissingNames(draft:Draft):string[]{
 // working; the generated image stays a preview, never recipe evidence.
 export {dishImagePrompt,isAbortError,dishCompletionKept} from "./dish-image";
 export function toSaveMaterials(draft:Draft){
- return draft.materials.map(m=>({name:m.name,
-  quantity:m.quantity||null,unit:m.unit||null,
-  price_jpy:m.price_jpy||null,price_quantity:m.price_quantity||null,
-  price_unit:m.price_unit||null}));
+ return draft.materials.map(m=>{
+  // The API accepts either quantity+unit together, or neither. An incomplete
+  // purchase-price trio must be represented as unresolved, never zero.
+  const quantity=m.quantity&&m.unit?m.quantity:null;
+  const unit=quantity?m.unit:null;
+  const priced=Boolean(quantity&&unit&&m.price_jpy&&m.price_quantity&&m.price_unit);
+  return {name:m.name,quantity,unit,
+   price_jpy:priced?m.price_jpy:null,price_quantity:priced?m.price_quantity:null,
+   price_unit:priced?m.price_unit:null};
+ });
 }
 
 function applyFoundPrices(draft:Draft):Draft{
@@ -382,7 +387,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   if(phaseRef.current==="saving")return;
   if(!d){say("先にレシピの内容を入力してください。");return;}
   const mode=saveModeFor(d);
-  if(!mode){say("登録に必要な情報が不足しています："+[...d.missing,...d.notes].join("、"));return;}
+  if(!mode){say("レシピ名と食材名を確認してください。入力できている内容は下書きに保持しています。");return;}
   reviewed.current=d;reviewMode.current=mode;setStage("review");
   await save();
  }
