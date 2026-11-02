@@ -411,3 +411,12 @@ main.recipe-detail-page>div[hidden]{display:none!important}
 .recipe-gap-disclosure ul{margin:10px 0;padding-left:23px;color:#e7e5df;font-size:.85rem}
 .recipe-gap-disclosure li{padding:3px 0}
 .recipe-gap-disclosure p{font-size:.77rem;color:#b9c0bd;margin:8px 0 2px}
+
+/* Supplier master shares existing cards; no new visual design system. */
+.supplier-manager{display:grid;gap:12px}
+.supplier-manager form{display:grid;gap:10px}
+.supplier-manager form label{display:grid;gap:5px}
+.supplier-manager-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.supplier-manager-list li{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;border:1px solid rgba(163,186,174,.22);border-radius:10px;padding:11px}
+.supplier-manager-list li>div:first-child{display:grid;gap:4px;overflow-wrap:anywhere}
+.supplier-manager-list small{color:#aebfb6}
