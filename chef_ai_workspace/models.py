@@ -83,6 +83,8 @@ class MaterialLine:
             raise ValueError("Negative quantity")
         if self.quantity.value is not None and not self.unit:
             raise ValueError("Known quantity requires unit")
+        if self.ingredient_id is not None and self.price_mode != "inherit":
+            raise ValueError("Linked ingredients must use shared master pricing")
         if self.price_mode == "inherit" and self.ingredient_id is None:
             raise ValueError("Inherit requires linked ingredient")
         if self.price_mode == "inherit" and self.price_override is not None:
