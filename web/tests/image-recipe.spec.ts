@@ -302,3 +302,21 @@ test("selling price needs its mention next to the amount", async () => {
     expect((await res2.json()).selling_price_jpy).toBe("1200");
   } finally { restore(); restoreFetch(); }
 });
+
+test("image memo count-unit provenance preserves only matching count facts", async () => {
+ const restore=withEnv();
+ const proposal={...MUSE_IMAGE_PROPOSAL,materials:[{name:"さくら卵",quantity:"3",unit:"個",price_jpy:"20",price_quantity:"1",price_unit:"個",supplier:""}]};
+ const restoreFetch=mockUpstream(async()=>Response.json({choices:[{finish_reason:"stop",message:{content:JSON.stringify(proposal)}}]}));
+ try {
+  const matching=await proposeImage(authed("http://localhost/api/image-recipe",{image:PNG,memo:"さくら卵3個、1個20円"}));
+  expect(matching.status).toBe(200);
+  const good=(await matching.json()).materials[0];
+  expect(good.quantity).toBe("3");
+  expect(good.unit).toBe("個");
+  const mismatching=await proposeImage(authed("http://localhost/api/image-recipe",{image:PNG,memo:"さくら卵3g、1g20円"}));
+  expect(mismatching.status).toBe(200);
+  const bad=(await mismatching.json()).materials[0];
+  expect(bad.quantity).toBe("");
+  expect(bad.unit).toBe("");
+ } finally {restore();restoreFetch();}
+});
