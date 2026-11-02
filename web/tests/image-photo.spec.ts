@@ -18,6 +18,7 @@ const voiceDraft = {title: "ペペロンチーノ", materials: [
 async function enterCreate(page: Page) {
   await page.goto("/");
   await page.getByRole("button", {name: "登録", exact: true}).click();
+  await page.getByText("写真からレシピを読み取る（オプション）").click();
   await expect(page.getByRole("button", {name: "写真を解析", exact: true})).toBeVisible();
 }
 
@@ -48,9 +49,9 @@ test("photo analysis reaches the existing unsaved draft path with its gate intac
   // Same formal path: the existing unsaved-draft card, not a new save route.
   await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("トマトパスタ");
   await expect(page.getByText("要確認：数量・価格は写真から確定できない")).toBeVisible();
-  // Human Gate: unresolved notes keep review and approval disabled; nothing saved.
-  await expect(page.getByRole("button", {name: "内容を確認", exact: true})).toBeDisabled();
-  await expect(page.getByRole("button", {name: "内容を承認して保存", exact: true})).toBeDisabled();
+  // Human Gate: nothing is saved without an explicit action. Notes make the
+  // draft unconfirmed, so one explicit registration saves it as unconfirmed.
+  await expect(page.getByRole("button", {name: "レシピを登録", exact: true})).toBeEnabled();
   expect(calls).toBe(1);
   expect(saves).toEqual([]);
 });
@@ -71,6 +72,7 @@ test("photo analysis never overwrites an existing draft", async ({page}) => {
   await page.getByLabel("解析する写真").setInputFiles(pngFile);
   await page.getByRole("button", {name: "写真を解析", exact: true}).click();
   // Refused before any request: the draft cannot be clobbered.
+  await page.getByText("処理メッセージ").click();
   await expect(page.getByText("既存の下書きがあります")).toBeVisible();
   expect(photoCalls).toBe(0);
   await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("ペペロンチーノ");
@@ -121,6 +123,7 @@ test("voice draft created during photo analysis wins; photo result is discarded"
   // Photo arrives late: it must not clobber the voice draft, and the
   // discard must be explicit, never silent.
   release();
+  await page.getByText("処理メッセージ").click();
   await expect(page.getByText("解析中に音声の下書きが作成されたため")).toBeVisible();
   await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("ペペロンチーノ");
   await expect(page.getByLabel("未保存のレシピ下書き")).not.toContainText("トマトパスタ");

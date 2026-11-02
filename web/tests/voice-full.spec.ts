@@ -1,5 +1,5 @@
 import {test,expect} from "@playwright/test";
-test("full recipe voice dialogue requires review before one atomic save",async({page})=>{
+test("full recipe voice dialogue requires an explicit action before one atomic save",async({page})=>{
  let saved=0;
  const draft={title:"カルボナーラ",materials:[{name:"卵",quantity:"100",unit:"g",price_jpy:"60",price_quantity:"50",price_unit:"g"}],selling_price_jpy:"1800",notes:[],missing:[]};
  await page.route("**/api/voice-recipe",async route=>{
@@ -24,15 +24,10 @@ test("full recipe voice dialogue requires review before one atomic save",async({
  await expect(page.getByText("未保存の下書き：カルボナーラ")).toBeVisible();
  await expect(page.getByText("卵 — 100g")).toBeVisible();
  await expect(page.getByText("仕入価格 ¥60 / 50g")).toBeVisible();
- await expect(page.getByRole("button",{name:"内容を承認して保存"})).toBeDisabled();
+ await expect(page.getByRole("button",{name:"レシピを登録"})).toBeEnabled();
  expect(saved).toBe(0);
+ // One explicit registration commits the eligible draft atomically.
  await entry.fill("登録を確定");await page.getByRole("button",{name:"反映"}).click();
- await expect(page.getByText(/^確認用の下書きを表示しました。/)).toBeVisible();
- expect(saved).toBe(0);
- await entry.fill("内容 を 確認");await page.getByRole("button",{name:"反映"}).click();
- await expect(page.getByRole("button",{name:"内容を承認して保存"})).toBeEnabled();
- expect(saved).toBe(0);
- await entry.fill("登録 を 確定");await page.getByRole("button",{name:"反映"}).click();
  await expect(page.getByText("レシピを保存しました。")).toBeVisible();
  expect(saved).toBe(1);
 });

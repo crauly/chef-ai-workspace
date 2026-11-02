@@ -5,7 +5,7 @@ const id = "11111111-1111-4111-8111-111111111111", materialId = "22222222-2222-4
 const id2 = "33333333-3333-4333-8333-333333333333", id3 = "44444444-4444-4444-8444-444444444444";
 const tracked = value => ({value, status: "confirmed", origin: "user"});
 const assumed = value => ({value, status: "assumed", origin: "model"});
-let recipe, recipes, confirms, corrections, receipts, browseItems, listQueries;
+let recipe, recipes, confirms, corrections, receipts, browseItems, listQueries, suppliers;
 function reset() {
   recipe = {id, title: tracked("片栗粉のレシピ"), revision: 0, materials: [{id: materialId, material_name: tracked("片栗粉"), quantity: tracked("10"), unit: "g", price_mode: "override", price_override: {amount_jpy: tracked("1000"), per_quantity: "1", per_unit: "kg"}}], selling_price_jpy: tracked("1000")};
   // Visual-check fixtures for the recipe detail UI (automated specs use `recipe` only).
@@ -21,6 +21,7 @@ function reset() {
   recipes = {[id]: recipe, [id2]: pasta, [id3]: soup};
   confirms = []; corrections = []; receipts = new Map();
   browseItems = Object.values(recipes).map(r => ({id: r.id, title: r.title.value, revision: r.revision})); listQueries = [];
+  suppliers = [];
 }
 reset();
 createServer(async (req, res) => {
@@ -98,6 +99,31 @@ createServer(async (req, res) => {
     const found = recipes[single[1]];
     if (!found) return send(404, {detail: "not found"});
     return send(200, found);
+  }
+  if (path === "/demo/suppliers") {
+    if (req.method === "GET") {
+      const params = new URL(req.url, "http://localhost").searchParams;
+      const page = Math.max(1, Number(params.get("page") || 1)), size = Math.min(100, Math.max(1, Number(params.get("page_size") || 50)));
+      const ordered = [...suppliers].sort((a, b) => a.name.localeCompare(b.name, "ja") || (a.id < b.id ? -1 : 1));
+      return send(200, {items: ordered.slice((page - 1) * size, page * size), page, page_size: size});
+    }
+    if (req.method === "POST") {
+      if (typeof body.name !== "string" || !body.name.trim() || body.name.length > 200) return send(422, {detail: "invalid supplier"});
+      const row = {id: crypto.randomUUID(), name: body.name.trim(), note: body.note ?? null};
+      suppliers.push(row);
+      return send(201, row);
+    }
+  }
+  const supplierId = (path.match(/^\/demo\/suppliers\/([^/]+)$/) || [])[1];
+  if (supplierId) {
+    const found = suppliers.find(row => row.id === supplierId);
+    if (!found) return send(404, {detail: "not found"});
+    if (req.method === "PUT") {
+      if (typeof body.name !== "string" || !body.name.trim() || body.name.length > 200) return send(422, {detail: "invalid supplier"});
+      found.name = body.name.trim(); found.note = body.note ?? null;
+      return send(200, found);
+    }
+    if (req.method === "DELETE") return send(204, {});
   }
   return send(200, recipe);
 }).listen(8100, "127.0.0.1");

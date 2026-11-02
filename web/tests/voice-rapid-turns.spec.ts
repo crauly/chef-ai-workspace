@@ -75,6 +75,7 @@ test("parse failure is visible and keeps every turn for retry", async ({page}) =
   await submit(page, COMMAND);
   await submit(page, INGREDIENTS[0]);
   await expect(page.getByText("解析に失敗しました")).toBeVisible({timeout: 8000});
+  await page.getByText("処理メッセージ").click();
   await expect(page.getByText("料理の解釈に失敗しました")).toBeVisible();
   // Nothing silently vanished: the turns stay listed and retry is offered.
   await expect(page.getByText(/認識した発話/)).toContainText("1件");

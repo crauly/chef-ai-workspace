@@ -153,8 +153,8 @@ async function openRecipe(page: Page, title: string) {
   return detail;
 }
 
-test("settings section is reachable from the library view and starts empty", async ({page}) => {
-  await page.goto("/");
+test("settings section is reachable from the settings route and starts empty", async ({page}) => {
+  await page.goto("/settings");
   const settings = page.locator("details.plate-settings");
   await expect(settings.getByText("料理画像設定（デフォルト皿）")).toBeVisible();
   await settings.getByText("料理画像設定（デフォルト皿）").click();
@@ -199,7 +199,7 @@ test("detail section without a plate reports standard generation and sends no ph
 
 test("two registered plates can be chosen per recipe, including no plate", async ({page}) => {
  await page.setViewportSize({width: 390, height: 844});
- await page.goto("/");
+ await page.goto("/settings");
  const settings=page.locator("details.plate-settings");
  await settings.locator("summary").click();
  const file=settings.locator('input[type="file"]');
@@ -218,6 +218,7 @@ test("two registered plates can be chosen per recipe, including no plate", async
  }
  const shiroSrc = await gallerySrc("白皿");
  const kuroSrc = await gallerySrc("黒皿");
+ await page.goto("/");
  await page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"}).click();
  const picker=page.getByLabel("使用する皿");
  await expect(picker.locator("option")).toHaveCount(3);

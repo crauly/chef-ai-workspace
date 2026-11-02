@@ -15,8 +15,9 @@ export default function SupplierManager({locale}:{locale:string}){
   try{
    const res=await fetch(`/api/suppliers?page=${targetPage}&page_size=${pageSize}`,{cache:"no-store",signal});
    if(!res.ok)throw new Error(String(res.status));
-   const data=await res.json() as {items:Supplier[]};
-   if(seq===readSeq.current){setItems(data.items);setError("");}
+   const data=await res.json() as {items?:unknown};
+   if(!Array.isArray(data.items))throw new Error("bad supplier payload");
+   if(seq===readSeq.current){setItems(data.items as Supplier[]);setError("");}
    return true;
   }catch(e){
    if(seq===readSeq.current && !(e instanceof Error&&e.name==="AbortError"))

@@ -20,15 +20,11 @@ test("voice recipe with unknown prices saves explicitly as price-unconfirmed",as
  await entry.fill("カルボナーラ、卵100グラム、値段はわかりません");
  await page.getByRole("button",{name:"反映"}).click();
  await expect(page.getByText("未保存の下書き：カルボナーラ")).toBeVisible();
- await expect(page.getByText("仕入単価 未確定（推測しません）")).toBeVisible();
- await expect(page.getByRole("button",{name:"内容を承認して保存"})).toBeDisabled();
+ await expect(page.getByText("仕入価格 未設定")).toBeVisible();
+ // The unknown price stays unconfirmed, yet the draft is explicitly registrable.
+ await expect(page.getByRole("button",{name:"レシピを登録"})).toBeEnabled();
  expect(saved).toBe(0);
- // A single save request only opens review, never saves (Human Gate).
- await entry.fill("保存してください");await page.getByRole("button",{name:"反映"}).click();
- await expect(page.getByText(/仕入単価が不明の項目があります/)).toBeVisible();
- await expect(page.getByRole("button",{name:"価格未確定として承認して保存"})).toBeEnabled();
- expect(saved).toBe(0);
- // The second explicit approval saves with prices omitted, not zero-filled.
+ // One explicit save commits with prices omitted, not zero-filled.
  await entry.fill("保存してください");await page.getByRole("button",{name:"反映"}).click();
  await expect(page.getByRole("region",{name:"音声操作モード"}).getByText("価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。")).toBeVisible();
  expect(saved).toBe(1);
@@ -53,9 +49,8 @@ test("a confirmed voice recipe with a spoken supplier saves without 422 and keep
  await expect(page.getByText("未保存の下書き：ペペロンチーノ")).toBeVisible();
  await expect(page.getByText("仕入先: 築地場外")).toBeVisible();
  expect(saved).toBe(0);
- await entry.fill("保存してください"); await page.getByRole("button", {name: "反映"}).click();
- await expect(page.getByRole("button", {name: "内容を承認して保存"})).toBeEnabled();
- expect(saved).toBe(0);
+ // One explicit save commits the confirmed draft and hands the spoken
+ // purchase source to the ledger path as a memo.
  await entry.fill("保存してください"); await page.getByRole("button", {name: "反映"}).click();
  await expect(page.getByRole("region", {name: "音声操作モード"}).getByText(/仕入先メモ：築地場外/)).toBeVisible();
  expect(saved).toBe(1);

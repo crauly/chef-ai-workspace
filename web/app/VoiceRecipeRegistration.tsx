@@ -29,7 +29,7 @@ function researchLabel(status:ResearchStatus,ja:boolean){
   misconfigured:["検索サービスの設定を確認してください","Search configuration unavailable"]};
  return messages[status.web][ja?0:1];
 }
-type Input={text:string;command:VoiceCommand;revision:number;approval:Draft|null;traceId:string};
+type Input={text:string;command:VoiceCommand;revision:number;approval:Draft|null;staleVoice:boolean;traceId:string};
 export type SaveMode="confirmed"|"unconfirmed";
 // Missing-entry kinds mirror web/app/api/voice-recipe/route.ts. Only a draft
 // whose gaps are all purchase prices may take the explicit unconfirmed path;
@@ -446,7 +446,11 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
      await parse(dataTurns.current,batch[batch.length-1].revision,batch[batch.length-1].traceId);
     }else if(input.revision===revision.current){
      if(input.command==="review")showReview(input.traceId);
-     else if(input.command==="save")await register();else if(input.command==="hold"){
+     else if(input.command==="save"){
+      // Stale microphone audio presents the draft but never commits it.
+      // Explicit manual input and button taps register in one action.
+      if(input.staleVoice)showReview(input.traceId);else await register();
+     }else if(input.command==="hold"){
       reviewed.current=null;setStage("dictating");say("保存せず、下書きを保持します。");
      }
     }
@@ -466,7 +470,9 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    revision.current++;reviewed.current=null;reviewMode.current=null;draftRef.current=null;requestId.current=null;setStage("dictating");
   }
   const afterReview=!meta||meta.reviewEpoch===approvalEpoch.current;
-  inbox.current.push({text,command,revision:revision.current,approval:afterReview&&phaseRef.current==="review"?reviewed.current:null,traceId:meta?.traceId??""});void drain();
+  // A microphone turn captured before the current review predates the presented draft.
+  const staleVoice=Boolean(meta)&&phaseRef.current==="review"&&(meta?.reviewEpoch??approvalEpoch.current)!==approvalEpoch.current;
+  inbox.current.push({text,command,revision:revision.current,approval:afterReview&&phaseRef.current==="review"?reviewed.current:null,staleVoice,traceId:meta?.traceId??""});void drain();
  }
  function retry(){
   if(!dataTurns.current.length||draining.current)return;

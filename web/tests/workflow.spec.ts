@@ -23,7 +23,11 @@ test("Japanese chef reviews, explicitly approves, saves, recalculates and record
   await page.getByRole("button", {name: "訂正を確認して登録"}).click();
   await expect(page.getByRole("region",{name:"AIに変更を相談"}).getByRole("status")).toContainText("訂正履歴を登録しました");
   expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).corrections).toEqual([{heard: "澱粉", preferred: "片栗粉"}]);
-  await page.reload(); await page.getByRole("button", {name: /の詳細を開く/}).first().click();
+  // Reload restores the standalone recipe URL directly with the saved values.
+  await page.reload();
+  await expect(page.locator("section.recipe-detail")).toContainText("¥15");
+  await page.getByRole("button", {name: "← レシピ一覧"}).click();
+  await page.getByRole("button", {name: /の詳細を開く/}).first().click();
   await expect(page.locator("section.recipe-detail")).toContainText("¥15");
 });
 test("English mobile: edit/discard invalidates approval; empty, stale and unavailable proposals never save", async ({page, request}) => {
