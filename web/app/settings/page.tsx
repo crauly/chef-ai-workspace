@@ -1,5 +1,6 @@
-import NavIcon from "../NavIcon";
 "use client";
+import NavIcon from "../NavIcon";
+
 import {useEffect,useState} from "react";
 import SupplierManager from "../SupplierManager";
 import SourcingSuggestions from "../SourcingSuggestions";
