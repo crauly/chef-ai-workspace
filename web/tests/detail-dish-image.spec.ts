@@ -89,3 +89,13 @@ test("390px mobile layout without overflow, edit flow intact", async ({page}) =>
   await detail.getByRole("button", {name: "牛乳を編集"}).click();
   await expect(page.getByRole("dialog", {name: "牛乳を編集"})).toBeVisible();
 });
+
+test("generated image is retained on this device after page reload", async ({page}) => {
+ await page.route("**/api/dish-image",route=>route.fulfill({json:{image:IMG,mode:"generate"}}));
+ const detail=await openRecipe(page,"片栗粉のレシピ");
+ const section=detail.getByRole("region",{name:"料理イメージ"});
+ await section.getByRole("button",{name:"✦ 料理画像を生成"}).click();
+ await expect(section.getByText("このブラウザに自動保存済み")).toBeVisible();
+ await page.reload();
+ await expect(page.getByRole("region",{name:"料理イメージ"}).getByRole("img",{name:"生成した料理イメージ"})).toBeVisible();
+});
