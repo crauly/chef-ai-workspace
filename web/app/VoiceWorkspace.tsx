@@ -1,3 +1,4 @@
+import NavIcon from "./NavIcon";
 "use client";
 import {useEffect,useRef,useState,type RefObject} from "react";
 import type {Locale} from "./i18n";
@@ -245,11 +246,11 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
   setDraftPending(false);transition("browse");feedback((mode==="unconfirmed"?(locale==="ja"?"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"Saved with unconfirmed prices. Only partial food costs are shown."):(locale==="ja"?"レシピを保存しました。":"Recipe saved."))+(locale==="ja"?supplierNote:(suppliers.length?` (Supplier notes: ${suppliers.join(", ")})`:"")));onCreated(recipe);
   }}/></div>
   <nav aria-label={locale==="ja"?"主要":"Primary"} className="bottom-nav">
-   <a href="#top">{locale==="ja"?"ホーム":"Home"}</a>
-   <a href="#recipes">{locale==="ja"?"レシピ":"Recipes"}</a>
+   <a href="#top"><NavIcon name="home"/><span>{locale==="ja"?"ホーム":"Home"}</span></a>
+   <a href="#recipes"><NavIcon name="recipes"/><span>{locale==="ja"?"レシピ":"Recipes"}</span></a>
    <button type="button" className="bottom-nav-mic" aria-label={locale==="ja"?"下部の音声操作":"Bottom voice control"} aria-pressed={micRecording} disabled={micDisabled} onClick={toggleMic}>{micRecording?<span aria-hidden="true" className="stop-glyph"/>:<MicrophoneGlyph/>}</button>
-   <button type="button" onClick={()=>void revealDraft()}>{locale==="ja"?"下書き":"Draft"}</button>
-   <a href="/settings" aria-label={locale==="ja"?"管理・設定":"Management and settings"}><span className="bottom-nav-settings-icon" aria-hidden="true">⚙</span><span>{locale==="ja"?"設定":"Settings"}</span></a>
+   <button type="button" onClick={()=>void revealDraft()}><NavIcon name="draft"/><span>{locale==="ja"?"下書き":"Draft"}</span></button>
+   <a href="/settings" aria-label={locale==="ja"?"管理・設定":"Management and settings"}><NavIcon name="settings"/><span>{locale==="ja"?"設定":"Settings"}</span></a>
   </nav>
  </>;
 }
