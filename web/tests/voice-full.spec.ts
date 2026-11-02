@@ -31,3 +31,27 @@ test("full recipe voice dialogue requires an explicit action before one atomic s
  await expect(page.getByText("レシピを保存しました。")).toBeVisible();
  expect(saved).toBe(1);
 });
+
+test("count-based egg quantity and unit remain intact through voice save",async({page})=>{
+ let savedBody:any=null;
+ await page.route("**/api/voice-recipe",async route=>{
+  await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({
+   title:"スクランブルエッグ",materials:[{name:"さくら卵",quantity:"3",unit:"個",price_jpy:"20",price_quantity:"1",price_unit:"個",supplier:""}],selling_price_jpy:"800",notes:[],missing:[]
+  })});
+ });
+ await page.route("**/api/recipes/full",async route=>{
+  savedBody=route.request().postDataJSON();
+  await route.fulfill({status:201,contentType:"application/json",body:JSON.stringify({
+   id:savedBody.request_id,title:{value:savedBody.title,status:"confirmed"},materials:[],revision:0,selling_price_jpy:{value:savedBody.selling_price_jpy,status:"confirmed"}
+  })});
+ });
+ await page.goto("/");
+ const entry=page.getByLabel("音声認識できない場合の入力");
+ await entry.fill("スクランブルエッグ、さくら卵3個。卵は1個20円。売価800円");
+ await page.getByRole("button",{name:"反映"}).click();
+ await expect(page.getByText("さくら卵 — 3個")).toBeVisible();
+ await expect(page.getByRole("button",{name:"レシピを登録"})).toBeEnabled();
+ await page.getByRole("button",{name:"レシピを登録"}).click();
+ await expect(page.getByText("レシピを保存しました。")).toBeVisible();
+ expect(savedBody.materials[0]).toMatchObject({name:"さくら卵",quantity:"3",unit:"個",price_jpy:"20",price_quantity:"1",price_unit:"個"});
+});
