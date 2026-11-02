@@ -148,7 +148,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  // must pass the ordinary review/Human Gate again.
  useEffect(()=>{
   let cancelled=false;
-  void loadWorkingDraft().then(snapshot=>{
+  void loadWorkingDraft<Draft>().then(snapshot=>{
    if(cancelled||!alive.current||!snapshot||draftRef.current||dataTurns.current.length)return;
    draftRef.current=snapshot.draft;parseBase.current=snapshot.draft;
    dataTurns.current=snapshot.turns;parsedTurns.current=snapshot.turns.length;
@@ -159,7 +159,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  },[]);
  useEffect(()=>{
   if(!restored)return;
-  const snapshot:WorkingDraftSnapshot|null=draft?{draft,turns:[...dataTurns.current],image:dishPreviewRef.current}:null;
+  const snapshot:WorkingDraftSnapshot<Draft>|null=draft?{draft,turns:[...dataTurns.current],image:dishPreviewRef.current}:null;
   void saveWorkingDraft(snapshot).catch(()=>{if(alive.current)say(ja?"下書きを端末に保存できませんでした。":"Could not persist the working draft on this device.");});
  },[draft,restored,dishImageUrl]);
 
