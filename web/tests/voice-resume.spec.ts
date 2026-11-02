@@ -9,22 +9,25 @@ for(const command of ["登録","登録してください","レシピを登録し
   await page.route("**/api/voice-recipe",route=>{parses++;return route.fulfill({json:draft});});
   await page.route("**/api/recipes/full",async route=>{saves++;await route.fulfill({status:201,json:{id:"11111111-1111-4111-8111-111111111111",title:{value:"パスタ"},revision:0,materials:[],selling_price_jpy:{value:null}}});});
   await page.goto("/");await type(page,"パスタ100g、500g350円");
-  await expect(page.getByRole("button",{name:"内容を確認",exact:true})).toBeEnabled();
-  await type(page,"内容を確認");await expect(page.getByRole("button",{name:"内容を承認して保存",exact:true})).toBeEnabled();
+  await expect(page.getByRole("button",{name:"レシピを登録",exact:true})).toBeEnabled();
+  await type(page,"内容を確認");
+  await expect(page.getByRole("button",{name:"レシピを登録",exact:true})).toBeEnabled();
   expect(saves).toBe(0);await type(page,command);
   await expect(page.getByRole("region",{name:"音声操作モード"})).toContainText("レシピを保存しました。");
   expect(saves).toBe(1);expect(parses).toBe(1);
  });
 }
 
-test("registration is never approval before review and a negative request clears approval",async({page})=>{
+test("nothing saves without an explicit registration action and a negative request saves nothing",async({page})=>{
  let saves=0;await page.route("**/api/voice-recipe",route=>route.fulfill({json:draft}));
- await page.route("**/api/recipes/full",route=>{saves++;return route.fulfill({status:500});});
+ await page.route("**/api/recipes/full",async route=>{saves++;await route.fulfill({status:201,json:{id:"11111111-1111-4111-8111-111111111111",title:{value:"パスタ"},revision:0,materials:[],selling_price_jpy:{value:null}}});});
  await page.goto("/");await type(page,"パスタ100g、500g350円");
- await expect(page.getByRole("button",{name:"内容を確認",exact:true})).toBeEnabled();
- await type(page,"レシピを登録してください");await expect(page.getByRole("button",{name:"内容を承認して保存",exact:true})).toBeEnabled();expect(saves).toBe(0);
- await type(page,"登録しないでください");await expect(page.getByRole("button",{name:"内容を承認して保存",exact:true})).toBeDisabled();expect(saves).toBe(0);
- await type(page,"登録");await expect(page.getByRole("button",{name:"内容を承認して保存",exact:true})).toBeEnabled();expect(saves).toBe(0);
+ await expect(page.getByRole("button",{name:"レシピを登録",exact:true})).toBeEnabled();expect(saves).toBe(0);
+ await type(page,"登録しないでください");expect(saves).toBe(0);
+ await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("パスタ");
+ await type(page,"登録");
+ await expect(page.getByRole("region",{name:"音声操作モード"})).toContainText("レシピを保存しました。");
+ expect(saves).toBe(1);
 });
 
 // Inject worklet frames to exercise the full 29-second bound without sleeping

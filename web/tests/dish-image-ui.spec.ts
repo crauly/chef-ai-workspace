@@ -33,8 +33,9 @@ test("explicit tap generates a preview; the draft is untouched", async ({page}) 
   await page.goto("/");
   await dictate(page, "カルボナーラ、卵100グラム");
   await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("カルボナーラ");
+  await page.getByRole("button", {name: "✦ 料理画像を生成", exact: true}).click();
   await page.getByLabel("料理イメージの指示（任意）").fill("和風の盛り付け");
-  await page.getByRole("button", {name: "画像を生成"}).click();
+  await page.getByRole("button", {name: "✦ 画像を生成", exact: true}).click();
   // Generating state is tied to the actual flight, with a spinner row.
   await expect(page.getByText("料理イメージを生成中…")).toBeVisible();
   release();
@@ -57,7 +58,8 @@ test("generation failure keeps the draft with no preview", async ({page}) => {
   await page.goto("/");
   await dictate(page, "カルボナーラ、卵100グラム");
   await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("カルボナーラ");
-  await page.getByRole("button", {name: "画像を生成"}).click();
+  await page.getByRole("button", {name: "✦ 料理画像を生成", exact: true}).click();
+  await page.getByRole("button", {name: "✦ 画像を生成", exact: true}).click();
   // The failure surfaces in the message and the processing-status row.
   await expect(page.getByRole("status", {name: "処理状況"}).getByText("画像の生成に失敗しました。下書きは保持しています。")).toBeVisible();
   await expect(page.getByAltText("生成した料理イメージ")).toHaveCount(0);
@@ -80,16 +82,17 @@ test("saving clears the preview so it cannot cross into the next recipe", async 
   await page.goto("/");
   await dictate(page, "カルボナーラ、卵100グラム");
   await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("カルボナーラ");
-  await page.getByRole("button", {name: "画像を生成"}).click();
+  await page.getByRole("button", {name: "✦ 料理画像を生成", exact: true}).click();
+  await page.getByRole("button", {name: "✦ 画像を生成", exact: true}).click();
   await expect(page.getByAltText("生成した料理イメージ")).toBeVisible();
   await dictate(page, "登録を確定");
-  await dictate(page, "内容 を 確認");
-  await dictate(page, "登録 を 確定");
-  await expect(page.getByText("レシピを保存しました。")).toBeVisible();
+  await expect(page.getByRole("region",{name:"音声操作モード"})).toContainText("レシピを保存しました。");
   // Saving switches the workspace to browse mode; return to create mode.
   // The next recipe starts clean: no stale preview from the saved one.
   await page.getByRole("button", {name: "登録", exact: true}).click();
   await dictate(page, "オムライス、卵100グラム");
   await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("オムライス");
-  await expect(page.getByAltText("生成した料理イメージ")).toHaveCount(0);
+  // The new draft starts clean: no preview crossed over. The saved recipe's
+  // own detail keeps its carried preview outside the draft panel by design.
+  await expect(page.locator("#draft").getByAltText("生成した料理イメージ")).toHaveCount(0);
 });

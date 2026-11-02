@@ -29,7 +29,7 @@ test("draft survives browse transition and review routes back to the draft",asyn
  expect(parses).toBe(1);
  await expect(page.getByText("登録途中の下書きを保持しています。")).toHaveCount(0);
  // The routed review presents the draft for approval without a new Muse parse.
- await expect(page.getByText("確認待ち")).toBeVisible();
+ await expect(page.getByRole("button",{name:"レシピを登録",exact:true})).toBeEnabled();
  expect(parses).toBe(1);
  // An explicit save after the presented review commits through the normal gate.
  await input(page,"保存してください");
@@ -45,6 +45,7 @@ test("transcription and Muse failures keep the draft",async({page})=>{
  });
  await page.goto("/");
  await input(page,"アマトリチャーナ。乾燥パスタ100g");
+ await page.getByText("処理メッセージ").click();
  await expect(page.getByText("料理の解釈に失敗しました。")).toBeVisible();
  await input(page,"トマト200g、1kg300円");
  await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("アマトリチャーナ");
@@ -94,12 +95,14 @@ test("a correction resets the presented review and a saved draft never double-sa
  await page.goto("/");
  await input(page,"アマトリチャーナ。乾燥パスタ100g、500g350円");
  await input(page,"内容を確認");
- await expect(page.getByRole("button",{name:"内容を承認して保存",exact:true})).toBeEnabled();
+ await expect(page.getByRole("button",{name:"レシピを登録",exact:true})).toBeEnabled();
+ // A correction reparses and presents the updated draft; nothing was saved.
  await input(page,"トマト200gを追加");
- await expect(page.getByRole("button",{name:"内容を承認して保存",exact:true})).toBeDisabled();
+ await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("アマトリチャーナ");
  expect(parses).toBe(2);
  await input(page,"内容を確認");
- await expect(page.getByText("確認待ち")).toBeVisible();
+ await expect(page.getByRole("button",{name:"レシピを登録",exact:true})).toBeEnabled();
+ expect(saves).toBe(0);
  await input(page,"保存してください");
  await expect(page.getByText("レシピを保存しました。")).toBeVisible();
  expect(saves).toBe(1);

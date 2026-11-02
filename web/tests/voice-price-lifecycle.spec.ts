@@ -314,12 +314,14 @@ test("review during search is invalidated when the search fails", async ({page})
   await entry.fill("パスタ100グラム、平均価格を調べて");
   await page.getByRole("button", {name: "反映"}).click();
   await expect(page.getByText("未保存の下書き：パスタ")).toBeVisible();
-  await page.getByRole("button", {name: "内容を確認"}).click();
-  await expect(page.getByRole("button", {name: "内容を承認して保存"})).toBeEnabled();
-  // The running search fails: approval must reset, not stay enabled-dead.
+  await entry.fill("内容を確認");
+  await page.getByRole("button", {name: "反映"}).click();
+  await expect(page.getByRole("button", {name: "レシピを登録"})).toBeEnabled();
+  // The running search fails: the failure stays explicit, the draft is kept,
+  // and nothing was saved without an explicit registration.
   await expect(page.getByText("価格を確認できませんでした")).toBeVisible({timeout: 8000});
-  await expect(page.getByRole("button", {name: "内容を承認して保存"})).toBeDisabled();
-  await expect(page.getByRole("button", {name: "内容を確認"})).toBeEnabled();
+  await expect(page.getByText("未保存の下書き：パスタ")).toBeVisible();
+  await expect(page.getByRole("button", {name: "レシピを登録"})).toBeEnabled();
 });
 
 // A new parse that supersedes the failed research clears the obsolete failure:
@@ -396,10 +398,9 @@ test("successful save clears the price failure for the next recipe", async ({pag
   await reflect.click();
   await expect(page.getByText("未保存の下書き：パスタ")).toBeVisible();
   await expect(page.getByText("価格検索に失敗しました")).toBeVisible({timeout: 8000});
-  await page.getByRole("button", {name: "内容を確認"}).click();
-  await expect(page.getByRole("button", {name: "内容を承認して保存"})).toBeEnabled();
-  await page.getByRole("button", {name: "内容を承認して保存"}).click();
-  await expect(page.getByText("レシピを保存しました。")).toBeVisible({timeout: 8000});
+  // One explicit registration saves the price-unconfirmed draft directly.
+  await page.getByRole("button", {name: "レシピを登録"}).click();
+  await expect(page.getByRole("region",{name:"音声操作モード"}).getByText("価格未確定として保存しました。")).toBeVisible({timeout: 8000});
   // Next recipe with no research inherits no failure from the previous one.
   // Saving leaves registration mode, so return via the Create tab first.
   await page.getByRole("button", {name: "登録"}).click();

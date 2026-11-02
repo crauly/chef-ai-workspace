@@ -125,7 +125,7 @@ async function installMicrophone(page: Page) {
 test("real Web Audio capture sends WAV through transcription, review and explicit save only", async ({page}) => {
   await installMicrophone(page);
   let saved = 0, transcribed = 0;
-  const texts = ["カルボナーラ、卵100グラム、50グラム60円、売価1800円", "登録を確定", "内容を確認", "登録"];
+  const texts = ["カルボナーラ、卵100グラム、50グラム60円、売価1800円", "内容を確認", "登録"];
   await page.route("**/api/voice/transcribe", async route => {
     const data = route.request().postDataBuffer()!;
     expect(validWav(data)).toBe(true);
@@ -149,15 +149,13 @@ test("real Web Audio capture sends WAV through transcription, review and explici
   await recordTurn();
   await expect(page.getByText("未保存の下書き：カルボナーラ")).toBeVisible();
   expect(saved).toBe(0);
+  // Review presents the eligible draft; only an explicit save commits it.
   await recordTurn();
-  await expect(page.getByText(/^確認用の下書きを表示しました。/)).toBeVisible();
-  expect(saved).toBe(0);
-  await recordTurn();
-  await expect(page.getByRole("button", {name: "内容を承認して保存"})).toBeEnabled();
+  await expect(page.getByRole("button", {name: "レシピを登録"})).toBeEnabled();
   expect(saved).toBe(0);
   await recordTurn();
   await expect(page.getByText("レシピを保存しました。")).toBeVisible();
-  expect(saved).toBe(1); expect(transcribed).toBe(4);
+  expect(saved).toBe(1); expect(transcribed).toBe(3);
 });
 
 test("transcription failure keeps capture running, reports recovery and never sends a draft or save", async ({page}) => {
