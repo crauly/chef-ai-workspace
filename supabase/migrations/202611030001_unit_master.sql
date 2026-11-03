@@ -18,6 +18,30 @@ create policy units_owner_read on public.units for select to authenticated
 -- Writes use only the trusted server: no authenticated insert/update/delete policy.
 revoke insert, update, delete on public.units from anon, authenticated;
 
+-- Resolve both canonical symbol and spoken aliases without choosing between
+-- conflicting candidates. The owning user boundary is mandatory.
+create or replace function public.resolve_owned_unit_id(
+ p_owner_id uuid,p_spoken text
+) returns uuid
+language plpgsql stable security definer set search_path=''
+as $
+declare v_ids uuid[];
+begin
+ select array_agg(u.id) into v_ids
+ from public.units u where u.owner_id=p_owner_id
+   and (lower(u.symbol)=lower(btrim(p_spoken)) or exists(
+     select 1 from unnest(u.aliases) a
+     where lower(btrim(a))=lower(btrim(p_spoken))
+   ));
+ if cardinality(v_ids)<>1 then
+   raise exception 'Unknown or ambiguous unit';
+ end if;
+ return v_ids[1];
+end; $;
+revoke all on function public.resolve_owned_unit_id(uuid,text)
+ from public,anon,authenticated;
+grant execute on function public.resolve_owned_unit_id(uuid,text) to service_role;
+
 -- A unit can be created only by the same transaction that creates an approved
 -- recipe. The old standalone create RPC is deliberately absent.
 -- In a private V1 test DB, this migration replaces the old recipe-create
@@ -64,17 +88,13 @@ begin
  then raise exception 'Invalid material lines'; end if;
  for v_material in select * from jsonb_array_elements(v_state->'materials') loop
    if v_material->>'unit' is not null then
-     select u.id into v_unit_id from public.units u
-     where u.owner_id=p_owner_id and lower(u.symbol)=lower(btrim(v_material->>'unit'));
-     if v_unit_id is null then raise exception 'Unknown recipe unit'; end if;
+     v_unit_id := public.resolve_owned_unit_id(p_owner_id,v_material->>'unit');
      v_material := jsonb_set(v_material,'{unit_id}',to_jsonb(v_unit_id::text),true);
    end if;
    if v_material->'price_override' is not null
       and jsonb_typeof(v_material->'price_override')='object' then
-     select u.id into v_unit_id from public.units u
-     where u.owner_id=p_owner_id
-       and lower(u.symbol)=lower(btrim(v_material #>> '{price_override,per_unit}'));
-     if v_unit_id is null then raise exception 'Unknown price unit'; end if;
+     v_unit_id := public.resolve_owned_unit_id(
+         p_owner_id, v_material #>> '{price_override,per_unit}');
      v_material := jsonb_set(v_material,
         '{price_override,per_unit_id}',to_jsonb(v_unit_id::text),true);
    end if;
