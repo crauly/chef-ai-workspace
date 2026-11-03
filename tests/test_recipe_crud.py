@@ -98,6 +98,23 @@ class RecipeCrudTests(unittest.TestCase):
         self.assertEqual(saved.recipe.materials[0].supplier_id, supplier)
         self.assertEqual(saved.recipe.materials[0].price_mode, "inherit")
 
+    def test_same_name_different_ingredient_ids_update_only_selected_master(self):
+        other_id = str(uuid4())
+        from dataclasses import replace
+        line = self.repo.recipe.materials[0]
+        self.repo.ingredients[other_id] = Ingredient(other_id, "Pasta",
+            PriceQuote(tv("700"), "1", "kg", "manual"))
+        self.repo.recipe = replace(self.repo.recipe, materials=(
+            line, replace(line, id=str(uuid4()), ingredient_id=other_id)))
+        saved = self.save({"op": "set_material_price",
+                           "material_id": self.repo.recipe.materials[1].id,
+                           "price_jpy": "900", "price_quantity": "1", "price_unit": "kg"})
+        writes = {entry["id"]: entry for entry in self.repo.commits[0]["ingredient_entries"]}
+        self.assertIsNone(writes[self.repo.ingredient_id]["current_price"])
+        self.assertEqual(writes[other_id]["current_price"]["amount_jpy"]["value"], "900")
+        self.assertEqual(self.repo.ingredients[self.repo.ingredient_id].current_price.amount_jpy.value, "400")
+        self.assertEqual(self.repo.ingredients[other_id].current_price.amount_jpy.value, "900")
+
     def test_remove_and_title_edit(self):
         line = self.repo.recipe.materials[0]
         saved = self.save({"op": "remove_material", "material_id": line.id},
