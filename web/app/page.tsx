@@ -119,15 +119,20 @@ export default function Library(){
        method:"POST",body:JSON.stringify({base_revision:selected.revision,
          request_id:crypto.randomUUID(),operations,save_version:true})});
      setSelected(result.recipe);
-     const persisted=await request<Recipe>(`/api/recipes/${selected.id}`);
-     if(persisted.revision!==result.recipe.revision)throw new Error("Saved revision mismatch");
-     for(const op of operations){
-       const material=persisted.materials.find(m=>m.id===op.material_id);
-       if(op.op==="set_material_quantity"&&(!material||material.quantity.value!==op.value||material.unit!==op.unit))throw new Error("Quantity not persisted");
-       if(op.op==="set_material_price"&&(!material||material.price_override?.amount_jpy.value!==op.price_jpy))throw new Error("Price not persisted");
-       if(op.op==="set_selling_price"&&persisted.selling_price_jpy.value!==op.value_jpy)throw new Error("Selling price not persisted");
+     try {
+       const persisted=await request<Recipe>(`/api/recipes/${selected.id}`);
+       if(persisted.revision!==result.recipe.revision)throw new Error("Saved revision mismatch");
+       for(const op of operations){
+         const material=persisted.materials.find(m=>m.id===op.material_id);
+         if(op.op==="set_material_quantity"&&(!material||material.quantity.value!==op.value||material.unit!==op.unit))throw new Error("Quantity not persisted");
+         if(op.op==="set_material_price"&&(!material||material.price_override?.amount_jpy.value!==op.price_jpy))throw new Error("Price not persisted");
+         if(op.op==="set_selling_price"&&persisted.selling_price_jpy.value!==op.value_jpy)throw new Error("Selling price not persisted");
+       }
+       setSelected(persisted);setError("");
+     }catch(e){
+       setError(`保存APIは成功しましたが、再取得による検証に失敗しました: ${String(e)}`);
      }
-     setSelected(persisted);setError("");void reload();return true;
+     void reload();return true;
    }catch(e){setError(String(e));return false;}finally{setBusy(false);}
  }
  async function addFood(e:React.FormEvent){e.preventDefault();
