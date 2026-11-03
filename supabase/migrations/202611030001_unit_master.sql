@@ -275,3 +275,42 @@ revoke all on function public.update_owned_ingredient(uuid,uuid,text,jsonb)
  from public,anon,authenticated;
 grant execute on function public.update_owned_ingredient(uuid,uuid,text,jsonb)
  to service_role;
+
+-- V1 pricing invariant: no legacy or alternative recipe write may persist
+-- a line-owned quote. This trigger covers both recipe creation and subsequent
+-- old commit RPCs. Only owner-owned concrete Ingredient IDs may be linked.
+create or replace function public.enforce_recipe_ingredient_ssot()
+returns trigger language plpgsql security invoker set search_path=''
+as $$
+declare v_line jsonb;
+declare v_ingredient_id uuid;
+begin
+ if jsonb_typeof(new.state->'materials') is distinct from 'array'
+ then raise exception 'Invalid recipe materials'; end if;
+ for v_line in select value from jsonb_array_elements(new.state->'materials') loop
+   if jsonb_typeof(v_line) is distinct from 'object'
+      or v_line->>'price_mode' is distinct from 'inherit'
+      or jsonb_typeof(v_line->'price_override') is distinct from 'null'
+   then raise exception 'Per-recipe purchase price is prohibited'; end if;
+   begin
+     v_ingredient_id := (v_line->>'ingredient_id')::uuid;
+   exception when others then raise exception 'Recipe ingredient ID required'; end;
+   if v_ingredient_id is null or not exists(
+     select 1 from public.ingredients i
+     where i.id=v_ingredient_id and i.owner_id=new.owner_id
+   ) then raise exception 'Ingredient must belong to recipe owner'; end if;
+   if v_line->>'unit' is not null and
+      nullif(v_line->>'unit_id','') is null
+   then raise exception 'Canonical recipe unit ID required'; end if;
+ end loop;
+ return new;
+end; $$;
+revoke all on function public.enforce_recipe_ingredient_ssot() from public,anon,authenticated;
+drop trigger if exists recipe_ingredient_ssot on public.recipes;
+create trigger recipe_ingredient_ssot
+ before insert or update of state on public.recipes
+ for each row execute function public.enforce_recipe_ingredient_ssot();
+
+-- Writes to masters go through server-approved RPCs, not direct Data API.
+revoke insert,update,delete on public.ingredients from anon,authenticated;
+revoke insert,update,delete on public.units from anon,authenticated;
