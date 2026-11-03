@@ -17,6 +17,7 @@ async function mockIngredients(page:import("@playwright/test").Page){
 test("desktop settings keeps Chef brand and displays labeled ingredient table, filtering and sorting",async({page})=>{
  await mockIngredients(page);
  await page.goto("/settings");
+ await page.getByRole("navigation",{name:"設定項目"}).getByRole("button",{name:"食材ライブラリ"}).click();
  await expect(page.locator("img[src='/chef-ai-mark.svg']")).toBeVisible();
  await expect(page.getByRole("navigation",{name:"設定項目"})).toBeVisible();
  const table=page.getByRole("table");
@@ -39,6 +40,8 @@ test("mobile settings uses one selector and readable ingredient cards",async({pa
  await page.setViewportSize({width:390,height:844});
  await mockIngredients(page);
  await page.goto("/settings");
+ await expect(page.getByLabel("設定項目")).toHaveValue("");
+ await page.getByLabel("設定項目").selectOption("ingredient");
  await expect(page.locator(".settings-sidebar")).toBeHidden();
  await expect(page.getByLabel("設定項目")).toBeVisible();
  await expect(page.locator(".ingredient-table-wrap")).toBeHidden();
@@ -60,7 +63,9 @@ test("ingredient editor explicitly links a registered supplier through purchase 
   await route.fulfill({status:201,json:{offer_id:"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"}});
  });
  await page.goto("/settings");
+ await page.getByRole("navigation",{name:"設定項目"}).getByRole("button",{name:"食材ライブラリ"}).click();
  await page.getByRole("row",{name:/バター/}).getByRole("button",{name:"編集"}).click();
+ await expect(page.getByRole("dialog",{name:"バターを編集"})).toBeVisible();
  await page.getByLabel("仕入れ先を追加").selectOption(supplier);
  await page.getByRole("button",{name:"紐付ける"}).click();
  await expect.poll(()=>posted).toEqual({supplier_id:supplier});
@@ -74,5 +79,29 @@ test("ingredient prices keep fractional precision rather than rounding in the li
   }}],suppliers_by_ingredient:{},
  }}));
  await page.goto("/settings");
+ await page.getByRole("navigation",{name:"設定項目"}).getByRole("button",{name:"食材ライブラリ"}).click();
  await expect(page.getByRole("row",{name:/微量材料/})).toContainText("¥1,234.0004");
+});
+
+test("settings opens with no category selected and editor opens as a modal",async({page})=>{
+ await mockIngredients(page);
+ await page.goto("/settings");
+ await expect(page.getByText("左のメニューから設定項目を選択してください。")).toBeVisible();
+ await expect(page.getByRole("table")).toHaveCount(0);
+ await page.getByRole("navigation",{name:"設定項目"}).getByRole("button",{name:"食材ライブラリ"}).click();
+ await page.getByRole("row",{name:/バター/}).getByRole("button",{name:"編集"}).click();
+ await expect(page.getByRole("dialog",{name:"バターを編集"})).toBeVisible();
+ await expect(page.getByRole("table")).toBeVisible();
+ await page.getByRole("dialog",{name:"バターを編集"}).getByRole("button",{name:"キャンセル"}).click();
+ await expect(page.getByRole("dialog",{name:"バターを編集"})).toHaveCount(0);
+});
+
+test("settings microphone remains square at narrow mobile widths",async({page})=>{
+ await page.setViewportSize({width:320,height:720});
+ await page.goto("/settings");
+ const mic=page.locator(".settings-voice-link");
+ await expect(mic).toBeVisible();
+ const size=await mic.boundingBox();
+ expect(size).not.toBeNull();
+ expect(Math.abs(size!.width-size!.height)).toBeLessThanOrEqual(1);
 });
