@@ -118,6 +118,7 @@ export default function Library(){
      const result=await request<{recipe:Recipe}>(`/api/recipes/${selected.id}/confirm`,{
        method:"POST",body:JSON.stringify({base_revision:selected.revision,
          request_id:crypto.randomUUID(),operations,save_version:true})});
+     setSelected(result.recipe);
      const persisted=await request<Recipe>(`/api/recipes/${selected.id}`);
      if(persisted.revision!==result.recipe.revision)throw new Error("Saved revision mismatch");
      for(const op of operations){
