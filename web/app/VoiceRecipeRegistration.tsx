@@ -491,7 +491,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   }
   const afterReview=!meta||meta.reviewEpoch===approvalEpoch.current;
   // A microphone turn captured before the current review predates the presented draft.
-  const staleVoice=Boolean(meta)&&phaseRef.current==="review"&&(meta?.reviewEpoch??approvalEpoch.current)!==approvalEpoch.current;
+  const staleVoice=Boolean(meta)&&meta?.source!=="manual"&&phaseRef.current==="review"&&(meta?.reviewEpoch??approvalEpoch.current)!==approvalEpoch.current;
   inbox.current.push({text,command,revision:revision.current,approval:afterReview&&phaseRef.current==="review"?reviewed.current:null,staleVoice,traceId:meta?.traceId??""});void drain();
  }
  function retry(){
