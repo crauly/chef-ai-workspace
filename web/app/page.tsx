@@ -52,6 +52,7 @@ export default function Library(){
  // the existing /confirm path (saveOperations); the AI editor stays mounted
  // while collapsed so the voice edit flow keeps working.
  const [editingId,setEditingId]=useState<string|null>(null);
+ const [editName,setEditName]=useState("");
  const [editQty,setEditQty]=useState(""),[editUnit,setEditUnit]=useState("");
  const [editPrice,setEditPrice]=useState(""),[editPriceQty,setEditPriceQty]=useState("1"),[editPriceUnit,setEditPriceUnit]=useState("");
  const [aiOpen,setAiOpen]=useState(false);
@@ -124,6 +125,8 @@ export default function Library(){
        if(persisted.revision!==result.recipe.revision)throw new Error("Saved revision mismatch");
        for(const op of operations){
          const material=persisted.materials.find(m=>m.id===op.material_id);
+         if(op.op==="set_material_name"&&(!material||material.material_name.value!==op.value))throw new Error("Ingredient name not persisted");
+         if(op.op==="remove_material"&&material)throw new Error("Ingredient removal not persisted");
          if(op.op==="set_material_quantity"&&(!material||material.quantity.value!==op.value||material.unit!==op.unit))throw new Error("Quantity not persisted");
          if(op.op==="set_material_price"&&(!material||material.price_override?.amount_jpy.value!==op.price_jpy))throw new Error("Price not persisted");
          if(op.op==="set_selling_price"&&persisted.selling_price_jpy.value!==op.value_jpy)throw new Error("Selling price not persisted");
@@ -145,6 +148,7 @@ export default function Library(){
  function openEdit(materialId:string){
    const line=selected?.materials.find(m=>m.id===materialId);
    if(!line||busy)return;
+   setEditName(line.material_name.value||"");
    setEditQty(line.quantity.value||"");setEditUnit(line.unit||"g");
    setEditPrice(line.price_override?.amount_jpy.value||"");
    setEditPriceQty(line.price_override?.per_quantity||"1");
@@ -155,6 +159,7 @@ export default function Library(){
    const line=selected?.materials.find(m=>m.id===editingId);
    if(!line)return;
    const operations:Record<string,string>[]=[];
+   if(editName.trim()!==line.material_name.value)operations.push({op:"set_material_name",material_id:line.id,value:editName.trim()});
    if((editQty.trim()&&editQty.trim()!==line.quantity.value)||editUnit!==(line.unit||"g")||(confirmQty&&line.quantity.status==="assumed"))
      operations.push({op:"set_material_quantity",material_id:line.id,value:editQty.trim()||line.quantity.value||"",unit:editUnit});
    if((editPrice.trim()&&editPrice.trim()!==(line.price_override?.amount_jpy.value||""))||editPriceQty!==(line.price_override?.per_quantity||"1")||editPriceUnit!==(line.price_override?.per_unit||line.unit||"g")||(confirmPrice&&line.price_override?.amount_jpy.status==="assumed"))
@@ -229,6 +234,7 @@ export default function Library(){
     <p className="muted">{locale==="ja"?"現在":"Current"}: {line.quantity.value??t("missing")} {line.unit??""} ／ {line.price_override?`¥${line.price_override.amount_jpy.value} / ${line.price_override.per_quantity}${line.price_override.per_unit}`:line.price_mode==="inherit"?(locale==="ja"?"共通食材から継承（単価はここでは未取得）":"Inherited from shared ingredient (price not loaded)"):(locale==="ja"?"仕入単価 未設定":"Purchase price not set")}</p>
     {(qtyChanged||priceChanged)&&<p className="edit-diff">{locale==="ja"?"変更後":"After"}: {editQty.trim()||"?"} {editUnit}{priceChanged?` ／ ¥${editPrice.trim()||"?"} / ${editPriceQty}${editPriceUnit}`:""}</p>}
     <div className="edit-modal-fields">
+     <label>{locale==="ja"?"食材名":"Ingredient name"}<input value={editName} onChange={e=>setEditName(e.target.value)} disabled={busy}/></label>
      <label>{locale==="ja"?"数量":"Quantity"}<input inputMode="decimal" value={editQty} onChange={e=>setEditQty(e.target.value)} disabled={busy}/></label>
      <label>Unit<select value={editUnit} onChange={e=>setEditUnit(e.target.value)} disabled={busy}><option value="">—</option>{unitChoices(editUnit).map(symbol=><option key={symbol} value={symbol}>{symbol}</option>)}</select></label>
      <label>{locale==="ja"?"仕入単価（円）":"Price (JPY)"}<input inputMode="decimal" value={editPrice} onChange={e=>setEditPrice(e.target.value)} disabled={busy}/></label>
@@ -237,7 +243,8 @@ export default function Library(){
      {line.quantity.status==="assumed"&&<label><input type="checkbox" checked={confirmQty} onChange={e=>setConfirmQty(e.target.checked)}/> {locale==="ja"?"現在の数量を明示確定":"Confirm current quantity"}</label>}
      {line.price_override?.amount_jpy.status==="assumed"&&<label><input type="checkbox" checked={confirmPrice} onChange={e=>setConfirmPrice(e.target.checked)}/> {locale==="ja"?"現在の仕入価格を明示確定":"Confirm current price"}</label>}
     </div>
-    <div className="actions"><button type="button" disabled={busy} onClick={()=>void submitEdit()}>{t("save")}</button>
+    <div className="actions"><button type="button" disabled={busy||!editName.trim()} onClick={()=>void submitEdit()}>{t("save")}</button>
+    <button type="button" disabled={busy} onClick={()=>{if(window.confirm(locale==="ja"?"この食材をレシピから削除しますか？":"Remove this ingredient from the recipe?"))void saveOperations([{op:"remove_material",material_id:line.id}]).then(ok=>{if(ok)setEditingId(null);});}}>{locale==="ja"?"食材を削除":"Remove ingredient"}</button>
     <button className="secondary" type="button" disabled={busy} onClick={()=>setEditingId(null)}>{t("close")}</button></div>
    </section>
   </div>;})()}
