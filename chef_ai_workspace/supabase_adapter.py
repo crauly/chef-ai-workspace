@@ -847,6 +847,29 @@ class SupabasePersistence:
                 best[iid] = row
         return best
 
+    def commit_recipe_crud(self, *, owner_id, recipe_id, request_id,
+                           base_revision, state, title, cost_snapshot,
+                           payload_hash, save_version, ingredient_entries):
+        params = dict(p_owner_id=owner_id, p_recipe_id=recipe_id,
+                      p_request_id=request_id, p_expected_revision=base_revision,
+                      p_new_state=state, p_title=title,
+                      p_cost_snapshot=cost_snapshot, p_payload_hash=payload_hash,
+                      p_save_version=save_version,
+                      p_ingredient_entries=list(ingredient_entries))
+        try:
+            response = self.client.rpc("commit_recipe_crud", params).execute()
+        except APIError as exc:
+            if exc.code == "P0001" and exc.message in (
+                "Stale recipe revision", "Request ID reused with a different mutation",
+                "Ingredient identity collision", "Recipe ingredient must belong to owner",
+                "Unknown or ambiguous unit", "Recipe price override forbidden",
+            ):
+                raise MutationError(exc.message) from exc
+            raise
+        if not isinstance(response.data, int):
+            raise RuntimeError("Unexpected recipe CRUD RPC response")
+        return response.data
+
     def commit_recipe_revision(self, *, owner_id, recipe_id, request_id,
                                base_revision, state, title, cost_snapshot,
                                payload_hash, save_version):
