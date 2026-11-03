@@ -322,11 +322,18 @@ class CompleteRecipeMaterial(BaseModel):
     price_unit: str | None = Field(default=None, pattern=r"^(g|kg|ml|L)$")
 
 
+class UnitCandidateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    symbol: str = Field(min_length=1, max_length=32)
+    dimension: str = Field(pattern=r"^(mass|volume|count|other)$")
+
+
 class CompleteRecipeBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: UUID
     title: str = Field(min_length=1, max_length=200)
     materials: list[CompleteRecipeMaterial] = Field(max_length=40)
+    unit_candidates: list[UnitCandidateBody] = Field(default_factory=list, max_length=80)
     selling_price_jpy: str | None = None
 
 
@@ -339,6 +346,29 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
     title = body.title.strip()
     if not title:
         raise HTTPException(422, "Recipe title required")
+    # The explicit recipe-save action is the only approval gate for new units.
+    # Candidates are checked against the owned catalog; unknown spelling may
+    # register only when its proposed dimension is present in the reviewed body.
+    from .unit_master import prepare_unit_approval
+    loader = getattr(repository, "list_owned_units", None)
+    if not callable(loader):
+        raise HTTPException(503, "Unit master unavailable")
+    known_units = loader(owner)
+    entered = list(dict.fromkeys(
+        unit for material in body.materials
+        for unit in (material.unit, material.price_unit) if unit is not None
+    ))
+    dimensions = {c.symbol: c.dimension for c in body.unit_candidates}
+    if len(dimensions) != len(body.unit_candidates):
+        raise HTTPException(422, "Duplicate unit candidate")
+    try:
+        approvals = prepare_unit_approval(entered, known_units, dimensions)
+    except ValueError as exc:
+        raise HTTPException(422, "Unresolved unit approval") from exc
+    new_units = [{"symbol": item.symbol, "dimension": item.dimension}
+                 for item in approvals if item.status == "new_candidate"]
+    if any(symbol not in entered for symbol in dimensions):
+        raise HTTPException(422, "Unreferenced unit candidate")
     operations = []
     for material in body.materials:
         if not material.name.strip():
@@ -389,7 +419,7 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
     recipe = replace(recipe, revision=0)
     try:
         snapshot = _json(asdict(calculate_cost(recipe)))
-        repository.create_owned_recipe(owner, recipe, snapshot)
+        repository.create_owned_recipe(owner, recipe, snapshot, unit_candidates=new_units)
     except ValueError as exc:
         raise HTTPException(409, "Recipe already exists") from exc
     return _displayed_recipe(owner, repository, recipe)
