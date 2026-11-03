@@ -35,6 +35,11 @@ VOICE_RECIPE_SCHEMA_PY = {
                     "mass", "volume", "count", "other"]}},
             "required": ["symbol", "dimension"],
             "additionalProperties": False}},
+        "unit_proposals": {"type": "array", "items": {
+            "type": "object", "properties": {
+                "symbol": {"type": "string"},
+                "dimension": {"type": "string", "enum": ["mass","volume","count","other"]}},
+            "required": ["symbol","dimension"], "additionalProperties": False}},
         "selling_price_jpy": {"type": "string"},
         "notes": {"type": "array", "items": {"type": "string"}},
         "interpretations": {"type": "array", "items": {
@@ -124,7 +129,7 @@ class LiveStructuredOutputTests(unittest.TestCase):
             "messages": [
                 {"role": "developer", "content":
                  "Read the chronological spoken turns as one conversation and "
-                 "return a proposed UNSAVED recipe as JSON only. " "Allowed units: g, kg, ml, L. " "Prices are JPY decimal strings. "
+                 "return a proposed UNSAVED recipe as JSON only. " "Units are owner-scoped and may be proposed for registration. " "Prices are JPY decimal strings. "
                  "A package price is not the quantity consumed."},
                 {"role": "user", "content": json.dumps({
                     "spoken_turns": [
@@ -137,7 +142,7 @@ class LiveStructuredOutputTests(unittest.TestCase):
         # web/app/api/voice-recipe parse(); parse() itself runs in the
         # fixture spec, not in this live probe.
         self.assertEqual(set(parsed),
-                         {"title", "materials", "selling_price_jpy",
+                         {"title", "materials", "unit_proposals", "selling_price_jpy",
                           "notes", "interpretations", "price_research",
                           "name_corrections"})
         self.assertIsInstance(parsed["title"], str)
