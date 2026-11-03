@@ -365,6 +365,14 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
     title = body.title.strip()
     if not title:
         raise HTTPException(422, "Recipe title required")
+    recipe_id = str(body.request_id)
+    try:
+        existing = repository.load_owned_recipe(owner, recipe_id)
+    except ValueError:
+        existing = None
+    if existing is not None:
+        # An uncertain network retry must not create duplicates.
+        return _displayed_recipe(owner, repository, existing)
     # The explicit recipe-save action is the only approval gate for new units.
     # Candidates are checked against the owned catalog; unknown spelling may
     # register only when its proposed dimension is present in the reviewed body.
@@ -388,6 +396,7 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
                  for item in approvals if item.status == "new_candidate"]
     if any(symbol not in entered for symbol in dimensions):
         raise HTTPException(422, "Unreferenced unit candidate")
+    canonical = {item.entered: item.symbol for item in approvals}
     operations = []
     for material in body.materials:
         if not material.name.strip():
@@ -399,9 +408,9 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
                 raise HTTPException(422, "Priced lines require quantity and unit")
             operations.append({"op": "add_material", "material_id": str(uuid4()),
                                "name": material.name.strip(), "quantity": material.quantity,
-                               "unit": material.unit, "price_jpy": material.price_jpy,
+                               "unit": canonical[material.unit], "price_jpy": material.price_jpy,
                                "price_quantity": material.price_quantity,
-                               "price_unit": material.price_unit})
+                               "price_unit": canonical[material.price_unit]})
         else:
             # Price trio is all-or-nothing: any single field (including a lone
             # price_unit) is an explicit input error, never silently dropped.
@@ -414,18 +423,10 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
                 if material.unit is None:
                     raise HTTPException(422, "Quantity requires unit")
                 op["quantity"] = material.quantity
-                op["unit"] = material.unit
+                op["unit"] = canonical[material.unit]
             operations.append(op)
     if body.selling_price_jpy is not None:
         operations.append({"op": "set_selling_price", "value_jpy": body.selling_price_jpy})
-    recipe_id = str(body.request_id)
-    try:
-        existing = repository.load_owned_recipe(owner, recipe_id)
-    except ValueError:
-        existing = None
-    if existing is not None:
-        # An uncertain network retry must not create duplicates.
-        return _displayed_recipe(owner, repository, existing)
     recipe = Recipe(recipe_id, TrackedValue(title, "confirmed", "user"))
     if operations:
         try:
