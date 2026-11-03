@@ -6,10 +6,10 @@ from uuid import uuid5, NAMESPACE_URL
 from .costing import calculate_cost, unit_factor_catalog
 from .models import Ingredient
 from .mutations import MutationError, prepare_mutation
-from .persistence_service import SavedMutation, canonical_json, _json
+from .persistence_service import SavedMutation, canonical_json, _json, _validate_ledger
 
 
-def save_recipe_crud(*, owner_id, proposal, repository, save_version=True):
+def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledger=()):
     """Called exclusively after the authenticated HTTP confirmation boundary.
 
     All master writes and recipe revision CAS are committed by one database RPC.
@@ -18,6 +18,7 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True):
     receipt_hash = sha256(canonical_json({
         "proposal": asdict(proposal), "confirmed": True,
         "save_version": save_version,
+        "ledger": [asdict(entry) for entry in ledger],
     }).encode("utf-8")).hexdigest()
     receipt = repository.get_mutation_receipt(owner_id, proposal.request_id)
     if receipt is not None:
@@ -29,6 +30,14 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True):
     if recipe.revision != proposal.base_revision:
         raise MutationError("Stale recipe revision")
     catalog = repository.load_owned_catalog(owner_id, recipe)
+    ledger_ids = [entry.id for entry in ledger if entry.id]
+    if ledger_ids:
+        catalog = {**catalog, **repository.load_owned_ingredients(owner_id, ledger_ids)}
+    prepared_ledger = _validate_ledger(tuple(ledger), catalog,
+                                       request_id=proposal.request_id)
+    for item in prepared_ledger:
+        if item["kind"] == "new":
+            catalog[item["id"]] = Ingredient(item["id"], item["name"], None)
     explicit_links = [op["ingredient_id"] for op in proposal.operations
                       if op.get("op") == "link_ingredient" and op.get("ingredient_id")]
     if explicit_links:
@@ -87,6 +96,10 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True):
         normalized.append(replace(line, ingredient_id=ingredient_id,
                                   price_mode="inherit", price_override=None))
     candidate = replace(candidate, materials=tuple(normalized))
+    for item in prepared_ledger:
+        if item["kind"] == "new" and not any(
+                line.ingredient_id == item["id"] for line in candidate.materials):
+            raise MutationError("New ledger ingredient must be linked to a recipe material")
     units = unit_factor_catalog(repository.list_owned_units(owner_id))
     cost = calculate_cost(candidate, effective, units)
     snapshot = asdict(cost)
