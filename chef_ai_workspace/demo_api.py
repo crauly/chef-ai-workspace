@@ -68,14 +68,7 @@ def delete_demo_unit(unit_id:UUID,ctx=Depends(demo_context)):
     owner,repo=ctx
     delete=getattr(repo,"delete_owned_unit_master",None)
     if not callable(delete): raise HTTPException(503,"Unit manager unavailable")
-    try:
-        deleted = delete(owner,str(unit_id))
-    except Exception as exc:
-        from postgrest.exceptions import APIError
-        if isinstance(exc, APIError) and any(x in str(exc) for x in ("Unit has dependent references", "23503")):
-            raise HTTPException(409, "Unit is referenced and cannot be deleted") from exc
-        raise
-    if not deleted: raise HTTPException(404,"Unit not found")
+    if not delete(owner,str(unit_id)): raise HTTPException(404,"Unit not found")
     return {"deleted":True}
 
 
@@ -120,15 +113,8 @@ def edit_demo_unit(unit_id: UUID, body: UnitEditBody,
     editor = getattr(repository, "update_owned_unit", None)
     if not callable(editor):
         raise HTTPException(503, "Unit manager unavailable")
-    try:
-        updated = editor(owner, str(unit_id), body.symbol.strip(), body.dimension,
-                         body.base_factor, aliases)
-    except Exception as exc:
-        from postgrest.exceptions import APIError
-        if isinstance(exc, APIError) and any(x in str(exc) for x in ("Invalid unit edit", "Duplicate unit token", "Unit identity collision", "Unknown or ambiguous unit")):
-            raise HTTPException(409, "Unit name or conversion conflicts with the unit master") from exc
-        raise
-    if not updated:
+    if not editor(owner, str(unit_id), body.symbol.strip(), body.dimension,
+                  body.base_factor, aliases):
         raise HTTPException(404, "Unit not found")
     return {"id": str(unit_id), "symbol": body.symbol.strip(),
             "dimension": body.dimension, "base_factor": body.base_factor,
@@ -309,14 +295,7 @@ def delete_demo_ingredient_master(ingredient_id:UUID,ctx=Depends(demo_context)):
     owner,repo=ctx
     delete=getattr(repo,"delete_owned_ingredient_master",None)
     if not callable(delete): raise HTTPException(503,"Ingredient master unavailable")
-    try:
-        deleted = delete(owner,str(ingredient_id))
-    except Exception as exc:
-        from postgrest.exceptions import APIError
-        if isinstance(exc, APIError) and any(x in str(exc) for x in ("Ingredient has dependent references", "23503")):
-            raise HTTPException(409, "Ingredient is referenced by recipes or purchases and cannot be deleted") from exc
-        raise
-    if not deleted: raise HTTPException(404,"Ingredient not found")
+    if not delete(owner,str(ingredient_id)): raise HTTPException(404,"Ingredient not found")
     return {"deleted":True}
 
 
@@ -347,15 +326,8 @@ def edit_demo_ingredient_master(ingredient_id:UUID, body:IngredientMasterEditBod
     editor=getattr(repository,"update_owned_ingredient_master",None)
     if not callable(editor):
         raise HTTPException(503,"Ingredient master unavailable")
-    try:
-        updated = editor(owner,str(ingredient_id),body.name.strip(),
-                         asdict(quote) if quote is not None else None)
-    except Exception as exc:
-        from postgrest.exceptions import APIError
-        if isinstance(exc, APIError) and any(x in str(exc) for x in ("Ingredient identity collision", "Unknown or ambiguous unit", "Invalid ingredient update")):
-            raise HTTPException(409, "Ingredient name or price unit conflicts with the master") from exc
-        raise
-    if not updated:
+    if not editor(owner,str(ingredient_id),body.name.strip(),
+                  asdict(quote) if quote is not None else None):
         raise HTTPException(404,"Ingredient not found")
     return {"id":str(ingredient_id),"name":body.name.strip(),"updated":True}
 
@@ -641,22 +613,6 @@ def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(404, "Recipe not found or inaccessible") from exc
-    except Exception as exc:
-        # The database is the final SSOT guard. Known integrity violations
-        # must not surface as opaque HTTP 500s or be silently retried.
-        from postgrest.exceptions import APIError
-        if isinstance(exc, APIError):
-            message = str(exc)
-            if any(token in message for token in (
-                "Per-recipe purchase price is prohibited",
-                "Canonical recipe unit ID required",
-                "Recipe ingredient ID required",
-                "Ingredient must belong to recipe owner",
-                "Stale recipe revision",
-                "Request ID reused with a different mutation",
-            )):
-                raise HTTPException(409, "Recipe data conflicts with the current ingredient/unit master contract; review the recipe before saving") from exc
-        raise
     return {"recipe": _displayed_recipe(owner, repository, saved.recipe),
             "revision": saved.resulting_revision,
             "replayed": saved.replayed}
