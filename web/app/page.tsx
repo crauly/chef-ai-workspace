@@ -136,7 +136,7 @@ export default function Library(){
          if(op.op==="set_material_name"&&(!material||material.material_name.value!==op.value))throw new Error("Ingredient name not persisted");
          if(op.op==="remove_material"&&material)throw new Error("Ingredient removal not persisted");
          if(op.op==="set_material_quantity"&&(!material||material.quantity.value!==op.value||material.unit!==op.unit))throw new Error("Quantity not persisted");
-         if(op.op==="set_material_price"&&(!material||material.effective_price?.amount_jpy.value!==op.price_jpy))throw new Error("Price not persisted");
+         if(op.op==="set_material_price"&&(!material||material.effective_price?.amount_jpy.value!==op.price_jpy||String(material.effective_price?.per_quantity)!==op.price_quantity||material.effective_price?.per_unit!==op.price_unit))throw new Error("Price not persisted");
          if(op.op==="set_material_supplier"&&(!material||(material.supplier_id||"")!==op.supplier_id))throw new Error("Supplier not persisted");
          if(op.op==="set_selling_price"&&persisted.selling_price_jpy.value!==op.value_jpy)throw new Error("Selling price not persisted");
        }
