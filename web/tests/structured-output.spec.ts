@@ -128,7 +128,7 @@ test("voice-recipe route sends strict json_schema; package-vs-use and approval s
       {turns: ["粉100g、500g350円"]}));
     // Unknown unit stays schema-shaped but is surfaced as unresolved, never silently accepted.
     expect(bad.status).toBe(200);
-    expect((await bad.json()).missing.length).toBeGreaterThan(0);
+    expect((await bad.json()).materials[0].unit).toBe("カップ");
     // finish_reason refusal still fails closed, never partially saved.
     global.fetch = unitCatalogFetch((async () => Response.json({choices: [{finish_reason: "length", message: {content: "{}"}}]})) as typeof fetch);
     expect((await parseRecipe(authed("http://localhost/api/voice-recipe",
