@@ -14,7 +14,10 @@ class Repository:
         if key not in self.stored:
             raise ValueError("Not found")
         return self.stored[key]
-    def create_owned_recipe(self, owner_id, recipe, snapshot):
+    def list_owned_units(self, owner_id):
+        return [{"id": f"unit-{symbol}", "symbol": symbol, "dimension": "other", "aliases": []}
+                for symbol in ("g", "kg", "ml", "L")]
+    def create_owned_recipe(self, owner_id, recipe, snapshot, unit_candidates=()):
         key = (owner_id, recipe.id)
         if key in self.stored:
             raise ValueError("Duplicate")
@@ -22,6 +25,7 @@ class Repository:
         self.stored[key] = recipe
         self.snapshots[key] = snapshot
         self.writes += 1
+        self.unit_candidates = tuple(unit_candidates)
 
 
 class VoiceFullRecipeTests(unittest.TestCase):
