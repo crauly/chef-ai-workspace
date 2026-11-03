@@ -1,6 +1,7 @@
 """M6: explicit-confirmation bell notifications. Fake repo; no live DB."""
 import threading
 import unittest
+from decimal import Decimal
 from uuid import uuid4
 from fastapi.testclient import TestClient
 from chef_ai_workspace.api import app
@@ -10,6 +11,10 @@ from chef_ai_workspace.price_notifications import (
     STATUSES, check_transition, decide_notification)
 from chef_ai_workspace.price_history import PriceObservation
 
+
+UNIT_DEFINITIONS = {"g": ("mass", Decimal("1")),
+                    "kg": ("mass", Decimal("1000")),
+                    "ml": ("volume", Decimal("1"))}
 
 def tv(v, status="confirmed"):
     return TrackedValue(str(v), status, "user")
@@ -200,7 +205,7 @@ class FakeRepo:
         base = _mk(self.get_owned_observation(owner_id, basis_id)) \
             if basis_id else None
         should, comp, reasons = decide_notification(
-            base, _mk(candidate))
+            base, _mk(candidate), UNIT_DEFINITIONS)
         if not should:
             raise ValueError("; ".join(reasons) or "incomparable")
         payload = comparison_payload(comp, basis_id)
@@ -221,9 +226,9 @@ class FakeRepo:
                             snap_base = _mk(basis_row)
                             snap_cand = _mk(candidate)
                             _should, snap_comp, _reasons = decide_notification(
-                                snap_base, snap_cand)
+                                snap_base, snap_cand, UNIT_DEFINITIONS)
                             snap_comp = (snap_comp if snap_comp is not None
-                                         else _compare(snap_base, snap_cand))
+                                         else _compare(snap_base, snap_cand, UNIT_DEFINITIONS))
                             snap_payload = comparison_payload(
                                 snap_comp, str(stored_basis))
                             return {"created": False,
