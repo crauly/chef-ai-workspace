@@ -20,11 +20,11 @@ export default function SettingsPage(){
   <section className="workspace-section workspace-settings-section" aria-labelledby="settings-title">
    <div className="workspace-section-head"><div><h2 id="settings-title">{ja?"管理・設定":"Management & Settings"}</h2><p>{ja?"食材・単位・仕入先・購入先候補・料理画像設定":"Ingredients, units, suppliers, sourcing suggestions, and dish image settings"}</p></div></div>
    <div className="workspace-settings-content">
-    <details><summary>{ja?"単位マスター":"Unit master"}</summary><UnitManager locale={locale}/></details>
-    <details><summary>{ja?"食材マスター":"Ingredient master"}</summary><IngredientManager locale={locale}/></details>
-    <details><summary>{ja?"仕入先マスター":"Supplier master"}</summary><SupplierManager locale={locale}/></details>
+    <details><summary>{ja?"単位管理":"Units"}</summary><UnitManager locale={locale}/></details>
+    <details><summary>{ja?"食材ライブラリ":"Ingredient Library"}</summary><IngredientManager locale={locale}/></details>
+    <details><summary>{ja?"仕入れ先管理":"Suppliers"}</summary><SupplierManager locale={locale}/></details>
     <details><summary>{ja?"購入先候補":"Sourcing suggestions"}</summary><SourcingSuggestions locale={locale}/></details>
-    <details className="plate-settings"><summary>{ja?"お皿の管理":"Plate management"}</summary><PlateSettingsSection locale={locale}/></details>
+    <details className="plate-settings"><summary>{ja?"盛り付け用の皿":"Plating Plates"}</summary><PlateSettingsSection locale={locale}/></details>
    </div>
   </section>
   <nav aria-label={ja?"主要":"Primary"} className="bottom-nav">
