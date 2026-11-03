@@ -135,7 +135,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
  const suppliers=(item:Ingredient)=>supplierMap===null
   ? (ja?"確認できません":"Unavailable")
   : (supplierMap[item.id]?.join("、")||(ja?"仕入れ先未設定":"Not set"));
- const editor=(item:Ingredient)=><div className="ingredient-editor" key={item.id}>
+ const editor=(item:Ingredient)=><div className="name-choice-overlay ingredient-edit-overlay" key={item.id} onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setEditing(null);}}><section role="dialog" aria-modal="true" aria-label={ja?`${item.name}を編集`:`Edit ${item.name}`} className="name-choice-dialog ingredient-editor">
   <div className="ingredient-editor-head"><h4>{ja?"食材を編集":"Edit Ingredient"} — {item.name}</h4><button type="button" className="secondary" onClick={()=>setEditing(null)}>{ja?"閉じる":"Close"}</button></div>
   <div className="ingredient-editor-fields">
    <label>{ja?"食材名":"Ingredient name"}<input value={name} maxLength={200} disabled={busy} onChange={e=>setName(e.target.value)}/></label>
@@ -143,6 +143,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
    <label>{ja?"仕入数量":"Purchase quantity"}<input inputMode="decimal" value={quantity} disabled={busy} onChange={e=>setQuantity(e.target.value)}/></label>
    <label>{ja?"仕入単位":"Purchase unit"}<input value={unit} maxLength={32} disabled={busy} onChange={e=>setUnit(e.target.value)}/></label>
   </div>
+  {error&&<p role="alert" className="error">{error}</p>}
   <div className="ingredient-supplier-link">
    <label>{ja?"仕入れ先を追加":"Add supplier"}<select value={linkSupplier} disabled={busy||supplierLoading} onChange={e=>setLinkSupplier(e.target.value)}>
     <option value="">{supplierLoading?(ja?"読み込み中…":"Loading…"):(ja?"仕入れ先を選択":"Choose supplier")}</option>
@@ -152,7 +153,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
   </div>
   <p className="ingredient-muted">{ja?"既存の購入条件・価格履歴は変更しません。":"Existing purchase offers and price history are preserved."}</p>
   <div className="ingredient-actions"><button type="button" disabled={busy} onClick={()=>void save(item.id)}>{ja?"保存":"Save"}</button><button type="button" className="secondary" disabled={busy} onClick={()=>setEditing(null)}>{ja?"キャンセル":"Cancel"}</button></div>
- </div>;
+ </section></div>;
  return <section className="ingredient-manager" aria-label={ja?"食材ライブラリ":"Ingredient library"}>
   <p className="settings-panel-description">{ja?"レシピで使用する食材と、価格・仕入れ先を管理します。":"Manage ingredients, prices and suppliers used in recipes."}</p>
   <div className="ingredient-controls">
