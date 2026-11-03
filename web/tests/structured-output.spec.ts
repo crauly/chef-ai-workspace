@@ -5,6 +5,18 @@ import {POST as classifyIntent} from "../app/api/intent/route";
 import {INTENT_SCHEMA, VOICE_RECIPE_SCHEMA, chatResponseFormat} from "../muse-schemas";
 
 const PASSWORD = "test-only-preview-password-32-characters";
+const UNIT_CATALOG={items:[{id:"00000000-0000-4000-8000-000000000001",symbol:"g",dimension:"mass",base_factor:"1",aliases:["グラム"]}]};
+function unitCatalogFetch(mock:typeof fetch):typeof fetch{
+ return (async (input:RequestInfo|URL,init?:RequestInit)=>{
+  if(String(input).includes("/demo/units"))return Response.json(UNIT_CATALOG);
+  return mock(input,init);
+ }) as typeof fetch;
+}
+test.beforeEach(()=>{
+ process.env.FASTAPI_BASE_URL="http://127.0.0.1:8100";
+ process.env.DEMO_ACCESS_TOKEN="fixture-unit-test-token";
+});
+
 function authed(url: string, body: unknown) {
   return new NextRequest(url, {method: "POST",
     headers: {Origin: "http://localhost",
@@ -88,13 +100,13 @@ test("voice-recipe route sends strict json_schema; package-vs-use and approval s
   const previousFetch = global.fetch;
   try {
     let sentBody = "";
-    global.fetch = (async (_: unknown, init?: {body?: unknown}) => {
+    global.fetch = unitCatalogFetch((async (_: unknown, init?: {body?: unknown}) => {
       sentBody = String(init?.body);
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
         title: "テスト", materials: [{name: "粉", quantity: "100", unit: "g",
           price_jpy: "350", price_quantity: "500", price_unit: "g", supplier: ""}],
         selling_price_jpy: "", notes: [], interpretations: []})}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const ok = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["粉100g、500g350円"]}));
     expect(ok.status).toBe(200);
@@ -108,17 +120,17 @@ test("voice-recipe route sends strict json_schema; package-vs-use and approval s
     // 100g used vs 500g pack preserved as distinct fields, not conflated.
     expect((await ok.json()).materials[0]).toMatchObject({quantity: "100", price_quantity: "500"});
     // Bad unit rejected app-side even though shape matches schema.
-    global.fetch = (async () => Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
+    global.fetch = unitCatalogFetch((async () => Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
       title: "テスト", materials: [{name: "粉", quantity: "100", unit: "カップ",
         price_jpy: "350", price_quantity: "500", price_unit: "g", supplier: ""}],
-      selling_price_jpy: "", notes: [], interpretations: []})}}]})) as typeof fetch;
+      selling_price_jpy: "", notes: [], interpretations: []})}}]})) as typeof fetch);
     const bad = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["粉100g、500g350円"]}));
     // Unknown unit stays schema-shaped but is surfaced as unresolved, never silently accepted.
     expect(bad.status).toBe(200);
     expect((await bad.json()).missing.length).toBeGreaterThan(0);
     // finish_reason refusal still fails closed, never partially saved.
-    global.fetch = (async () => Response.json({choices: [{finish_reason: "length", message: {content: "{}"}}]})) as typeof fetch;
+    global.fetch = unitCatalogFetch((async () => Response.json({choices: [{finish_reason: "length", message: {content: "{}"}}]})) as typeof fetch);
     expect((await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["粉100g"]})) ).status).toBe(502);
   } finally {
@@ -134,23 +146,23 @@ test("english structuring and self-correction merge through the same schema gate
   const previousFetch = global.fetch;
   try {
     // English: 500g pack 350yen, 100g used — fields must not be conflated.
-    global.fetch = (async (_: unknown, init?: {body?: unknown}) => {
+    global.fetch = unitCatalogFetch((async (_: unknown, init?: {body?: unknown}) => {
       const sent = JSON.parse(String(init?.body));
       expect(sent.response_format.json_schema.name).toBe("chef_voice_recipe");
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
         title: "Pasta", materials: [{name: "pasta", quantity: "100", unit: "g",
           price_jpy: "350", price_quantity: "500", price_unit: "g", supplier: ""}],
         selling_price_jpy: "", notes: [], interpretations: []})}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const en = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["pasta 100 grams, 500 gram pack 350 yen"]}));
     expect(en.status).toBe(200);
     expect((await en.json()).materials[0]).toMatchObject({quantity: "100", price_quantity: "500"});
     // Self-correction in Japanese merges to the corrected value, single material.
-    global.fetch = (async () => Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
+    global.fetch = unitCatalogFetch((async () => Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
       title: "テスト", materials: [{name: "片栗粉", quantity: "15", unit: "g",
         price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
-      selling_price_jpy: "", notes: [], interpretations: []})}}]})) as typeof fetch;
+      selling_price_jpy: "", notes: [], interpretations: []})}}]})) as typeof fetch);
     const fixed = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["片栗粉10g、いや15g"]}));
     expect(fixed.status).toBe(200);
@@ -158,10 +170,10 @@ test("english structuring and self-correction merge through the same schema gate
     expect(body.materials).toHaveLength(1);
     expect(body.materials[0].quantity).toBe("15");
     // Review request is never structured as an ingredient.
-    global.fetch = (async () => Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
+    global.fetch = unitCatalogFetch((async () => Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
       title: "", materials: [{name: "内容を確認", quantity: "1", unit: "g",
         price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
-      selling_price_jpy: "", notes: [], interpretations: []})}}]})) as typeof fetch;
+      selling_price_jpy: "", notes: [], interpretations: []})}}]})) as typeof fetch);
     const sneaky = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["内容を確認"]}));
     expect(sneaky.status).toBe(200);
@@ -179,19 +191,19 @@ test("supplier is extracted without guessing; revision reuses the previous draft
   const previousFetch = global.fetch;
   try {
     let sentBody = "";
-    global.fetch = (async (_: unknown, init?: {body?: unknown}) => {
+    global.fetch = unitCatalogFetch((async (_: unknown, init?: {body?: unknown}) => {
       sentBody = String(init?.body);
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
         title: "テスト", materials: [{name: "ディチェコ パスタ", quantity: "100", unit: "g",
           price_jpy: "350", price_quantity: "500", price_unit: "g", supplier: "築地場外"}],
         selling_price_jpy: "", notes: [], interpretations: []})}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const ok = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["ディチェコのパスタ100g、築地場外で500g350円"]}));
     expect(ok.status).toBe(200);
     expect((await ok.json()).materials[0]).toMatchObject({name: "ディチェコ パスタ", supplier: "築地場外"});
     // Revision: only the new turn plus the previous draft travel upstream.
-    global.fetch = (async (_: unknown, init?: {body?: unknown}) => {
+    global.fetch = unitCatalogFetch((async (_: unknown, init?: {body?: unknown}) => {
       sentBody = String(init?.body);
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
         title: "テスト", materials: [
@@ -200,7 +212,7 @@ test("supplier is extracted without guessing; revision reuses the previous draft
           {name: "卵", quantity: "50", unit: "g", price_jpy: "", price_quantity: "",
             price_unit: "", supplier: ""}],
         selling_price_jpy: "", notes: [], interpretations: []})}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const previous = {title: "テスト", materials: [{name: "ディチェコ パスタ", quantity: "100",
       unit: "g", price_jpy: "350", price_quantity: "500", price_unit: "g", supplier: "築地場外"}],
       selling_price_jpy: "", notes: [], interpretations: [],
@@ -217,14 +229,14 @@ test("supplier is extracted without guessing; revision reuses the previous draft
       previous.nameCorrections);
     expect((await revised.json()).materials).toHaveLength(2);
     // Malformed previous draft fails closed without calling the provider.
-    global.fetch = (async () => Response.json({choices: []})) as typeof fetch;
+    global.fetch = unitCatalogFetch((async () => Response.json({choices: []})) as typeof fetch);
     expect((await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["卵"], previous: {title: "x"}}))).status).toBe(400);
     // Material shape without supplier is rejected app-side.
-    global.fetch = (async () => Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
+    global.fetch = unitCatalogFetch((async () => Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
       title: "テスト", materials: [{name: "粉", quantity: "100", unit: "g",
         price_jpy: "350", price_quantity: "500", price_unit: "g"}],
-      selling_price_jpy: "", notes: [], interpretations: []})}}]})) as typeof fetch;
+      selling_price_jpy: "", notes: [], interpretations: []})}}]})) as typeof fetch);
     expect((await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["粉"]})) ).status).toBe(502);
   } finally {
@@ -250,11 +262,11 @@ test("explicit price research resolves against the owned ledger, never model kno
         unit_basis: "g", average_unit_price: "0.7700", observation_count: 2,
         observed_to: "2026-10-28", method: "average of 2 comparable observations"},
       observations: []}]};
-    global.fetch = (async (url: unknown) => {
+    global.fetch = unitCatalogFetch((async (url: unknown) => {
       if (String(url).includes("/demo/price-reference")) return Response.json(ledger);
       return Response.json({choices: [{finish_reason: "stop",
         message: {content: JSON.stringify(recipe)}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const ok = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["豚バラ肉100g、だいたいの相場で入れて"]}));
     expect(ok.status).toBe(200);
@@ -270,12 +282,12 @@ test("explicit price research resolves against the owned ledger, never model kno
     expect(body.materials[0].price_jpy).toBe("");
     expect(body.missing.join("")).toContain("仕入単価");
     // Backend failure still returns the draft; the entry reports none.
-    global.fetch = (async (url: unknown) => {
+    global.fetch = unitCatalogFetch((async (url: unknown) => {
       if (String(url).includes("/demo/price-reference"))
         return Response.json({}, {status: 503});
       return Response.json({choices: [{finish_reason: "stop",
         message: {content: JSON.stringify(recipe)}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const degraded = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["豚バラ肉100g、だいたいの相場で入れて"]}));
     expect(degraded.status).toBe(200);
@@ -285,7 +297,7 @@ test("explicit price research resolves against the owned ledger, never model kno
     expect(degradedBody.price_references[0].status).toBe("unavailable");
     expect(degradedBody.price_references[0].text).toContain("確認できません");
     // Non-JPY history is shown verbatim, never labeled yen, never converted.
-    global.fetch = (async (url: unknown) => {
+    global.fetch = unitCatalogFetch((async (url: unknown) => {
       if (String(url).includes("/demo/price-reference"))
         return Response.json({query: "beef", candidates: [{ingredient_id: "ing-2",
           ingredient_name: "beef", reference: {available: true, currency: "USD",
@@ -296,7 +308,7 @@ test("explicit price research resolves against the owned ledger, never model kno
         message: {content: JSON.stringify({...recipe,
           materials: [{...recipe.materials[0], name: "beef"}],
           price_research: [{material_name: "beef", request: "market quote"}]})}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const foreign = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["beef 100 grams, market quote"]}));
     expect(foreign.status).toBe(200);
@@ -304,7 +316,7 @@ test("explicit price research resolves against the owned ledger, never model kno
     expect(foreignText).toContain("USD");
     expect(foreignText).not.toContain("円");
     // First candidate without history does not hide a later exact match.
-    global.fetch = (async (url: unknown) => {
+    global.fetch = unitCatalogFetch((async (url: unknown) => {
       if (String(url).includes("/demo/price-reference"))
         return Response.json({query: "豚バラ", candidates: [
           {ingredient_id: "ing-9", ingredient_name: "豚バラ先輩",
@@ -312,7 +324,7 @@ test("explicit price research resolves against the owned ledger, never model kno
           ledger.candidates[0]]});
       return Response.json({choices: [{finish_reason: "stop",
         message: {content: JSON.stringify(recipe)}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const multi = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["豚バラ肉100g、相場で"]}));
     expect(multi.status).toBe(200);
@@ -320,7 +332,7 @@ test("explicit price research resolves against the owned ledger, never model kno
     expect(multiRef.status).toBe("available");
     expect(multiRef.ingredient_name).toBe("豚バラ肉");
     // Non-exact fallback names the actual ingredient instead of merging silently.
-    global.fetch = (async (url: unknown) => {
+    global.fetch = unitCatalogFetch((async (url: unknown) => {
       if (String(url).includes("/demo/price-reference"))
         return Response.json({query: "豚", candidates: [
           {ingredient_id: "ing-9", ingredient_name: "豚バラ先輩",
@@ -332,7 +344,7 @@ test("explicit price research resolves against the owned ledger, never model kno
       return Response.json({choices: [{finish_reason: "stop",
         message: {content: JSON.stringify({...recipe,
           price_research: [{material_name: "豚", request: "相場で"}]})}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const fuzzy = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["豚100g、相場で"]}));
     expect(fuzzy.status).toBe(200);
@@ -343,12 +355,12 @@ test("explicit price research resolves against the owned ledger, never model kno
     // material_index is strict-required (null when rowless); legacy
     // 2-key entries stay accepted for old fixtures. Bad shapes fail closed.
     const indexed = (research: unknown) => {
-      global.fetch = (async (url: unknown) => {
+      global.fetch = unitCatalogFetch((async (url: unknown) => {
         if (String(url).includes("/demo/price-reference"))
           return Response.json({query: "x", candidates: []});
         return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
           ...recipe, price_research: research})}}]});
-      }) as typeof fetch;
+      }) as typeof fetch);
       return parseRecipe(authed("http://localhost/api/voice-recipe",
         {turns: ["豚バラ肉100g、相場で"]}));
     };
@@ -359,12 +371,12 @@ test("explicit price research resolves against the owned ledger, never model kno
     expect((await indexed([{material_name: "豚バラ肉", request: "相場", material_index: -1}])).status).toBe(502);
     expect((await indexed([{material_name: "豚バラ肉", request: "相場", material_index: 1.5}])).status).toBe(502);
     // Malformed research entry (extra key) fails closed.
-    global.fetch = (async (url: unknown) => {
+    global.fetch = unitCatalogFetch((async (url: unknown) => {
       if (String(url).includes("/demo/price-reference"))
         return Response.json({query: "x", candidates: []});
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify({
         ...recipe, price_research: [{material_name: "豚バラ肉", request: "相場", approved: true}]})}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     expect((await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["豚バラ肉100g、相場で"]})) ).status).toBe(502);
   } finally {
@@ -389,10 +401,10 @@ test("ledger lookup failures stay distinct from no-history and never fail the dr
   const museOk = async () => Response.json({choices: [{finish_reason: "stop",
     message: {content: JSON.stringify(recipe)}}]});
   async function draftWithLedger(ledger: (url: unknown) => Promise<Response>) {
-    global.fetch = (async (url: unknown, init?: {body?: unknown}) => {
+    global.fetch = unitCatalogFetch((async (url: unknown, init?: {body?: unknown}) => {
       if (String(url).includes("/demo/price-reference")) return ledger(url);
       return museOk();
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["豚バラ肉100g、平均価格を調べて"]}));
     expect(res.status).toBe(200);
@@ -416,7 +428,7 @@ test("ledger lookup failures stay distinct from no-history and never fail the dr
     // Missing connection config -> unavailable, and the model call still runs.
     delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
     let museCalled = false;
-    global.fetch = (async () => { museCalled = true; return museOk(); }) as typeof fetch;
+    global.fetch = unitCatalogFetch((async () => { museCalled = true; return museOk(); }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["豚バラ肉100g、平均価格を調べて"]}));
     expect(res.status).toBe(200);
@@ -445,8 +457,8 @@ test("ingredient name corrections stay informational and validate strictly", asy
       name_corrections: [{material_name: "片栗粉", heard: "かたくりこ",
         candidates: [{name: "片栗粉", reason: "一般的な調味料名の音誤認を料理文脈で補正"},
           {name: "コーンスターチ", reason: "用途が近い代替の候補"}]}]};
-    global.fetch = (async () => Response.json({choices: [{finish_reason: "stop",
-      message: {content: JSON.stringify(recipe)}}]})) as typeof fetch;
+    global.fetch = unitCatalogFetch((async () => Response.json({choices: [{finish_reason: "stop",
+      message: {content: JSON.stringify(recipe)}}]})) as typeof fetch);
     const ok = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["かたくりこ15g"]}));
     expect(ok.status).toBe(200);
@@ -460,15 +472,15 @@ test("ingredient name corrections stay informational and validate strictly", asy
     const tooMany = {...recipe, name_corrections: [{material_name: "粉", heard: "こな",
       candidates: [{name: "a", reason: "r"}, {name: "b", reason: "r"},
         {name: "c", reason: "r"}, {name: "d", reason: "r"}]}]};
-    global.fetch = (async () => Response.json({choices: [{finish_reason: "stop",
-      message: {content: JSON.stringify(tooMany)}}]})) as typeof fetch;
+    global.fetch = unitCatalogFetch((async () => Response.json({choices: [{finish_reason: "stop",
+      message: {content: JSON.stringify(tooMany)}}]})) as typeof fetch);
     expect((await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["こな"]})) ).status).toBe(502);
     // Empty candidates fail closed instead of padding silently.
     const emptyCands = {...recipe,
       name_corrections: [{material_name: "粉", heard: "こな", candidates: []}]};
-    global.fetch = (async () => Response.json({choices: [{finish_reason: "stop",
-      message: {content: JSON.stringify(emptyCands)}}]})) as typeof fetch;
+    global.fetch = unitCatalogFetch((async () => Response.json({choices: [{finish_reason: "stop",
+      message: {content: JSON.stringify(emptyCands)}}]})) as typeof fetch);
     expect((await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["こな"]})) ).status).toBe(502);
   } finally {
