@@ -777,6 +777,8 @@ class AdapterResendSnapshotTests(unittest.TestCase):
 
         repo = SupabasePersistence.__new__(SupabasePersistence)
         repo.client = _Tables(note)
+        repo.list_owned_units = lambda owner: [{"id":"g-id","symbol":"g",
+            "dimension":"mass","base_factor":"1","aliases":[]}]
         return repo
 
     def _row(self, oid, amount):
