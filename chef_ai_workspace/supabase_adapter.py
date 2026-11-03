@@ -483,8 +483,10 @@ class SupabasePersistence:
             source=str(candidate["source"]),
             confirmed=bool(candidate.get("confirmed")),
             observed_at=str(candidate.get("observed_at") or ""))
-        should, comparison, reasons = decide_notification(base, cand)
-        comparison = comparison if comparison is not None else compare_observations(base, cand)
+        from .costing import unit_factor_catalog
+        units = unit_factor_catalog(self.list_owned_units(owner_id))
+        should, comparison, reasons = decide_notification(base, cand, units)
+        comparison = comparison if comparison is not None else compare_observations(base, cand, units)
         if not should:
             raise ValueError("incomparable: " + "; ".join(reasons))
         from .price_notifications import comparison_payload
