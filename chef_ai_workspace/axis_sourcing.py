@@ -16,7 +16,6 @@ only retrieved-with-source rows may be treated as real data.
 """
 from decimal import Decimal, InvalidOperation
 
-from .costing import convert_quantity
 
 AXES = ("cost", "compatibility", "quality")
 AXIS_LABELS = {
@@ -36,16 +35,8 @@ class AxisEvaluationError(ValueError):
     """Raised when a Muse axis-evaluation payload is not usable."""
 
 
-def _unit_price(candidate):
-    """Comparable unit price normalized to per-g/per-ml, or None.
-
-    M5 keeps the raw unit when the adopted basis shares it (e.g. per-kg)
-    but converts mixed units to g/ml, so bare ``new_unit_price`` values
-    across candidates are not mutually comparable (500/kg vs 0.9/g).
-    Normalization reuses M5's own factors from ``costing`` instead of a
-    second conversion table. Returns ``(dimension, price)``; unrankable
-    terms (unknown basis, bad numbers) yield None and are never ranked.
-    """
+def _unit_price(candidate, units):
+    """Price per approved base unit; unknown factors are not ranked."""
     comparison = candidate.get("comparison") if isinstance(candidate, dict) else None
     if not isinstance(comparison, dict) or not comparison.get("comparable"):
         return None
@@ -56,14 +47,10 @@ def _unit_price(candidate):
         return None
     if price < 0:
         return None
-    for target in ("g", "ml"):
-        try:
-            factor = convert_quantity(Decimal(1), basis, target)
-        except (InvalidOperation, ValueError, TypeError, AttributeError):
-            factor = None
-        if factor is not None and factor > 0:
-            return (target, price / factor)
-    return None
+    definition = (units or {}).get(basis)
+    if not definition or definition[1] is None or definition[1] <= 0:
+        return None
+    return (definition[0], price / definition[1])
 
 
 def build_axis_prompt(ingredient_name, candidates):
@@ -179,7 +166,8 @@ def _cost_reason(candidate):
 
 def assign_axes(*, ingredient_id, ingredient_name, candidates,
                 evaluations=None, skipped_evaluations=0,
-                muse_used=False, muse_error=None, max_picks=STANDARD_PICKS):
+                muse_used=False, muse_error=None, max_picks=STANDARD_PICKS,
+                unit_definitions=None):
     """Pick at most one candidate per axis. Deterministic, read-only.
 
     ``candidates`` is the M7 pool in priority order. ``max_picks`` clamps
@@ -206,7 +194,7 @@ def assign_axes(*, ingredient_id, ingredient_name, candidates,
     for i, c in enumerate(pool):
         if c.get("kind") == "similar_product":
             continue
-        ranked = _unit_price(c)
+        ranked = _unit_price(c, unit_definitions)
         if ranked is not None:
             normalized.append((i,) + ranked)
     dimension = normalized[0][1] if normalized else None
