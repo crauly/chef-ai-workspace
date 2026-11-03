@@ -324,7 +324,7 @@ export default function Library(){
     <h3>{actionItem.title}</h3>
     <p className="muted">{locale==="ja"?"操作を選択してください。":"Choose an action."}</p>
     <div className="recipe-action-options">
-     <button type="button" disabled={busy} onClick={()=>{const id=actionItem.id;setActionItem(null);void open(id);}}>{locale==="ja"?"編集":"Edit"}</button>
+     <button type="button" disabled={busy} onClick={()=>{const id=actionItem.id;setActionItem(null);setAiOpen(true);void open(id);}}>{locale==="ja"?"編集":"Edit"}</button>
      <button type="button" disabled={busy} className="recipe-delete-action" onClick={()=>{setDeleteTarget({id:actionItem.id,title:actionItem.title});setActionItem(null);}}>{locale==="ja"?"削除":"Delete"}</button>
      <button type="button" className="secondary" onClick={()=>setActionItem(null)}>{locale==="ja"?"キャンセル":"Cancel"}</button>
     </div>
