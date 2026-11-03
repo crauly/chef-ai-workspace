@@ -104,7 +104,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  useEffect(()=>{let cancelled=false;setUnitCatalog(null);
   request<{items:Array<{id:string;symbol:string;dimension:string;base_factor:string|null;aliases:string[]}>}>("/api/units").then(result=>{if(!cancelled)setUnitCatalog(result.items);}).catch(()=>{if(!cancelled)setUnitCatalog(null);});
   return ()=>{cancelled=true;};
- },[draft?.title,draft?.materials]);
+ },[]);
  const [phase,setPhase]=useState<"dictating"|"review"|"saving">("dictating");
  const [message,setMessage]=useState(ja?"料理名・食材・分量・仕入単価を話してください。":"Describe the recipe, quantities and purchase prices.");
  const [manual,setManual]=useState("");
