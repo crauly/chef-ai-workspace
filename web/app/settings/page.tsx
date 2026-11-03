@@ -4,6 +4,7 @@ import NavIcon from "../NavIcon";
 import {useEffect,useState} from "react";
 import SupplierManager from "../SupplierManager";
 import UnitManager from "../UnitManager";
+import IngredientManager from "../IngredientManager";
 import SourcingSuggestions from "../SourcingSuggestions";
 import PlateSettingsSection from "../PlateSettingsSection";
 import PriceBell from "../PriceBell";
@@ -17,9 +18,10 @@ export default function SettingsPage(){
   <header className="chef-header"><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><PriceBell locale={locale}/><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">Japanese</option><option value="en-US">English</option></select></label></div><div className="chef-brand"><img src="/chef-ai-mark.svg" alt="" width="58" height="58"/><h1>Chef AI</h1></div></header>
   <a href="/" className="settings-back">{ja?"← レシピ一覧へ戻る":"← Back to recipes"}</a>
   <section className="workspace-section workspace-settings-section" aria-labelledby="settings-title">
-   <div className="workspace-section-head"><div><h2 id="settings-title">{ja?"管理・設定":"Management & Settings"}</h2><p>{ja?"仕入先・購入先候補・料理画像設定":"Suppliers, sourcing suggestions, and dish image settings"}</p></div></div>
+   <div className="workspace-section-head"><div><h2 id="settings-title">{ja?"管理・設定":"Management & Settings"}</h2><p>{ja?"食材・単位・仕入先・購入先候補・料理画像設定":"Ingredients, units, suppliers, sourcing suggestions, and dish image settings"}</p></div></div>
    <div className="workspace-settings-content">
     <UnitManager locale={locale}/>
+    <IngredientManager locale={locale}/>
     <SupplierManager locale={locale}/>
     <SourcingSuggestions locale={locale}/>
     <details className="plate-settings"><summary>{ja?"料理画像設定（デフォルト皿）":"Dish image settings (default plate)"}</summary><PlateSettingsSection locale={locale}/></details>
