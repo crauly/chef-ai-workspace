@@ -3,6 +3,14 @@ import {NextRequest} from "next/server";
 import {POST as parseRecipe} from "../app/api/voice-recipe/route";
 import {POST as fetchPrices} from "../app/api/voice-recipe/prices/route";
 
+
+const UNIT_FIXTURE={items:[{id:"00000000-0000-4000-8000-000000000001",symbol:"g",dimension:"mass",base_factor:"1",aliases:[]}]};
+function withUnitCatalog(mock:typeof fetch):typeof fetch{
+ return (async (input:RequestInfo|URL,init?:RequestInit)=>{
+  if(String(input).includes("/demo/units"))return Response.json(UNIT_FIXTURE);
+  return mock(input,init);
+ }) as typeof fetch;
+}
 const PASSWORD = "test-only-preview-password-32-characters";
 function authed(url: string, body: unknown) {
   return new NextRequest(url, {method: "POST",
@@ -49,11 +57,11 @@ test("defer_prices returns the draft without ledger or grounding calls", async (
   const previousFetch = global.fetch;
   const calls: string[] = [];
   try {
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       calls.push(String(url));
       return Response.json({choices: [{finish_reason: "stop",
         message: {content: JSON.stringify(MUSE_RECIPE([{material_name: "pasta", request: "相場", material_index: 0}]))}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["pasta100g、相場で"], defer_prices: true}));
     expect(res.status).toBe(200);
@@ -79,12 +87,12 @@ test("default path still enriches inline and reports complete", async () => {
   const restore = withEnv();
   const previousFetch = global.fetch;
   try {
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/demo/price-reference"))
         return Response.json(ledgerHit("pasta"));
       return Response.json({choices: [{finish_reason: "stop",
         message: {content: JSON.stringify(MUSE_RECIPE([{material_name: "pasta", request: "相場", material_index: 0}]))}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["pasta100g、相場で"]}));
     expect(res.status).toBe(200);
@@ -103,7 +111,7 @@ test("concurrent entries keep entry order under out-of-order latency", async () 
   const previousFetch = global.fetch;
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
   try {
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       const u = String(url);
       if (u.includes("/demo/price-reference")) {
         // First entry is slowest: sequential code would still be ordered,
@@ -116,7 +124,7 @@ test("concurrent entries keep entry order under out-of-order latency", async () 
         message: {content: JSON.stringify(MUSE_RECIPE([
           {material_name: "pasta", request: "r1", material_index: 0},
           {material_name: "tomato", request: "r2", material_index: 1}]))}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const started = performance.now();
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["pastaとtomatoの相場"]}));
@@ -142,12 +150,12 @@ test("deferred draft returns before slow enrichment would finish", async () => {
     message: {content: JSON.stringify(MUSE_RECIPE([{material_name: "pasta", request: "相場", material_index: 0}]))}}]});
   try {
     // Slow ledger + slow grounding: full path must wait, deferred must not.
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       const u = String(url);
       if (u.includes("/demo/price-reference")) { await sleep(400); return Response.json({query: "pasta", candidates: []}); }
       if (u.includes("/v1/responses")) { await sleep(400); return Response.json(grounded([CANDIDATE])); }
       return muse();
-    }) as typeof fetch;
+    }) as typeof fetch);
     const t0 = performance.now();
     const full = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["pasta100g、相場で"]}));
@@ -170,11 +178,11 @@ test("prices endpoint rebinds against the submitted snapshot", async () => {
   const restore = withEnv();
   const previousFetch = global.fetch;
   try {
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/demo/price-reference"))
         return Response.json(ledgerHit("tomato"));
       return Response.json(grounded([CANDIDATE]));
-    }) as typeof fetch;
+    }) as typeof fetch);
     // Contradictory index 0 with an exact row-1 name: the name wins, so the
     // price binds tomato (row 1), never pasta (row 0).
     const res = await fetchPrices(authed("http://localhost/api/voice-recipe/prices", {
@@ -204,7 +212,7 @@ test("prices endpoint fails closed on bad shapes", async () => {
   const restore = withEnv();
   const previousFetch = global.fetch;
   try {
-    global.fetch = (async () => Response.json({})) as typeof fetch;
+    global.fetch = withUnitCatalog((async () => Response.json({})) as typeof fetch);
     const bad = (body: unknown) => fetchPrices(authed("http://localhost/api/voice-recipe/prices", body));
     expect((await bad({materials: [], entries: "x"})).status).toBe(400);
     expect((await bad({materials: [{name: "pasta"}],
@@ -222,13 +230,13 @@ test("prices endpoint accepts rowless -1 without failing healthy entries", async
   const restore = withEnv();
   const previousFetch = global.fetch;
   try {
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/demo/price-reference")) {
         const name = new URL(String(url)).searchParams.get("name") ?? "?";
         return Response.json(ledgerHit(name));
       }
       return Response.json(grounded([]));
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await fetchPrices(authed("http://localhost/api/voice-recipe/prices", {
       materials: [{name: "pasta"}, {name: "tomato"}],
       entries: [
@@ -249,13 +257,13 @@ test("deleted-row pointer never binds another ingredient", async () => {
   const restore = withEnv();
   const previousFetch = global.fetch;
   try {
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/demo/price-reference")) {
         const name = new URL(String(url)).searchParams.get("name") ?? "?";
         return Response.json(ledgerHit(name));
       }
       return Response.json(grounded([]));
-    }) as typeof fetch;
+    }) as typeof fetch);
     const call = (materials: unknown, entries: unknown) =>
       fetchPrices(authed("http://localhost/api/voice-recipe/prices", {materials, entries}));
     // [tomato, pasta] -> tomato deleted, [pasta]: index 0 now names pasta.
@@ -296,7 +304,7 @@ test("prices endpoint rejects bad row_name and out-of-shape indexes", async () =
   const restore = withEnv();
   const previousFetch = global.fetch;
   try {
-    global.fetch = (async () => Response.json({})) as typeof fetch;
+    global.fetch = withUnitCatalog((async () => Response.json({})) as typeof fetch);
     const bad = (body: unknown) => fetchPrices(authed("http://localhost/api/voice-recipe/prices", body));
     expect((await bad({materials: [{name: "pasta"}],
       entries: [{material_name: "p", request: "r", material_index: -2}]})).status).toBe(400);
