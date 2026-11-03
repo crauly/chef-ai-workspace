@@ -27,23 +27,28 @@ export default function SourcingSuggestions({locale}:{locale:string}){
  const [busy,setBusy]=useState(false);
  const [axisBusy,setAxisBusy]=useState(false);
  const axisSeq=useRef(0);
+ const lookupSeq=useRef(0);
  const ja=locale==="ja";
  async function lookup(e:React.FormEvent){
   e.preventDefault();
   const id=ingredientId.trim();
   if(!id)return;
+  const seq=++lookupSeq.current;
+  // Invalidate an in-flight comparison as soon as a new search starts.
+  axisSeq.current++;setAxisBusy(false);setAxes(null);
   setBusy(true);
   try{
    const data=await read<Result>(`/api/sourcing-suggestions?ingredient_id=${encodeURIComponent(id)}`);
    // A retargeted search invalidates any in-flight axis request: the
    // late response is ignored by sequence, and busy is released here
    // so the button never wedges on an orphaned request.
-   axisSeq.current++;setAxisBusy(false);
+   if(lookupSeq.current!==seq)return;
    setResult(data);setAxes(null);setError("");
-  }catch(e){const code=(e as {status?:number}).status;
+  }catch(e){if(lookupSeq.current!==seq)return;
+   const code=(e as {status?:number}).status;
    if(code===404)setError(ja?"食材が見つかりません。":"Ingredient not found.");
    else setError(ja?"候補を取得できませんでした。":"Could not load suggestions.");}
-  finally{setBusy(false);}
+  finally{if(lookupSeq.current===seq)setBusy(false);}
  }
  async function lookupAxes(){
   // Bind to the displayed candidate result, never the live input: a
@@ -53,7 +58,7 @@ export default function SourcingSuggestions({locale}:{locale:string}){
   const seq=++axisSeq.current;setAxisBusy(true);
   try{
    const data=await read<AxisResult>(`/api/axis-suggestions?ingredient_id=${encodeURIComponent(target)}&max_candidates=3`);
-   if(axisSeq.current!==seq)return;
+   if(axisSeq.current!==seq||data.ingredient_id!==target)return;
    setAxes(data);setError("");
   }catch{if(axisSeq.current===seq)setError(ja?"軸別候補を取得できませんでした。":"Could not load axis picks.");}
   finally{if(axisSeq.current===seq)setAxisBusy(false);}
