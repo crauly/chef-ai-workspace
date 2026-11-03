@@ -181,7 +181,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
     </tr>)}</tbody>
    </table></div>
    <div className="ingredient-cards">{visible.map(item=><article key={item.id} className="ingredient-item-card">
-    <div className="ingredient-item-head"><strong>{item.name}</strong><button type="button" className="secondary" disabled={busy} onClick={()=>begin(item)} aria-label={ja?`${item.name}を編集`:`Edit ${item.name}`}>›</button></div>
+    <div className="ingredient-item-head"><strong>{item.name}</strong><button type="button" className="secondary" disabled={busy} onClick={()=>void begin(item)} aria-label={ja?`${item.name}を編集`:`Edit ${item.name}`}>›</button></div>
     <dl><div><dt>{ja?"価格・規格":"Price / Unit"}</dt><dd className={item.current_price?.amount_jpy?.value==null?"ingredient-unset":""}>{priceLabel(item)}</dd></div>
     <div><dt>{ja?"仕入れ先":"Supplier"}</dt><dd>{suppliers(item)}</dd></div></dl>
     <button type="button" className="secondary ingredient-delete" disabled={busy} onClick={()=>void remove(item)}>{ja?"削除":"Delete"}</button>
