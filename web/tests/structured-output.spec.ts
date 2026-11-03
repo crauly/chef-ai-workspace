@@ -32,7 +32,7 @@ test("SSOT schemas mirror app-side validators and use strict JSON Schema", () =>
   expect([...INTENT_SCHEMA.required].sort()).toEqual(["intent", "target"]);
   expect(INTENT_SCHEMA.properties.intent.enum).toEqual(["create", "browse", "edit", "clarify"]);
   expect([...VOICE_RECIPE_SCHEMA.required].sort()).toEqual(
-    ["interpretations", "materials", "name_corrections", "notes", "price_research", "selling_price_jpy", "title"]);
+    ["interpretations", "materials", "name_corrections", "notes", "price_research", "selling_price_jpy", "title", "unit_proposals"]);
   // Strict-mode contract: every object schema lists all its property
   // keys in required (Meta rejects otherwise with 400 -> app 502).
   const assertStrict = (node: unknown, path: string) => {
