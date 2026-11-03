@@ -175,5 +175,5 @@ begin
 end; $$;
 revoke all on function public.update_owned_unit(uuid,uuid,text,text,numeric,text[])
  from public,anon,authenticated;
-grant execute on function public.update_owned_unit(uuid,uuid,text,text,text[])
+grant execute on function public.update_owned_unit(uuid,uuid,text,text,numeric,text[])
  to service_role;
