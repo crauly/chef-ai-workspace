@@ -280,7 +280,10 @@ def list_demo_ingredient_master(ctx=Depends(demo_context)):
     loader=getattr(repository,"list_owned_ingredient_master",None)
     if not callable(loader):
         raise HTTPException(503,"Ingredient master unavailable")
-    return {"items":loader(owner)}
+    suppliers=getattr(repository,"list_owned_ingredient_suppliers",None)
+    if not callable(suppliers):
+        raise HTTPException(503,"Ingredient supplier lookup unavailable")
+    return {"items":loader(owner),"suppliers_by_ingredient":suppliers(owner)}
 
 
 class IngredientMasterCreateBody(BaseModel):
