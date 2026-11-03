@@ -178,6 +178,39 @@ class SupabasePersistence:
                 return rows
             rows.extend(batch)
 
+    def list_owned_ingredient_suppliers(self, owner_id):
+        """Supplier names from owned purchase offers, not guessed from master price.
+
+        An ingredient may have multiple suppliers. Entries without a supplier
+        are not considered evidence that no other supplier is linked.
+        """
+        offers = []
+        while True:
+            batch = (self.client.table("offers")
+                     .select("ingredient_id,supplier_id")
+                     .eq("owner_id", owner_id)
+                     .order("id")
+                     .range(len(offers), len(offers) + 499).execute()).data or []
+            if not batch:
+                break
+            offers.extend(batch)
+        supplier_ids = sorted({row["supplier_id"] for row in offers
+                               if row.get("supplier_id")})
+        names = {}
+        for start in range(0, len(supplier_ids), 200):
+            batch = (self.client.table("suppliers").select("id,name")
+                     .eq("owner_id", owner_id)
+                     .in_("id", supplier_ids[start:start + 200])
+                     .execute()).data or []
+            names.update({row["id"]: row["name"] for row in batch})
+        linked = {}
+        for row in offers:
+            supplier = names.get(row.get("supplier_id"))
+            if supplier:
+                linked.setdefault(str(row["ingredient_id"]), set()).add(supplier)
+        return {ingredient_id: sorted(suppliers)
+                for ingredient_id, suppliers in linked.items()}
+
     def update_owned_ingredient_master(self, owner_id, ingredient_id, name, quote):
         result=self.client.rpc("update_owned_ingredient",{
             "p_owner_id":owner_id,
