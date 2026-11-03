@@ -107,3 +107,24 @@ revoke all on function public.commit_recipe_crud(uuid,uuid,uuid,bigint,jsonb,tex
  from public,anon,authenticated;
 grant execute on function public.commit_recipe_crud(uuid,uuid,uuid,bigint,jsonb,text,jsonb,text,boolean,jsonb)
  to service_role;
+
+-- Supplier deletion must not orphan recipe material selections.
+create or replace function public.protect_recipe_supplier_reference()
+returns trigger language plpgsql security invoker set search_path=''
+as $$
+begin
+ if exists(
+   select 1 from public.recipes r
+   where r.owner_id=old.owner_id
+     and exists(
+       select 1 from jsonb_array_elements(r.state->'materials') m
+       where m->>'supplier_id'=old.id::text
+     )
+ ) then raise exception 'Supplier is used by recipe materials'; end if;
+ return old;
+end;
+$$;
+drop trigger if exists protect_recipe_supplier_reference on public.suppliers;
+create trigger protect_recipe_supplier_reference
+ before delete on public.suppliers
+ for each row execute function public.protect_recipe_supplier_reference();
