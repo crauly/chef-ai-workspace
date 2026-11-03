@@ -31,6 +31,7 @@ function SettingsGlyph({tab}:{tab:Tab}){
 export default function SettingsPage(){
  const [locale,setLocale]=useState<Locale>("ja");
  const [tab,setTab]=useState<Tab>("ingredient");
+ const [helpOpen,setHelpOpen]=useState(false);
  useEffect(()=>{
   const stored=localStorage.getItem("chef-ui-locale");
   if(stored==="ja"||stored==="en-US"){setLocale(stored);document.documentElement.lang=stored;}
@@ -39,7 +40,7 @@ export default function SettingsPage(){
  },[]);
  function switchLocale(next:Locale){setLocale(next);localStorage.setItem("chef-ui-locale",next);document.documentElement.lang=next;}
  const ja=locale==="ja";
- const choose=(next:Tab)=>{setTab(next);window.history.replaceState(null,"",next==="ingredient"?"/settings":"/settings?section="+next);};
+ const choose=(next:Tab)=>{setHelpOpen(false);setTab(next);window.history.replaceState(null,"",next==="ingredient"?"/settings":"/settings?section="+next);};
  return <main id="top" className="settings-page">
   <header className="chef-header"><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><PriceBell locale={locale}/><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">Japanese</option><option value="en-US">English</option></select></label></div><div className="chef-brand"><img src="/chef-ai-mark.svg" alt="" width="58" height="58"/><h1>Chef AI</h1></div></header>
   <a href="/" className="settings-back">{ja?"← レシピ一覧へ戻る":"← Back to recipes"}</a>
@@ -60,7 +61,10 @@ export default function SettingsPage(){
     </label>
    </div>
    <section className="settings-main-panel" aria-labelledby="settings-panel-title">
-    <h2 id="settings-panel-title" className="settings-panel-title">{ja?names[tab].ja:names[tab].en}</h2>
+    <div className="settings-panel-heading"><h2 id="settings-panel-title" className="settings-panel-title">{ja?names[tab].ja:names[tab].en}</h2>
+     <button type="button" className="secondary settings-help-button" aria-expanded={helpOpen} onClick={()=>setHelpOpen(v=>!v)}>{ja?"使い方":"Help"}</button>
+    </div>
+    {helpOpen&&<p className="settings-help" role="note">{tab==="ingredient"?(ja?"食材を検索し、価格・仕入れ先を確認できます。編集から価格の変更と仕入れ先の追加ができます。":"Search ingredients, review prices and suppliers, and open Edit to update prices or link a supplier."):tab==="supplier"?(ja?"仕入れ先を登録・編集します。食材との紐付けは食材ライブラリから行います。":"Manage suppliers here; link them to ingredients from the Ingredient Library."):tab==="unit"?(ja?"単位の名称と別名を管理します。":"Manage unit names and aliases."):tab==="sourcing"?(ja?"食材IDから購入候補を確認します。":"Find purchasing suggestions by ingredient ID."):(ja?"皿を登録し、画像生成に使用する標準の皿を指定できます。":"Register plates and choose a default for image generation.")}</p>}
     {tab==="ingredient"&&<IngredientManager locale={locale}/>}
     {tab==="supplier"&&<SupplierManager locale={locale}/>}
     {tab==="unit"&&<UnitManager locale={locale}/>}
