@@ -31,6 +31,9 @@ class Repo:
         self.catalog = {PASTA_ID: Ingredient(PASTA_ID, "乾燥パスタ", None)}
         self.receipts = {}
         self.search_calls = []
+    def list_owned_units(self, owner_id):
+        return [{"id": "test-g", "symbol": "g", "dimension": "mass", "aliases": []}]
+
     def load_owned_recipe(self, owner_id, recipe_id):
         if owner_id != self.owner or recipe_id not in self.recipes:
             raise ValueError("Not found")
