@@ -57,6 +57,7 @@ class UnitCreateBody(BaseModel):
 @router.post("/units",status_code=201)
 def create_demo_unit(body:UnitCreateBody,ctx=Depends(demo_context)):
     owner,repo=ctx
+    if not body.symbol.strip(): raise HTTPException(422,"Unit symbol required")
     create=getattr(repo,"create_owned_unit_master",None)
     if not callable(create): raise HTTPException(503,"Unit manager unavailable")
     return {"id":str(create(owner,body.symbol.strip(),body.dimension))}
@@ -283,6 +284,7 @@ class IngredientMasterCreateBody(BaseModel):
 @router.post("/ingredients",status_code=201)
 def create_demo_ingredient_master(body:IngredientMasterCreateBody,ctx=Depends(demo_context)):
     owner,repo=ctx
+    if not body.name.strip(): raise HTTPException(422,"Ingredient name required")
     create=getattr(repo,"create_owned_ingredient_master",None)
     if not callable(create): raise HTTPException(503,"Ingredient master unavailable")
     return {"id":str(create(owner,body.name.strip()))}
