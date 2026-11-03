@@ -4,6 +4,14 @@ import {POST as parseRecipe} from "../app/api/voice-recipe/route";
 import {runGroundedSearch} from "../price-web-search";
 import {detectPriceResearch} from "../price-research-intent";
 
+
+const UNIT_FIXTURE={items:[{id:"00000000-0000-4000-8000-000000000001",symbol:"g",dimension:"mass",base_factor:"1",aliases:[]}]};
+function withUnitCatalog(mock:typeof fetch):typeof fetch{
+ return (async (input:RequestInfo|URL,init?:RequestInit)=>{
+  if(String(input).includes("/demo/units"))return Response.json(UNIT_FIXTURE);
+  return mock(input,init);
+ }) as typeof fetch;
+}
 const PASSWORD = "test-only-preview-password-32-characters";
 function authed(url: string, body: unknown) {
   return new NextRequest(url, {method: "POST",
@@ -150,10 +158,10 @@ test("omitted price_research still reaches grounding; provisional stays unapprov
   const previousFetch = global.fetch;
   try {
     // Muse omits price_research; the ledger is unreachable (no binding/token).
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/v1/responses")) return Response.json(grounded([CANDIDATE]));
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(MUSE_RECIPE([]))}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["pasta100g、平均仕入価格を調べて"]}));
     expect(res.status).toBe(200);
@@ -190,11 +198,11 @@ test("grounding failure keeps the draft and reports the stage", async () => {
   process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
   const previousFetch = global.fetch;
   try {
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/v1/responses")) return new Response("e", {status: 500});
       return Response.json({choices: [{finish_reason: "stop", message: {content:
         JSON.stringify(MUSE_RECIPE([{material_name: "pasta", request: "r"}]))}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe", {turns: ["pasta100g"]}));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -219,10 +227,10 @@ test("no request means no search, no provisional, no status", async () => {
   const previousFetch = global.fetch;
   try {
     let responsesCalls = 0;
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/v1/responses")) { responsesCalls++; }
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(MUSE_RECIPE([]))}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe", {turns: ["pasta100g"]}));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -250,13 +258,13 @@ test("named heuristic request survives the entry cap; only saffron is searched",
       selling_price_jpy: "", notes: [], interpretations: [], price_research: []};
     const saffron = {...CANDIDATE, name: "サフラン"};
     let groundingCalls = 0;
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/v1/responses")) {
         groundingCalls++;
         return Response.json(grounded([saffron]));
       }
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(muse)}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["サフランの平均仕入価格を調べて"]}));
     expect(res.status).toBe(200);
@@ -290,7 +298,7 @@ test("http internal binding host reaches the ledger (PR #89 contract kept)", asy
   const previousFetch = global.fetch;
   try {
     let responsesCalls = 0;
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/v1/responses")) {
         responsesCalls++;
         return Response.json(grounded([CANDIDATE]));
@@ -304,7 +312,7 @@ test("http internal binding host reaches the ledger (PR #89 contract kept)", asy
       }
       return Response.json({choices: [{finish_reason: "stop", message: {content:
         JSON.stringify(MUSE_RECIPE([{material_name: "pasta", request: "r"}]))}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe", {turns: ["pasta100g"]}));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -344,10 +352,10 @@ test("drifted Muse name with material_index still binds the right row", async ()
           price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
       selling_price_jpy: "", notes: [], interpretations: [],
       price_research: [{material_name: "パスタ", material_index: 0, request: "平均価格を調べて"}]};
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/v1/responses")) return Response.json(grounded([CANDIDATE]));
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(muse)}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["ディチェコのパスタ100g、平均価格を調べて"]}));
     expect(res.status).toBe(200);
@@ -391,10 +399,10 @@ test("contradictory index loses to an exact row-name match", async () => {
           price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
       selling_price_jpy: "", notes: [], interpretations: [],
       price_research: [{material_name: "tomato", material_index: 0, request: "r"}]};
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/v1/responses")) return Response.json(grounded([CANDIDATE]));
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(muse)}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["tomato"]}));
     expect(res.status).toBe(200);
@@ -419,10 +427,10 @@ test("bad index falls back to the row name; unknown names stay rowless", async (
   const previousFetch = global.fetch;
   async function runWith(research: unknown) {
     const muse = {...MUSE_RECIPE(research)};
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/v1/responses")) return Response.json(grounded([CANDIDATE]));
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(muse)}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe", {turns: ["pasta100g"]}));
     expect(res.status).toBe(200);
     return res.json();
