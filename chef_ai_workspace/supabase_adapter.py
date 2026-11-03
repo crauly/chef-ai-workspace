@@ -145,6 +145,28 @@ class SupabasePersistence:
         }).execute()
         return bool(response.data)
 
+    def list_owned_ingredient_master(self, owner_id):
+        """Complete owner-scoped ingredient SSOT for the manager."""
+        rows=[]
+        while True:
+            response=(self.client.table("ingredients")
+                      .select("id,name,current_price")
+                      .eq("owner_id",owner_id)
+                      .order("id").range(len(rows),len(rows)+499).execute())
+            batch=response.data or []
+            if not batch:
+                return rows
+            rows.extend(batch)
+
+    def update_owned_ingredient_master(self, owner_id, ingredient_id, name, quote):
+        result=self.client.rpc("update_owned_ingredient",{
+            "p_owner_id":owner_id,
+            "p_ingredient_id":ingredient_id,
+            "p_name":name,
+            "p_price":quote,
+        }).execute()
+        return result.data is True
+
     def find_owned_ingredients_exact(self, owner_id, name):
         """Owner-scoped exact product identity lookup (never fuzzy merge)."""
         if not isinstance(name,str) or not name.strip():
