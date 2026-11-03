@@ -17,8 +17,18 @@ class Repo:
         if owner_id != self.owner or recipe_id != self.recipe.id:
             raise ValueError("Unknown recipe")
         return self.recipe
-    def commit_recipe_revision(self, *, owner_id, recipe_id, request_id, base_revision,
-                               state, title, cost_snapshot, payload_hash, save_version):
+    def load_owned_catalog(self, owner_id, recipe):
+        return {}
+
+    def find_owned_ingredients_exact(self, owner_id, name):
+        return []
+
+    def list_owned_units(self, owner_id):
+        return []
+
+    def commit_recipe_crud(self, *, owner_id, recipe_id, request_id, base_revision,
+                           state, title, cost_snapshot, payload_hash, save_version,
+                           ingredient_entries):
         if owner_id != self.owner or base_revision != self.recipe.revision:
             raise ValueError("Denied")
         self.writes+=1
