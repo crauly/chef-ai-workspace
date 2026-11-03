@@ -37,13 +37,14 @@ class SupabasePersistence:
         """trusted_client must be a server-owned Supabase SDK client."""
         self.client = trusted_client
 
-    def create_owned_recipe(self, owner_id, recipe, cost_snapshot):
+    def create_owned_recipe(self, owner_id, recipe, cost_snapshot, unit_candidates=()):
         response = self.client.rpc("create_owned_recipe", {
             "p_owner_id": owner_id,
             "p_recipe_id": recipe.id,
             "p_title": recipe.title.value,
             "p_initial_state": asdict(recipe),
-            "p_cost_snapshot": cost_snapshot
+            "p_cost_snapshot": cost_snapshot,
+            "p_unit_candidates": list(unit_candidates),
         }).execute()
         if str(response.data) != recipe.id:
             raise RuntimeError("Unexpected create RPC result")
@@ -140,15 +141,8 @@ class SupabasePersistence:
         }).execute()
         return response.data is True
 
-    def ensure_owned_unit(self, owner_id, symbol, dimension, aliases=()):
-        """Trusted-server only. Call after the real user approval boundary."""
-        response = self.client.rpc("ensure_owned_unit", {
-            "p_owner_id": owner_id,
-            "p_symbol": symbol,
-            "p_dimension": dimension,
-            "p_aliases": list(aliases),
-        }).execute()
-        return str(response.data)
+    # New units are created only by create_owned_recipe's approved transaction.
+    # Never expose a standalone unit-create RPC through the adapter.
 
     def search_owned_ingredients(self, owner_id, query, limit=20):
         """Owner-scoped ingredient search for reuse candidates and past-recipe
