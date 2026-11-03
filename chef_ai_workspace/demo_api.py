@@ -57,6 +57,27 @@ def resolve_demo_unit(
     return asdict(resolve_unit(q, loader(owner)))
 
 
+class UnitAliasesBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    aliases: list[str] = Field(max_length=20)
+
+
+@router.put("/units/{unit_id}/aliases")
+def edit_demo_unit_aliases(unit_id: UUID, body: UnitAliasesBody,
+                           ctx=Depends(demo_context)):
+    """Explicit unit manager edit; AI never invokes this write path."""
+    owner, repository = ctx
+    aliases = [alias.strip() for alias in body.aliases]
+    if any(not alias or len(alias) > 32 for alias in aliases):
+        raise HTTPException(422, "Invalid unit alias")
+    editor = getattr(repository, "update_owned_unit_aliases", None)
+    if not callable(editor):
+        raise HTTPException(503, "Unit manager unavailable")
+    if not editor(owner, str(unit_id), aliases):
+        raise HTTPException(404, "Unit not found")
+    return {"id": str(unit_id), "aliases": aliases}
+
+
 @router.get("/recipes")
 def list_demo_recipes(page: int = 1, page_size: int = 20,
                       q: str = Query(default="", max_length=200), ctx=Depends(demo_context)):
