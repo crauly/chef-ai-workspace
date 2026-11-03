@@ -1,0 +1,49 @@
+-- Chef AI Workspace V1: user-owned unit master, no fixed unit whitelist.
+-- Execute only against the dedicated Chef AI Workspace database.
+create table public.units (
+ id uuid primary key default gen_random_uuid(),
+ owner_id uuid not null references auth.users(id) on delete cascade,
+ symbol text not null check (length(btrim(symbol)) between 1 and 32),
+ dimension text not null check (dimension in ('mass','volume','count','other')),
+ aliases text[] not null default '{}',
+ created_at timestamptz not null default now(),
+ updated_at timestamptz not null default now(),
+ unique (owner_id, symbol),
+ unique (owner_id, id)
+);
+create index units_owner_idx on public.units(owner_id);
+alter table public.units enable row level security;
+create policy units_owner_read on public.units for select to authenticated
+ using (owner_id = (select auth.uid()));
+-- Writes use only the trusted server: no authenticated insert/update/delete policy.
+revoke insert, update, delete on public.units from anon, authenticated;
+
+-- Atomic, owner-scoped reuse or creation. Only the trusted backend can call.
+-- Same normalized symbol reuses one ID under concurrent requests.
+create or replace function public.ensure_owned_unit(
+ p_owner_id uuid, p_symbol text, p_dimension text, p_aliases text[] default '{}'
+) returns uuid
+language plpgsql security definer set search_path = ''
+as $$
+declare v_id uuid;
+declare v_symbol text := btrim(p_symbol);
+begin
+ if p_owner_id is null or v_symbol is null or length(v_symbol) not between 1 and 32
+    or p_dimension not in ('mass','volume','count','other')
+    or array_length(p_aliases,1)>20
+    or exists(select 1 from unnest(p_aliases) a where length(btrim(a)) not between 1 and 32)
+ then raise exception 'Invalid unit candidate'; end if;
+ insert into public.units(owner_id,symbol,dimension,aliases)
+ values (p_owner_id,v_symbol,p_dimension,coalesce(p_aliases,'{}'))
+ on conflict(owner_id,symbol) do nothing
+ returning id into v_id;
+ if v_id is not null then return v_id; end if;
+ select id into v_id from public.units
+ where owner_id=p_owner_id and symbol=v_symbol and dimension=p_dimension;
+ if v_id is null then
+   raise exception 'Unit symbol already exists with a different dimension';
+ end if;
+ return v_id;
+end; $$;
+revoke all on function public.ensure_owned_unit(uuid,text,text,text[]) from public, anon, authenticated;
+grant execute on function public.ensure_owned_unit(uuid,text,text,text[]) to service_role;
