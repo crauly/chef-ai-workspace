@@ -285,6 +285,25 @@ def list_demo_ingredient_master(ctx=Depends(demo_context)):
             "suppliers_by_ingredient":suppliers(owner) if callable(suppliers) else None}
 
 
+class IngredientSupplierLinkBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    supplier_id: UUID
+
+
+@router.post("/ingredients/{ingredient_id}/suppliers", status_code=201)
+def link_demo_ingredient_supplier(ingredient_id:UUID, body:IngredientSupplierLinkBody,
+                                  ctx=Depends(demo_context)):
+    owner, repository=ctx
+    link=getattr(repository,"link_owned_ingredient_supplier",None)
+    if not callable(link):
+        raise HTTPException(503,"Ingredient supplier linking unavailable")
+    try:
+        offer_id=link(owner,str(ingredient_id),str(body.supplier_id))
+    except ValueError as exc:
+        raise HTTPException(404,"Ingredient or supplier not found") from exc
+    return {"offer_id":str(offer_id)}
+
+
 class IngredientMasterCreateBody(BaseModel):
     model_config=ConfigDict(extra="forbid")
     name: str=Field(min_length=1,max_length=200)
