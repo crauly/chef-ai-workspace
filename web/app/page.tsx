@@ -118,7 +118,9 @@ export default function Library(){
      const result=await request<{recipe:Recipe}>(`/api/recipes/${selected.id}/confirm`,{
        method:"POST",body:JSON.stringify({base_revision:selected.revision,
          request_id:crypto.randomUUID(),operations,save_version:true})});
-     setSelected(result.recipe);await reload();setError("");return true;
+     const persisted=await request<Recipe>(`/api/recipes/${selected.id}`);
+     if(persisted.revision!==result.recipe.revision)throw new Error("Saved revision mismatch");
+     setSelected(persisted);await reload();setError("");return true;
    }catch(e){setError(String(e));return false;}finally{setBusy(false);}
  }
  async function addFood(e:React.FormEvent){e.preventDefault();
