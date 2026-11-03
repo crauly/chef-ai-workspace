@@ -15,6 +15,9 @@ class FakeRepo:
         self.recipes = {}
         self.catalog = {}
         self.receipts = {}
+    def list_owned_units(self, owner_id):
+        return [{"id": "test-g", "symbol": "g", "dimension": "mass", "aliases": []}]
+
     def load_owned_recipe(self, owner_id, recipe_id):
         try:
             return self.recipes[recipe_id]
@@ -26,7 +29,7 @@ class FakeRepo:
         return {i: self.catalog[i] for i in ids if i in self.catalog}
     def get_mutation_receipt(self, owner_id, request_id):
         return self.receipts.get(request_id)
-    def create_owned_recipe(self, owner, recipe, snapshot):
+    def create_owned_recipe(self, owner, recipe, snapshot, unit_candidates=()):
         if recipe.id in self.recipes:
             raise ValueError("exists")
         from dataclasses import replace
