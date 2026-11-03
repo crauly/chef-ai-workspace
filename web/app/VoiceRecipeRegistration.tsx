@@ -98,6 +98,11 @@ export type SharedMicStatus={recording:boolean;transcribing:boolean;queued:numbe
 export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,control,sharedVoice}:{locale:Locale;onCreated:(recipe:Recipe,mode:SaveMode,suppliers:string[])=>void;onDiscarded?:()=>void;control?:Ref<RegistrationHandle>;sharedVoice?:{markReview:()=>number;cancel:()=>void;captureMessage:string;mic?:SharedMicStatus}}){
  const ja=locale==="ja";
  const [busy,setBusy]=useState(false),[turns,setTurns]=useState<string[]>([]),[draft,setDraft]=useState<Draft|null>(null);
+ const [unitCatalog,setUnitCatalog]=useState<Array<{id:string;symbol:string;dimension:string;aliases:string[]}>|null>(null);
+ useEffect(()=>{let cancelled=false;setUnitCatalog(null);
+  request<{items:Array<{id:string;symbol:string;dimension:string;aliases:string[]}>}>("/api/units").then(result=>{if(!cancelled)setUnitCatalog(result.items);}).catch(()=>{if(!cancelled)setUnitCatalog(null);});
+  return ()=>{cancelled=true;};
+ },[draft?.title,draft?.materials]);
  const [phase,setPhase]=useState<"dictating"|"review"|"saving">("dictating");
  const [message,setMessage]=useState(ja?"料理名・食材・分量・仕入単価を話してください。":"Describe the recipe, quantities and purchase prices.");
  const [manual,setManual]=useState("");
@@ -374,6 +379,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  function showReview(traceId=""){
   if(priceLoading){say(ja?"価格調査中ですが、下書きの確認は先にできます。検索結果は確定後に反映されます。":"Price research is running; you can still review the draft now.")} 
   const d=draftRef.current;
+  if(!unitCatalog){say(ja?"単位マスターを取得できません。承認前に再試行してください。":"Unit catalog is unavailable; retry before approval.");return;}
   if(!d){say(dataTurns.current.length?(ja?"最新の入力を解釈中、または解釈に失敗しています。解析が終わるまで保存しません。":"The latest input is processing or failed. Saving is blocked until analysis finishes."):(ja?"新しいレシピを登録します。料理名・食材・分量・仕入単価を話してください。":"Describe the dish, ingredients, quantities and purchase prices."));return;}
   const mode=saveModeFor(d);
   if(!mode){
@@ -398,14 +404,17 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  async function save(){
   const d=draftRef.current;
   const mode=reviewMode.current;
-  if(phaseRef.current!=="review"||!d||!mode||reviewed.current!==d||saveModeFor(d)!==mode)return;
+  if(phaseRef.current!=="review"||!d||!mode||reviewed.current!==d||saveModeFor(d)!==mode||!unitCatalog)return;
+  const allUnits=[...new Set(d.materials.flatMap(m=>[m.unit,m.price_unit]).filter(Boolean))];
+  const unknown=allUnits.filter(symbol=>!unitCatalog.some(u=>[u.symbol,...(u.aliases||[])].some(a=>a.toLocaleLowerCase()===symbol.toLocaleLowerCase())));
+  const unit_candidates=unknown.map(symbol=>({symbol,dimension:"other"}));
   voice.cancel();setStage("saving");if(!draining.current)setBusy(true);say("承認された内容を保存しています…");
   if(!requestId.current)requestId.current=crypto.randomUUID();
   // Persist the stable idempotency key before invoking the remote mutation.
   try{await saveWorkingDraft({draft:d,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current});}
   catch{setStage("dictating");say("保存IDを端末に保持できません。安全のため登録を中止しました。");return;}
   try{
-   const recipe=await request<Recipe>("/api/recipes/full",{method:"POST",body:JSON.stringify({request_id:requestId.current,title:d.title,materials:toSaveMaterials(d),selling_price_jpy:d.selling_price_jpy||null})});
+   const recipe=await request<Recipe>("/api/recipes/full",{method:"POST",body:JSON.stringify({request_id:requestId.current,title:d.title,materials:toSaveMaterials(d),unit_candidates,selling_price_jpy:d.selling_price_jpy||null})});
    if(!alive.current)return;
    // Associate the optional preview only after the formal save succeeded.
    // Local cache failure must never retry or roll back the confirmed recipe.
@@ -658,6 +667,10 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     return <p role="status" aria-live="polite">{hasResult?(ja?"検索結果を取得しました。価格の詳細・出典で内容を確認できます。":"Search results ready. Check price details and sources."):(ja?"価格を確認できませんでした。下書きは保持しています。":"Could not confirm prices. The draft is kept.")}</p>;
    })()}
    <h3>{ja?"未保存の下書き：":"Unsaved draft: "}{draft.title||(ja?"料理名未設定":"Untitled recipe")}</h3>
+   {!unitCatalog&&<p role="status">{ja?"単位マスターを照合中です。保存は照合後に可能になります。":"Loading the unit master; approval is blocked until ready."}</p>}
+   {unitCatalog&&(()=>{const names=[...new Set(draft.materials.flatMap(m=>[m.unit,m.price_unit]).filter(Boolean))];
+     const unknown=names.filter(symbol=>!unitCatalog.some(u=>[u.symbol,...(u.aliases||[])].some(a=>a.toLocaleLowerCase()===symbol.toLocaleLowerCase())));
+     return unknown.length?<p>{ja?"レシピ承認時に新規単位として登録：":"New units created only with recipe approval: "}{unknown.join("、")}</p>:null;})()}
    {draft.interpretations?.map((item,index)=><p key={index}>料理の文脈からの解釈案：{item.source} → {item.suggestion}（{item.reason}）</p>)}
    {(()=>{
     let partial=0,missing=0;
