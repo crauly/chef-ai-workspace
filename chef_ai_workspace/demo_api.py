@@ -610,9 +610,14 @@ def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(404, "Recipe not found or inaccessible") from exc
-    return {"recipe": _displayed_recipe(owner, repository, saved.recipe),
-            "revision": saved.resulting_revision,
-            "replayed": saved.replayed}
+    response = {"recipe": _displayed_recipe(owner, repository, saved.recipe),
+                "revision": saved.resulting_revision, "replayed": saved.replayed}
+    if body.ledger:
+        response["saved_ingredient_ids"] = [
+            str(entry.id) for entry in body.ledger
+            if entry.kind == "new" and entry.id is not None
+        ]
+    return response
 
 
 @router.get("/recipes/{recipe_id}/cost")
