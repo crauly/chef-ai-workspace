@@ -122,6 +122,8 @@ def prepare_mutation(recipe: Recipe, proposal: Proposal, *, user_confirmed: bool
                     UUID(supplier_id)
                 except (ValueError, TypeError, AttributeError) as exc:
                     raise MutationError("Invalid supplier ID") from exc
+            if supplier_id is not None:
+                supplier_id = str(UUID(supplier_id))
             candidate = replace(candidate, materials=tuple(
                 replace(m, supplier_id=supplier_id)
                 if m.id == op["material_id"] else m for m in candidate.materials))
