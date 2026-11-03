@@ -605,10 +605,9 @@ def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
             return {"recipe": shown, "revision": saved.resulting_revision,
                     "replayed": saved.replayed,
                     "saved_ingredient_ids": list(saved.saved_ingredient_ids)}
-        saved = save_validated_mutation(
-            owner_id=owner, trusted_user_confirmed=True,
-            proposal=proposal, repository=repository,
-            save_version=body.save_version)
+        from .recipe_crud import save_recipe_crud
+        saved = save_recipe_crud(owner_id=owner, proposal=proposal,
+                                 repository=repository, save_version=body.save_version)
     except MutationError as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
