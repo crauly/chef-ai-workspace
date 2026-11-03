@@ -2,7 +2,16 @@
 import unittest
 from dataclasses import replace
 from decimal import Decimal
-from chef_ai_workspace import Ingredient, MaterialLine, PriceQuote, Recipe, TrackedValue, calculate_cost
+from chef_ai_workspace import Ingredient, MaterialLine, PriceQuote, Recipe, TrackedValue, calculate_cost as _calculate_cost
+
+
+# Fixture-defined unit master ratios, not an application whitelist.
+UNITS = {
+    "g": ("mass", Decimal("1")), "kg": ("mass", Decimal("1000")),
+    "ml": ("volume", Decimal("1")), "L": ("volume", Decimal("1000")),
+}
+def calculate_cost(recipe, catalog=None):
+    return _calculate_cost(recipe, catalog, UNITS)
 
 
 def known(value, status="confirmed", origin="user"):
