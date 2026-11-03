@@ -71,8 +71,10 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True):
         quote = line.price_override
         # Only an explicit price edit may change the master; pre-existing
         # legacy line quotes must not silently overwrite a shared master.
-        price_edited = any(op.get("op") in ("set_material_price", "add_material")
-                           and op.get("material_id") == line.id for op in proposal.operations)
+        price_edited = any(
+            (op.get("op") in ("set_material_price", "add_material")
+             or (op.get("op") == "link_ingredient" and op.get("price_mode") == "override"))
+            and op.get("material_id") == line.id for op in proposal.operations)
         if price_edited and quote is not None:
             effective[ingredient_id] = Ingredient(ingredient_id, ingredient.name, quote)
         entry = entries.setdefault(key, {"id": ingredient_id, "name": ingredient.name,
