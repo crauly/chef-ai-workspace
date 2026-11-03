@@ -435,11 +435,58 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
                 user_confirmed=True)
         except (MutationError, ValueError, TypeError, KeyError) as exc:
             raise HTTPException(422, "Invalid spoken recipe values") from exc
+    # Product V1: every recipe row references a concrete owner Ingredient.
+    # A recipe never owns purchase prices; approved quotes update the same
+    # master transaction and all linked recipes see the updated current cost.
+    from .models import Ingredient
+    finder=getattr(repository,"find_owned_ingredients_exact",None)
+    if not callable(finder):
+        raise HTTPException(503,"Ingredient master lookup unavailable")
+    reader=getattr(repository,"load_owned_ingredients",None)
+    prepared_lines=[]
+    catalog={}
+    entries_by_name={}
+    for line in recipe.materials:
+        name=(line.material_name.value or "").strip()
+        key=name.casefold()
+        entry=entries_by_name.get(key)
+        if entry is None:
+            matches=finder(owner,name)
+            if len(matches)>1:
+                raise HTTPException(409,"Ambiguous ingredient identity; select a master")
+            if matches:
+                raw=matches[0]
+                ing_id=str(raw["id"])
+                if not callable(reader):
+                    raise HTTPException(503,"Ingredient master lookup unavailable")
+                saved_catalog=reader(owner,[ing_id])
+                ingredient=saved_catalog.get(ing_id)
+                if ingredient is None:
+                    raise HTTPException(409,"Ingredient master disappeared")
+                existing_price=ingredient.current_price
+            else:
+                ing_id=str(uuid4())
+                existing_price=None
+            entry={"id":ing_id,"name":name,"current_price":None}
+            entries_by_name[key]=entry
+            catalog[ing_id]=Ingredient(ing_id,name,existing_price)
+        ing_id=entry["id"]
+        quote=line.price_override
+        if quote is not None:
+            if entry["current_price"] is not None and entry["current_price"]!=asdict(quote):
+                raise HTTPException(422,"Conflicting quotes for one shared ingredient")
+            entry["current_price"]=asdict(quote)
+            catalog[ing_id]=Ingredient(ing_id,name,quote)
+        prepared_lines.append(replace(line,ingredient_id=ing_id,
+                                      price_mode="inherit",price_override=None))
+    recipe=replace(recipe,materials=tuple(prepared_lines))
+    ingredient_entries=tuple(entries_by_name.values())
     # The Supabase create_owned_recipe RPC requires initial revision 0.
     recipe = replace(recipe, revision=0)
     try:
-        snapshot = _json(asdict(calculate_cost(recipe, units=unit_factor_catalog(known_units))))
-        repository.create_owned_recipe(owner, recipe, snapshot, unit_candidates=new_units)
+        snapshot = _json(asdict(calculate_cost(recipe, catalog, unit_factor_catalog(known_units))))
+        repository.create_owned_recipe(owner, recipe, snapshot, unit_candidates=new_units,
+                                       ingredient_entries=ingredient_entries)
     except ValueError as exc:
         raise HTTPException(409, "Recipe already exists") from exc
     # The transaction resolves canonical unit IDs in the stored state.
