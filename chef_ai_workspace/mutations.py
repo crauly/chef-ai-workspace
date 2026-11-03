@@ -84,6 +84,21 @@ def prepare_mutation(recipe: Recipe, proposal: Proposal, *, user_confirmed: bool
             line = MaterialLine(id=op["material_id"], material_name=name,
                                 quantity=quantity, unit=unit, price_override=None)
             candidate = replace(candidate, materials=candidate.materials + (line,))
+        elif kind == "set_material_name":
+            _fields(op, {"op", "material_id", "value"})
+            matches = [m for m in candidate.materials if m.id == op["material_id"]]
+            if len(matches) != 1:
+                raise MutationError("Unknown material ID")
+            name = _value(op["value"], user_confirmed)
+            candidate = replace(candidate, materials=tuple(
+                replace(m, material_name=name) if m.id == op["material_id"] else m
+                for m in candidate.materials))
+        elif kind == "remove_material":
+            _fields(op, {"op", "material_id"})
+            if sum(m.id == op["material_id"] for m in candidate.materials) != 1:
+                raise MutationError("Unknown material ID")
+            candidate = replace(candidate, materials=tuple(
+                m for m in candidate.materials if m.id != op["material_id"]))
         elif kind == "set_material_price":
             _fields(op, {"op", "material_id", "price_jpy", "price_quantity", "price_unit"})
             if not any(m.id == op["material_id"] for m in candidate.materials):
