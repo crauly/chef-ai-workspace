@@ -39,6 +39,12 @@ export default function Library(){
  const [food,setFood]=useState(""),[qty,setQty]=useState(""),[unit,setUnit]=useState(""),[price,setPrice]=useState(""),[priceQty,setPriceQty]=useState("1"),[priceUnit,setPriceUnit]=useState("");
  const [units,setUnits]=useState<Array<{id:string;symbol:string;dimension:string;aliases:string[]}>>([]);
  const [unitsLoaded,setUnitsLoaded]=useState(false);
+ const [suppliers,setSuppliers]=useState<Array<{id:string;name:string}>>([]);
+ useEffect(()=>{let active=true;
+   request<{items:Array<{id:string;name:string}>}>("/api/suppliers?page_size=100")
+     .then(result=>{if(active)setSuppliers(result.items);}).catch(()=>{});
+   return()=>{active=false;};
+ },[]);
  useEffect(()=>{let mounted=true;
    request<{items:Array<{id:string;symbol:string;dimension:string;aliases:string[]}>}>("/api/units")
     .then(result=>{if(mounted){setUnits(result.items);setUnitsLoaded(true);}})
@@ -55,6 +61,7 @@ export default function Library(){
  const [editName,setEditName]=useState("");
  const [editQty,setEditQty]=useState(""),[editUnit,setEditUnit]=useState("");
  const [editPrice,setEditPrice]=useState(""),[editPriceQty,setEditPriceQty]=useState("1"),[editPriceUnit,setEditPriceUnit]=useState("");
+ const [editSupplier,setEditSupplier]=useState("");
  const [aiOpen,setAiOpen]=useState(false);
  const [voiceEditRequest,setVoiceEditRequest]=useState(0);
  const [sellingPriceEdit,setSellingPriceEdit]=useState("");
@@ -129,7 +136,8 @@ export default function Library(){
          if(op.op==="set_material_name"&&(!material||material.material_name.value!==op.value))throw new Error("Ingredient name not persisted");
          if(op.op==="remove_material"&&material)throw new Error("Ingredient removal not persisted");
          if(op.op==="set_material_quantity"&&(!material||material.quantity.value!==op.value||material.unit!==op.unit))throw new Error("Quantity not persisted");
-         if(op.op==="set_material_price"&&(!material||material.price_override?.amount_jpy.value!==op.price_jpy))throw new Error("Price not persisted");
+         if(op.op==="set_material_price"&&(!material||material.effective_price?.amount_jpy.value!==op.price_jpy))throw new Error("Price not persisted");
+         if(op.op==="set_material_supplier"&&(!material||(material.supplier_id||"")!==op.supplier_id))throw new Error("Supplier not persisted");
          if(op.op==="set_selling_price"&&persisted.selling_price_jpy.value!==op.value_jpy)throw new Error("Selling price not persisted");
        }
        setSelected(persisted);setError("");
@@ -153,9 +161,10 @@ export default function Library(){
    if(!line||busy)return;
    setEditName(line.material_name.value||"");
    setEditQty(line.quantity.value||"");setEditUnit(line.unit||"g");
-   setEditPrice(line.price_override?.amount_jpy.value||"");
-   setEditPriceQty(line.price_override?.per_quantity||"1");
-   setEditPriceUnit(line.price_override?.per_unit||line.unit||"g");
+   setEditSupplier(line.supplier_id||"");
+   setEditPrice(line.effective_price?.amount_jpy.value||line.price_override?.amount_jpy.value||"");
+   setEditPriceQty(line.effective_price?.per_quantity||line.price_override?.per_quantity||"1");
+   setEditPriceUnit(line.effective_price?.per_unit||line.price_override?.per_unit||line.unit||"g");
    setConfirmQty(false);setConfirmPrice(false);setEditingId(materialId);
  }
  async function submitEdit(){
@@ -165,10 +174,12 @@ export default function Library(){
    if(editName.trim()!==line.material_name.value)operations.push({op:"set_material_name",material_id:line.id,value:editName.trim()});
    if((editQty.trim()&&editQty.trim()!==line.quantity.value)||editUnit!==(line.unit||"g")||(confirmQty&&line.quantity.status==="assumed"))
      operations.push({op:"set_material_quantity",material_id:line.id,value:editQty.trim()||line.quantity.value||"",unit:editUnit});
-   if((editPrice.trim()&&editPrice.trim()!==(line.price_override?.amount_jpy.value||""))||editPriceQty!==(line.price_override?.per_quantity||"1")||editPriceUnit!==(line.price_override?.per_unit||line.unit||"g")||(confirmPrice&&line.price_override?.amount_jpy.status==="assumed"))
+   if((editPrice.trim()&&editPrice.trim()!==(line.effective_price?.amount_jpy.value||line.price_override?.amount_jpy.value||""))||editPriceQty!==(line.effective_price?.per_quantity||line.price_override?.per_quantity||"1")||editPriceUnit!==(line.effective_price?.per_unit||line.price_override?.per_unit||line.unit||"g")||(confirmPrice&&line.price_override?.amount_jpy.status==="assumed"))
      operations.push({op:"set_material_price",material_id:line.id,
-       price_jpy:editPrice.trim()||line.price_override?.amount_jpy.value||"",
+       price_jpy:editPrice.trim()||line.effective_price?.amount_jpy.value||line.price_override?.amount_jpy.value||"",
        price_quantity:editPriceQty,price_unit:editPriceUnit});
+   if(editSupplier!==(line.supplier_id||""))
+     operations.push({op:"set_material_supplier",material_id:line.id,supplier_id:editSupplier});
    if(!operations.length){setEditingId(null);return;}
    if(await saveOperations(operations))setEditingId(null);
  }
@@ -241,6 +252,7 @@ export default function Library(){
      <label>{locale==="ja"?"食材名":"Ingredient name"}<input value={editName} onChange={e=>setEditName(e.target.value)} disabled={busy}/></label>
      <label>{locale==="ja"?"数量":"Quantity"}<input inputMode="decimal" value={editQty} onChange={e=>setEditQty(e.target.value)} disabled={busy}/></label>
      <label>Unit<select value={editUnit} onChange={e=>setEditUnit(e.target.value)} disabled={busy}><option value="">—</option>{unitChoices(editUnit).map(symbol=><option key={symbol} value={symbol}>{symbol}</option>)}</select></label>
+     <label>{locale==="ja"?"仕入先":"Supplier"}<select value={editSupplier} onChange={e=>setEditSupplier(e.target.value)} disabled={busy}><option value="">—</option>{suppliers.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
      <label>{locale==="ja"?"仕入単価（円）":"Price (JPY)"}<input inputMode="decimal" value={editPrice} onChange={e=>setEditPrice(e.target.value)} disabled={busy}/></label>
      <label>{locale==="ja"?"単価の基準数量":"Price per quantity"}<input inputMode="decimal" value={editPriceQty} onChange={e=>setEditPriceQty(e.target.value)} disabled={busy}/></label>
      <label>Price unit<select value={editPriceUnit} onChange={e=>setEditPriceUnit(e.target.value)} disabled={busy}><option value="">—</option>{unitChoices(editPriceUnit).map(symbol=><option key={symbol} value={symbol}>{symbol}</option>)}</select></label>
