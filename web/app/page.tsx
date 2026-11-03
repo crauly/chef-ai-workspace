@@ -123,9 +123,9 @@ export default function Library(){
  }
  async function addFood(e:React.FormEvent){e.preventDefault();
    if(!food.trim()||!qty.trim()||!price.trim()||!priceQty.trim())return;
-   await saveOperations([{op:"add_material",material_id:crypto.randomUUID(),name:food.trim(),
+   const saved=await saveOperations([{op:"add_material",material_id:crypto.randomUUID(),name:food.trim(),
      quantity:qty,unit,price_jpy:price,price_quantity:priceQty,price_unit:priceUnit}]);
-   setFood("");setQty("");setPrice("");
+   if(saved){setFood("");setQty("");setPrice("");}
  }
  function openEdit(materialId:string){
    const line=selected?.materials.find(m=>m.id===materialId);
