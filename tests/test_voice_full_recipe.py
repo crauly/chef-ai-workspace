@@ -9,6 +9,7 @@ class Repository:
         self.stored = {}
         self.snapshots = {}
         self.writes = 0
+        self.ingredients = {}
     def load_owned_recipe(self, owner_id, recipe_id):
         key = (owner_id, recipe_id)
         if key not in self.stored:
@@ -17,7 +18,19 @@ class Repository:
     def list_owned_units(self, owner_id):
         return [{"id": f"unit-{symbol}", "symbol": symbol, "dimension": "other", "aliases": []}
                 for symbol in ("g", "kg", "ml", "L")]
-    def create_owned_recipe(self, owner_id, recipe, snapshot, unit_candidates=()):
+    def find_owned_ingredients_exact(self, owner_id, name):
+        return [{"id":id,"name":v.name} for id,v in self.ingredients.items()
+                if v.name.casefold()==name.casefold()]
+    def load_owned_ingredients(self, owner_id, ids):
+        return {id:self.ingredients[id] for id in ids if id in self.ingredients}
+    def create_owned_recipe(self, owner_id, recipe, snapshot, unit_candidates=(), ingredient_entries=()):
+        from chef_ai_workspace.models import Ingredient
+        from chef_ai_workspace.supabase_adapter import _quote
+        for entry in ingredient_entries:
+            existing=self.ingredients.get(entry["id"])
+            current=_quote(entry["current_price"]) if entry["current_price"] else (
+                existing.current_price if existing else None)
+            self.ingredients[entry["id"]]=Ingredient(entry["id"],entry["name"],current)
         key = (owner_id, recipe.id)
         if key in self.stored:
             raise ValueError("Duplicate")
