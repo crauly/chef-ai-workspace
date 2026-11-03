@@ -44,7 +44,7 @@ class SupabaseConflictTests(unittest.TestCase):
         return Query({"state": asdict(self.recipe)} if name == "recipes" else [])
 
     def rpc(self, name, params):
-        self.assertEqual(name, "commit_recipe_revision")
+        self.assertEqual(name, "commit_recipe_crud")
         self.calls += 1
         return Query(error=self.error)
 
@@ -74,8 +74,8 @@ class SupabaseConflictTests(unittest.TestCase):
                 self.error = APIError({"code": code, "message": message, "details": None, "hint": None})
                 self.assertEqual(self.post().status_code, 500)
                 with self.assertRaises(APIError) as caught:
-                    SupabasePersistence(self).commit_recipe_revision(owner_id=self.owner,
+                    SupabasePersistence(self).commit_recipe_crud(owner_id=self.owner,
                         recipe_id=self.rid, request_id=str(uuid4()), base_revision=0,
                         state=asdict(self.recipe), title="After", cost_snapshot={},
-                        payload_hash="test", save_version=True)
+                        payload_hash="test", save_version=True, ingredient_entries=())
                 self.assertIs(caught.exception, self.error)
