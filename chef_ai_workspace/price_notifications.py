@@ -46,7 +46,8 @@ def check_transition(current: str, nxt: str) -> None:
 
 
 def decide_notification(base: PriceObservation | None,
-                        candidate: PriceObservation) -> tuple[bool, ComparisonResult | None, list[str]]:
+                        candidate: PriceObservation,
+                        units=None) -> tuple[bool, ComparisonResult | None, list[str]]:
     """Decide whether an explicit confirmation should notify.
 
     Returns (should_notify, comparison, reasons). No basis, a foreign
@@ -57,7 +58,7 @@ def decide_notification(base: PriceObservation | None,
     """
     if base is None:
         return False, None, ["no adopted price basis"]
-    comparison = compare_observations(base, candidate)
+    comparison = compare_observations(base, candidate, units)
     if not comparison.comparable:
         return False, comparison, list(comparison.reasons)
     if candidate.currency != "JPY" or base.currency != "JPY":
