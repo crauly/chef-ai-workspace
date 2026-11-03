@@ -425,18 +425,17 @@ test("ledger lookup failures stay distinct from no-history and never fail the dr
     ref = await draftWithLedger(async () => Response.json({query: "豚バラ肉", candidates: []}));
     expect(ref.status).toBe("none");
     expect(ref.text).toContain("仕入履歴がありません");
-    // Missing connection config -> unavailable, and the model call still runs.
+    // Missing unit catalog connection fails closed before invoking the model.
     delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
     let museCalled = false;
     global.fetch = unitCatalogFetch((async () => { museCalled = true; return museOk(); }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["豚バラ肉100g、平均価格を調べて"]}));
-    expect(res.status).toBe(200);
-    expect(museCalled).toBe(true);
-    expect((await res.json()).price_references[0].status).toBe("unavailable");
+    expect(res.status).toBe(503);
+    expect(museCalled).toBe(false);
     // Failure entries carry no prices and block nothing: notes stay empty.
     expect((await parseRecipe(authed("http://localhost/api/voice-recipe",
-      {turns: ["豚バラ肉100g"]})) ).status).toBe(200);
+      {turns: ["豚バラ肉100g"]})) ).status).toBe(503);
   } finally {
     global.fetch = previousFetch;
     if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
