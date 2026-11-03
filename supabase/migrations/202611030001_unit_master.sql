@@ -5,6 +5,7 @@ create table public.units (
  owner_id uuid not null references auth.users(id) on delete cascade,
  symbol text not null check (length(btrim(symbol)) between 1 and 32),
  dimension text not null check (dimension in ('mass','volume','count','other')),
+ base_factor numeric check (base_factor > 0),
  aliases text[] not null default '{}',
  created_at timestamptz not null default now(),
  updated_at timestamptz not null default now(),
@@ -125,7 +126,7 @@ grant execute on function public.create_owned_recipe(uuid,uuid,text,jsonb,jsonb,
 -- symbol as an alias so existing recipe snapshots remain readable.
 create or replace function public.update_owned_unit(
  p_owner_id uuid, p_unit_id uuid, p_symbol text,
- p_dimension text, p_aliases text[]
+ p_dimension text, p_base_factor numeric, p_aliases text[]
 ) returns boolean
 language plpgsql security definer set search_path = ''
 as $$
@@ -136,6 +137,7 @@ begin
  if p_owner_id is null or p_unit_id is null
     or length(v_symbol) not between 1 and 32
     or p_dimension not in ('mass','volume','count','other')
+    or (p_base_factor is not null and p_base_factor <= 0)
     or cardinality(v_aliases)>20
     or exists(select 1 from unnest(v_aliases) a
               where length(btrim(a)) not between 1 and 32)
@@ -167,11 +169,11 @@ begin
      )
  ) then raise exception 'Unit identity collision'; end if;
  update public.units set symbol=v_symbol,dimension=p_dimension,
-                         aliases=v_aliases,updated_at=now()
+                         base_factor=p_base_factor,aliases=v_aliases,updated_at=now()
  where owner_id=p_owner_id and id=p_unit_id;
  return true;
 end; $$;
-revoke all on function public.update_owned_unit(uuid,uuid,text,text,text[])
+revoke all on function public.update_owned_unit(uuid,uuid,text,text,numeric,text[])
  from public,anon,authenticated;
 grant execute on function public.update_owned_unit(uuid,uuid,text,text,text[])
  to service_role;
