@@ -4,6 +4,22 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Mapping
 from .models import Ingredient, Recipe, PriceQuote, decimal
 
+def unit_factor_catalog(rows: list[dict]) -> dict[str, tuple[str, Decimal | None]]:
+    """Index owned Unit Master IDs and terms; never invent exchange ratios."""
+    values: dict[str, tuple[str, Decimal | None]] = {}
+    for row in rows:
+        factor_raw = row.get("base_factor")
+        factor = Decimal(str(factor_raw)) if factor_raw is not None else None
+        if factor is not None and (not factor.is_finite() or factor <= 0):
+            raise ValueError("Invalid master unit factor")
+        definition = (row["dimension"], factor)
+        for key in [row["id"], row["symbol"], *(row.get("aliases") or [])]:
+            if key in values and values[key] != definition:
+                raise ValueError("Conflicting unit identity")
+            values[key] = definition
+    return values
+
+
 def convert_quantity(
     qty: Decimal, from_unit: str, to_unit: str,
     units: Mapping[str, tuple[str, Decimal | None]] | None = None,
