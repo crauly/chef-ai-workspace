@@ -257,6 +257,8 @@ class SupabasePersistence:
         except APIError as exc:
             if str(exc.code) == "23503":
                 raise ValueError("Supplier is used by purchase offers") from exc
+            if exc.code == "P0001" and exc.message == "Supplier is used by recipe materials":
+                raise ValueError("Supplier is used by recipe materials") from exc
             raise
 
     def create_owned_offer(self, owner_id, ingredient_id, supplier_id=None,
