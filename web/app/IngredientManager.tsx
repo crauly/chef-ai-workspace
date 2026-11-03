@@ -128,8 +128,9 @@ export default function IngredientManager({locale}:{locale:Locale}){
  const pages=Math.max(1,Math.ceil(ordered.length/pageSize));
  const effectivePage=Math.min(page,pages);
  const visible=ordered.slice((effectivePage-1)*pageSize,effectivePage*pageSize);
+ const formatAmount=(raw:string)=>{const [whole,...fraction]=raw.split(".");return whole.replace(/\\B(?=(\\d{3})+(?!\\d))/g,",")+(fraction.length?"."+fraction.join("."):"");};
  const priceLabel=(item:Ingredient)=>item.current_price?.amount_jpy?.value!=null
-  ? `¥${Number(item.current_price.amount_jpy.value).toLocaleString("ja-JP")} / ${item.current_price.per_quantity??""} ${item.current_price.per_unit??""}`
+  ? `¥${formatAmount(item.current_price.amount_jpy.value)} / ${item.current_price.per_quantity??""} ${item.current_price.per_unit??""}`
   : (ja?"未設定":"Not set");
  const suppliers=(item:Ingredient)=>supplierMap===null
   ? (ja?"確認できません":"Unavailable")
