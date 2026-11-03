@@ -163,7 +163,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  function receive(text:string,meta?:VoiceCaptureMeta){
   if(!text.trim())return;
   if(registration.current?.isSaving()){feedback("承認された下書きを保存中です。完了後に続きをお願いします。",true);return;}
-  const captured:VoiceCaptureMeta={reviewEpoch:meta?.reviewEpoch??boundary.current,traceId:meta?.traceId??newTrace()};
+  const captured:VoiceCaptureMeta={reviewEpoch:meta?.reviewEpoch??boundary.current,traceId:meta?.traceId??newTrace(),source:meta?.source};
   // Approval/navigation from an earlier mode must never affect a new target.
   if(captured.reviewEpoch<modeBoundary.current&&voiceCommand(text)!=="data"){feedback("切り替え前の承認は適用していません。現在のモードを確認して、もう一度お願いします。",true);return;}
   if(currentMode.current==="edit"&&voiceCommand(text)==="data"&&!voiceNavigation(text))editor.current?.invalidate();
@@ -245,7 +245,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    {supplierMemo&&<p className="muted">{supplierMemo}</p>}
    <p aria-live="polite">{micRecording?(locale==="ja"?"聞き取り中… ":"Listening… "):""}{micBusy?(locale==="ja"?"音声を文字にしています… ":"Transcribing… "):""}{routing?(locale==="ja"?"操作を処理中… ":"Processing… "):""}{message}</p>
    {micError&&<p role="alert">{micError}</p>}
-   <form onSubmit={event=>{event.preventDefault();receive(manual);setManual("");}}>
+   <form onSubmit={event=>{event.preventDefault();receive(manual,{reviewEpoch:boundary.current,source:"manual"});setManual("");}}>
     <input aria-label={locale==="ja"?"音声認識できない場合の入力":"Manual input when voice recognition is unavailable"} value={manual} onChange={event=>setManual(event.target.value)} placeholder={locale==="ja"?"音声認識できないときの補助入力":"Type when voice recognition is unavailable"}/>
     <button type="submit" disabled={!manual.trim()}>{locale==="ja"?"反映":"Apply"}</button>
    </form>
