@@ -12,8 +12,17 @@ from fastapi.testclient import TestClient
 
 from chef_ai_workspace.api import app
 from chef_ai_workspace.axis_sourcing import (
-    AxisEvaluationError, assign_axes, build_axis_prompt,
+    AxisEvaluationError, assign_axes as _assign_axes, build_axis_prompt,
     parse_axis_evaluations)
+
+from decimal import Decimal
+
+UNIT_MASTER = {"g": ("mass", Decimal("1")),
+               "kg": ("mass", Decimal("1000")),
+               "ml": ("volume", Decimal("1"))}
+
+def assign_axes(**kwargs):
+    return _assign_axes(**kwargs, unit_definitions=UNIT_MASTER)
 
 OWNER_1 = "11111111-1111-1111-1111-111111111111"
 OWNER_2 = "22222222-2222-2222-2222-222222222222"
@@ -204,6 +213,10 @@ class AssignTests(unittest.TestCase):
 
 
 class FakeLedger:
+    def list_owned_units(self, owner):
+        return [{"id":"g-id","symbol":"g","dimension":"mass","base_factor":"1","aliases":[]},
+                {"id":"kg-id","symbol":"kg","dimension":"mass","base_factor":"1000","aliases":[]},
+                {"id":"ml-id","symbol":"ml","dimension":"volume","base_factor":"1","aliases":[]}]
     """Minimal owner-scoped read surface with write traps and counters."""
 
     def __init__(self, owner):

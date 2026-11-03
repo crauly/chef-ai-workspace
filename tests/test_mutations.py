@@ -1,4 +1,5 @@
 import unittest
+from decimal import Decimal
 from dataclasses import replace
 from chef_ai_workspace import MaterialLine, PriceQuote, Recipe, TrackedValue
 from chef_ai_workspace.mutations import MutationError, Proposal, prepare_mutation
@@ -24,7 +25,9 @@ class MutationTests(unittest.TestCase):
 
     def test_add_material_and_price_recompute(self):
         from uuid import uuid4
-        from chef_ai_workspace.costing import calculate_cost
+        from chef_ai_workspace.costing import calculate_cost as _calculate_cost
+        unit_catalog={"g":("mass",Decimal("1")),"kg":("mass",Decimal("1000"))}
+        calculate_cost=lambda recipe:_calculate_cost(recipe,units=unit_catalog)
         mid = str(uuid4())
         r = fixture()
         created = apply(r, {"op":"add_material","material_id":mid,"name":"片栗粉",

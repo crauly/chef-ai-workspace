@@ -15,6 +15,9 @@ class FakeRepo:
         self.recipes = {}
         self.catalog = {}
         self.receipts = {}
+    def list_owned_units(self, owner_id):
+        return [{"id": "test-g", "symbol": "g", "dimension": "mass", "aliases": []}]
+
     def load_owned_recipe(self, owner_id, recipe_id):
         try:
             return self.recipes[recipe_id]
@@ -24,9 +27,22 @@ class FakeRepo:
         return dict(self.catalog)
     def load_owned_ingredients(self, owner_id, ids):
         return {i: self.catalog[i] for i in ids if i in self.catalog}
+    def find_owned_ingredients_exact(self, owner_id, name):
+        return [{"id": row.id, "name": row.name}
+                for row in self.catalog.values() if row.name.casefold()==name.casefold()]
     def get_mutation_receipt(self, owner_id, request_id):
         return self.receipts.get(request_id)
-    def create_owned_recipe(self, owner, recipe, snapshot):
+    def find_owned_ingredients_exact(self, owner, name):
+        return [{"id":id,"name":v.name} for id,v in self.catalog.items()
+                if v.name.casefold()==name.casefold()]
+    def create_owned_recipe(self, owner, recipe, snapshot, unit_candidates=(), ingredient_entries=()):
+        from chef_ai_workspace.models import Ingredient
+        from chef_ai_workspace.supabase_adapter import _quote
+        for entry in ingredient_entries:
+            existing=self.catalog.get(entry["id"])
+            price=_quote(entry["current_price"]) if entry["current_price"] else (
+                existing.current_price if existing else None)
+            self.catalog[entry["id"]]=Ingredient(entry["id"],entry["name"],price)
         if recipe.id in self.recipes:
             raise ValueError("exists")
         from dataclasses import replace
@@ -68,27 +84,19 @@ class DemoRouteTests(unittest.TestCase):
             create_complete_demo_recipe(body, ctx(repo))
         self.assertEqual(repo.recipes, {})
 
-    def test_confirm_with_ledger_registers_and_links(self):
-        from chef_ai_workspace.demo_api import LedgerEntryBody
+    def test_voice_save_registers_shared_ingredient_and_links(self):
         repo = FakeRepo()
         body = CompleteRecipeBody(request_id=uuid4(), title="パスタ",
-                                  materials=[{"name": "パスタ", "quantity": "100",
-                                              "unit": "g", "price_jpy": "150",
-                                              "price_quantity": "100",
-                                              "price_unit": "g"}])
+                                  materials=[{"name":"パスタ","quantity":"100",
+                                              "unit":"g","price_jpy":"150",
+                                              "price_quantity":"100","price_unit":"g"}])
         created = create_complete_demo_recipe(body, ctx(repo))
-        line_id = created["materials"][0]["id"]
-        new_id = str(uuid4())
-        confirm = ConfirmChangeBody(
-            base_revision=0, request_id=uuid4(),
-            operations=[{"op": "link_ingredient", "material_id": line_id,
-                         "ingredient_id": new_id, "price_mode": "override",
-                         "price_jpy": "150", "price_quantity": "100",
-                         "price_unit": "g"}],
-            ledger=[LedgerEntryBody(kind="new", id=new_id, name="パスタ")])
-        out = confirm_demo_change(created["id"], confirm, ctx(repo))
-        self.assertEqual(out["saved_ingredient_ids"], [new_id])
-        self.assertFalse(out["replayed"])
+        self.assertEqual(len(repo.catalog), 1)
+        line = created["materials"][0]
+        self.assertEqual(line["price_mode"], "inherit")
+        self.assertIsNone(line["price_override"])
+        self.assertIn(line["ingredient_id"], repo.catalog)
+        self.assertEqual(repo.catalog[line["ingredient_id"]].current_price.amount_jpy.value, "150")
 
     def test_get_recipe_includes_display_names(self):
         repo = FakeRepo()

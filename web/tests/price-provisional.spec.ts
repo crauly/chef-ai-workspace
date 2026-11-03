@@ -4,6 +4,14 @@ import {POST as parseRecipe} from "../app/api/voice-recipe/route";
 import {runGroundedSearch} from "../price-web-search";
 import {detectPriceResearch} from "../price-research-intent";
 
+
+const UNIT_FIXTURE={items:[{id:"00000000-0000-4000-8000-000000000001",symbol:"g",dimension:"mass",base_factor:"1",aliases:[]}]};
+function withUnitCatalog(mock:typeof fetch):typeof fetch{
+ return (async (input:RequestInfo|URL,init?:RequestInit)=>{
+  if(String(input).includes("/demo/units"))return Response.json(UNIT_FIXTURE);
+  return mock(input,init);
+ }) as typeof fetch;
+}
 const PASSWORD = "test-only-preview-password-32-characters";
 function authed(url: string, body: unknown) {
   return new NextRequest(url, {method: "POST",
@@ -145,15 +153,15 @@ test("fallback never averages an unsourced price on another row's URL", async ()
 test("omitted price_research still reaches grounding; provisional stays unapproved", async () => {
   const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
   const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
-  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.FASTAPI_BASE_URL = "http://127.0.0.1:8100"; process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
   process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
   const previousFetch = global.fetch;
   try {
     // Muse omits price_research; the ledger is unreachable (no binding/token).
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/v1/responses")) return Response.json(grounded([CANDIDATE]));
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(MUSE_RECIPE([]))}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["pasta100g、平均仕入価格を調べて"]}));
     expect(res.status).toBe(200);
@@ -161,7 +169,7 @@ test("omitted price_research still reaches grounding; provisional stays unapprov
     // Grounding ran (heuristic trigger), materials untouched, provisional separate.
     expect(body.research_status).toEqual([{material_name: "pasta", material_index: 0,
       request: "pasta100g、平均仕入価格を調べて", trigger: "heuristic",
-      ledger: "unavailable", web: "available", provisional: true}]);
+      ledger: "invalid_response", web: "available", provisional: true}]);
     expect(body.price_references[0].origin).toBe("external");
     expect(body.materials[0].price_jpy).toBe("");
     expect(body.missing).toContain("pastaの仕入単価・基準数量・単位");
@@ -186,22 +194,22 @@ test("omitted price_research still reaches grounding; provisional stays unapprov
 test("grounding failure keeps the draft and reports the stage", async () => {
   const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
   const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
-  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.FASTAPI_BASE_URL = "http://127.0.0.1:8100"; process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
   process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
   const previousFetch = global.fetch;
   try {
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/v1/responses")) return new Response("e", {status: 500});
       return Response.json({choices: [{finish_reason: "stop", message: {content:
         JSON.stringify(MUSE_RECIPE([{material_name: "pasta", request: "r"}]))}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe", {turns: ["pasta100g"]}));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.research_status).toEqual([{material_name: "pasta", material_index: 0,
       request: "r", trigger: "muse",
-      ledger: "unavailable", web: "provider_error", provisional: false}]);
-    expect(body.price_references[0].status).toBe("unavailable");
+      ledger: "invalid_response", web: "provider_error", provisional: false}]);
+    expect(body.price_references[0].status).toBe("invalid_response");
     expect(body.provisional_prices).toEqual([null]);
     expect(body.materials[0].price_jpy).toBe("");
   } finally {
@@ -215,14 +223,16 @@ test("grounding failure keeps the draft and reports the stage", async () => {
 
 test("no request means no search, no provisional, no status", async () => {
   const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
+  const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
+  process.env.FASTAPI_BASE_URL = "http://127.0.0.1:8100"; process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
   process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
   const previousFetch = global.fetch;
   try {
     let responsesCalls = 0;
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/v1/responses")) { responsesCalls++; }
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(MUSE_RECIPE([]))}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe", {turns: ["pasta100g"]}));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -233,13 +243,15 @@ test("no request means no search, no provisional, no status", async () => {
     global.fetch = previousFetch;
     if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
     if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
+    if (base === undefined) delete process.env.FASTAPI_BASE_URL; else process.env.FASTAPI_BASE_URL = base;
+    if (token === undefined) delete process.env.DEMO_ACCESS_TOKEN; else process.env.DEMO_ACCESS_TOKEN = token;
   }
 });
 
 test("named heuristic request survives the entry cap; only saffron is searched", async () => {
   const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
   const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
-  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.FASTAPI_BASE_URL = "http://127.0.0.1:8100"; process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
   process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
   const previousFetch = global.fetch;
   try {
@@ -250,13 +262,13 @@ test("named heuristic request survives the entry cap; only saffron is searched",
       selling_price_jpy: "", notes: [], interpretations: [], price_research: []};
     const saffron = {...CANDIDATE, name: "サフラン"};
     let groundingCalls = 0;
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/v1/responses")) {
         groundingCalls++;
         return Response.json(grounded([saffron]));
       }
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(muse)}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["サフランの平均仕入価格を調べて"]}));
     expect(res.status).toBe(200);
@@ -266,7 +278,7 @@ test("named heuristic request survives the entry cap; only saffron is searched",
     expect(groundingCalls).toBe(1);
     expect(body.research_status).toEqual([{material_name: "サフラン", material_index: 3,
       request: "サフランの平均仕入価格を調べて", trigger: "heuristic",
-      ledger: "unavailable", web: "available", provisional: true}]);
+      ledger: "invalid_response", web: "available", provisional: true}]);
     expect(body.provisional_prices.map((x: {material_name: string} | null) => x?.material_name ?? null))
       .toEqual([null, null, null, "サフラン"]);
   } finally {
@@ -290,7 +302,7 @@ test("http internal binding host reaches the ledger (PR #89 contract kept)", asy
   const previousFetch = global.fetch;
   try {
     let responsesCalls = 0;
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/v1/responses")) {
         responsesCalls++;
         return Response.json(grounded([CANDIDATE]));
@@ -304,7 +316,7 @@ test("http internal binding host reaches the ledger (PR #89 contract kept)", asy
       }
       return Response.json({choices: [{finish_reason: "stop", message: {content:
         JSON.stringify(MUSE_RECIPE([{material_name: "pasta", request: "r"}]))}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe", {turns: ["pasta100g"]}));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -329,7 +341,7 @@ test("http internal binding host reaches the ledger (PR #89 contract kept)", asy
 test("drifted Muse name with material_index still binds the right row", async () => {
   const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
   const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
-  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.FASTAPI_BASE_URL = "http://127.0.0.1:8100"; process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
   process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
   const previousFetch = global.fetch;
   try {
@@ -344,17 +356,17 @@ test("drifted Muse name with material_index still binds the right row", async ()
           price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
       selling_price_jpy: "", notes: [], interpretations: [],
       price_research: [{material_name: "パスタ", material_index: 0, request: "平均価格を調べて"}]};
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/v1/responses")) return Response.json(grounded([CANDIDATE]));
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(muse)}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["ディチェコのパスタ100g、平均価格を調べて"]}));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.research_status).toEqual([{material_name: "パスタ", material_index: 0,
       request: "平均価格を調べて", trigger: "muse",
-      ledger: "unavailable", web: "available", provisional: true}]);
+      ledger: "invalid_response", web: "available", provisional: true}]);
     expect(body.price_references[0].material_name).toBe("パスタ");
     expect(body.price_references[0].material_index).toBe(0);
     const prov = body.provisional_prices[0];
@@ -377,7 +389,7 @@ test("drifted Muse name with material_index still binds the right row", async ()
 test("contradictory index loses to an exact row-name match", async () => {
   const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
   const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
-  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.FASTAPI_BASE_URL = "http://127.0.0.1:8100"; process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
   process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
   const previousFetch = global.fetch;
   try {
@@ -391,10 +403,10 @@ test("contradictory index loses to an exact row-name match", async () => {
           price_jpy: "", price_quantity: "", price_unit: "", supplier: ""}],
       selling_price_jpy: "", notes: [], interpretations: [],
       price_research: [{material_name: "tomato", material_index: 0, request: "r"}]};
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/v1/responses")) return Response.json(grounded([CANDIDATE]));
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(muse)}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["tomato"]}));
     expect(res.status).toBe(200);
@@ -414,15 +426,15 @@ test("contradictory index loses to an exact row-name match", async () => {
 test("bad index falls back to the row name; unknown names stay rowless", async () => {
   const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
   const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
-  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.FASTAPI_BASE_URL = "http://127.0.0.1:8100"; process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
   process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
   const previousFetch = global.fetch;
   async function runWith(research: unknown) {
     const muse = {...MUSE_RECIPE(research)};
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/v1/responses")) return Response.json(grounded([CANDIDATE]));
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(muse)}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe", {turns: ["pasta100g"]}));
     expect(res.status).toBe(200);
     return res.json();

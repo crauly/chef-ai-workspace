@@ -8,13 +8,30 @@ class Repository:
     def __init__(self):
         self.stored = {}
         self.snapshots = {}
+        self.catalog = {}
         self.writes = 0
+        self.ingredients = {}
     def load_owned_recipe(self, owner_id, recipe_id):
         key = (owner_id, recipe_id)
         if key not in self.stored:
             raise ValueError("Not found")
         return self.stored[key]
-    def create_owned_recipe(self, owner_id, recipe, snapshot):
+    def list_owned_units(self, owner_id):
+        return [{"id": f"unit-{symbol}", "symbol": symbol, "dimension": "other", "aliases": []}
+                for symbol in ("g", "kg", "ml", "L")]
+    def find_owned_ingredients_exact(self, owner_id, name):
+        return [{"id":id,"name":v.name} for id,v in self.ingredients.items()
+                if v.name.casefold()==name.casefold()]
+    def load_owned_ingredients(self, owner_id, ids):
+        return {id:self.ingredients[id] for id in ids if id in self.ingredients}
+    def create_owned_recipe(self, owner_id, recipe, snapshot, unit_candidates=(), ingredient_entries=()):
+        from chef_ai_workspace.models import Ingredient
+        from chef_ai_workspace.supabase_adapter import _quote
+        for entry in ingredient_entries:
+            existing=self.ingredients.get(entry["id"])
+            current=_quote(entry["current_price"]) if entry["current_price"] else (
+                existing.current_price if existing else None)
+            self.ingredients[entry["id"]]=Ingredient(entry["id"],entry["name"],current)
         key = (owner_id, recipe.id)
         if key in self.stored:
             raise ValueError("Duplicate")
@@ -22,6 +39,7 @@ class Repository:
         self.stored[key] = recipe
         self.snapshots[key] = snapshot
         self.writes += 1
+        self.unit_candidates = tuple(unit_candidates)
 
 
 class VoiceFullRecipeTests(unittest.TestCase):
@@ -52,6 +70,26 @@ class VoiceFullRecipeTests(unittest.TestCase):
             ],
             "selling_price_jpy": "2200"
         }
+
+    def test_new_unit_is_proposed_only_in_approved_recipe_save(self):
+        body = self.payload()
+        body["materials"] = [{
+            "name": "香草", "quantity": "2", "unit": "束",
+            "price_jpy": "300", "price_quantity": "1", "price_unit": "束",
+        }]
+        body["unit_candidates"] = [{"symbol": "束", "dimension": "count"}]
+        response = self.client.post("/demo/recipes/full", json=body, headers=self.headers)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(self.repo.unit_candidates,
+                         ({"symbol": "束", "dimension": "count"},))
+        self.assertEqual(self.repo.writes, 1)
+
+    def test_unknown_unit_without_approved_candidate_cannot_save(self):
+        body = self.payload()
+        body["materials"][0]["unit"] = "束"
+        response = self.client.post("/demo/recipes/full", json=body, headers=self.headers)
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(self.repo.writes, 0)
 
     def test_full_recipe_requires_authorized_session(self):
         response = self.client.post("/demo/recipes/full", json=self.payload())

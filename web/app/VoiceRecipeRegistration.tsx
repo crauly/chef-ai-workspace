@@ -16,7 +16,8 @@ type PriceReference={material_name:string;material_index?:number;status:string;o
 type ProvisionalPrice={material_index:number;material_name:string;origin:"ledger"|"external";price_jpy:string;price_quantity:string;price_unit:string;currency:string;observation_count:number;sources:{url:string;title:string}[];samples?:{name:string;seller:string;amount:string;package:string;url?:string}[];fetched_at:string|null;status:"provisional";approval:"unapproved";text:string};
 type ResearchStatus={material_name:string;material_index:number;request:string;trigger:"muse"|"heuristic";ledger:string;web:"not_attempted"|"available"|"empty"|"not_searched"|"provider_error"|"timeout"|"misconfigured";provisional:boolean};
 type PendingResearch={material_name:string;material_index:number;row_name?:string|null;request:string;trigger:"muse"|"heuristic"};
-type Draft={research_state?:"deferred"|"complete";pending_research?:PendingResearch[];title:string;materials:Ingredient[];selling_price_jpy:string;notes:string[];missing:string[];interpretations?:Interpretation[];price_references?:PriceReference[];provisional_prices?:Array<ProvisionalPrice|null>;research_status?:ResearchStatus[];nameCorrections?:NameCorrection[]};
+type UnitProposal={symbol:string;dimension:"mass"|"volume"|"count"|"other"};
+type Draft={unitProposals?:UnitProposal[];research_state?:"deferred"|"complete";pending_research?:PendingResearch[];title:string;materials:Ingredient[];selling_price_jpy:string;notes:string[];missing:string[];interpretations?:Interpretation[];price_references?:PriceReference[];provisional_prices?:Array<ProvisionalPrice|null>;research_status?:ResearchStatus[];nameCorrections?:NameCorrection[]};
 const validPrice=/^(?:0|[1-9]\d*)(?:\.\d+)?$/;
 function sourceUrl(url:string){try{const parsed=new URL(url);return parsed.protocol==="https:"?parsed.href:null;}catch{return null;}}
 function researchLabel(status:ResearchStatus,ja:boolean){
@@ -98,6 +99,12 @@ export type SharedMicStatus={recording:boolean;transcribing:boolean;queued:numbe
 export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,control,sharedVoice}:{locale:Locale;onCreated:(recipe:Recipe,mode:SaveMode,suppliers:string[])=>void;onDiscarded?:()=>void;control?:Ref<RegistrationHandle>;sharedVoice?:{markReview:()=>number;cancel:()=>void;captureMessage:string;mic?:SharedMicStatus}}){
  const ja=locale==="ja";
  const [busy,setBusy]=useState(false),[turns,setTurns]=useState<string[]>([]),[draft,setDraft]=useState<Draft|null>(null);
+ const [unitCatalog,setUnitCatalog]=useState<Array<{id:string;symbol:string;dimension:string;base_factor:string|null;aliases:string[]}>|null>(null);
+ const [unitDimensionChoices,setUnitDimensionChoices]=useState<Record<string,string>>({});
+ useEffect(()=>{let cancelled=false;setUnitCatalog(null);
+  request<{items:Array<{id:string;symbol:string;dimension:string;base_factor:string|null;aliases:string[]}>}>("/api/units").then(result=>{if(!cancelled)setUnitCatalog(result.items);}).catch(()=>{if(!cancelled)setUnitCatalog(null);});
+  return ()=>{cancelled=true;};
+ },[draft?.title,draft?.materials]);
  const [phase,setPhase]=useState<"dictating"|"review"|"saving">("dictating");
  const [message,setMessage]=useState(ja?"料理名・食材・分量・仕入単価を話してください。":"Describe the recipe, quantities and purchase prices.");
  const [manual,setManual]=useState("");
@@ -374,6 +381,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  function showReview(traceId=""){
   if(priceLoading){say(ja?"価格調査中ですが、下書きの確認は先にできます。検索結果は確定後に反映されます。":"Price research is running; you can still review the draft now.")} 
   const d=draftRef.current;
+  if(!unitCatalog){say(ja?"単位マスターを取得できません。承認前に再試行してください。":"Unit catalog is unavailable; retry before approval.");return;}
   if(!d){say(dataTurns.current.length?(ja?"最新の入力を解釈中、または解釈に失敗しています。解析が終わるまで保存しません。":"The latest input is processing or failed. Saving is blocked until analysis finishes."):(ja?"新しいレシピを登録します。料理名・食材・分量・仕入単価を話してください。":"Describe the dish, ingredients, quantities and purchase prices."));return;}
   const mode=saveModeFor(d);
   if(!mode){
@@ -398,14 +406,23 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  async function save(){
   const d=draftRef.current;
   const mode=reviewMode.current;
-  if(phaseRef.current!=="review"||!d||!mode||reviewed.current!==d||saveModeFor(d)!==mode)return;
+  if(phaseRef.current!=="review"||!d||!mode||reviewed.current!==d||saveModeFor(d)!==mode||!unitCatalog)return;
+  const materials=toSaveMaterials(d);
+  const allUnits=[...new Set(materials.flatMap(m=>[m.unit,m.price_unit]).filter((x):x is string=>Boolean(x)))];
+  const unknown=allUnits.filter(symbol=>!unitCatalog.some(u=>[u.symbol,...(u.aliases||[])].some(a=>a.toLocaleLowerCase()===symbol.toLocaleLowerCase())));
+  const unit_candidates=unknown.map(symbol=>({
+    symbol,dimension:unitDimensionChoices[symbol]??d.unitProposals?.find(item=>item.symbol===symbol)?.dimension??""
+  }));
+  if(unit_candidates.some(candidate=>!["mass","volume","count","other"].includes(candidate.dimension))){
+    say(ja?"新規単位の分類を確認してください。":"Review the dimension of every proposed new unit.");return;
+  }
   voice.cancel();setStage("saving");if(!draining.current)setBusy(true);say("承認された内容を保存しています…");
   if(!requestId.current)requestId.current=crypto.randomUUID();
   // Persist the stable idempotency key before invoking the remote mutation.
   try{await saveWorkingDraft({draft:d,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current});}
   catch{setStage("dictating");say("保存IDを端末に保持できません。安全のため登録を中止しました。");return;}
   try{
-   const recipe=await request<Recipe>("/api/recipes/full",{method:"POST",body:JSON.stringify({request_id:requestId.current,title:d.title,materials:toSaveMaterials(d),selling_price_jpy:d.selling_price_jpy||null})});
+   const recipe=await request<Recipe>("/api/recipes/full",{method:"POST",body:JSON.stringify({request_id:requestId.current,title:d.title,materials,unit_candidates,selling_price_jpy:d.selling_price_jpy||null})});
    if(!alive.current)return;
    // Associate the optional preview only after the formal save succeeded.
    // Local cache failure must never retry or roll back the confirmed recipe.
@@ -658,15 +675,34 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     return <p role="status" aria-live="polite">{hasResult?(ja?"検索結果を取得しました。価格の詳細・出典で内容を確認できます。":"Search results ready. Check price details and sources."):(ja?"価格を確認できませんでした。下書きは保持しています。":"Could not confirm prices. The draft is kept.")}</p>;
    })()}
    <h3>{ja?"未保存の下書き：":"Unsaved draft: "}{draft.title||(ja?"料理名未設定":"Untitled recipe")}</h3>
+   {!unitCatalog&&<p role="status">{ja?"単位マスターを照合中です。保存は照合後に可能になります。":"Loading the unit master; approval is blocked until ready."}</p>}
+   {unitCatalog&&(()=>{const projected=toSaveMaterials(draft);
+     const names=[...new Set(projected.flatMap(m=>[m.unit,m.price_unit]).filter((x):x is string=>Boolean(x)))];
+     const unknown=names.filter(symbol=>!unitCatalog.some(u=>[u.symbol,...(u.aliases||[])].some(a=>a.toLocaleLowerCase()===symbol.toLocaleLowerCase())));
+     return unknown.length?<fieldset><legend>{ja?"保存時に作成する単位マスター":"Unit Master entries created with this recipe"}</legend>
+       {unknown.map(symbol=><label key={symbol}>{symbol}
+        <select aria-label={ja?symbol+"の単位分類":symbol+" unit dimension"}
+         value={unitDimensionChoices[symbol]??draft.unitProposals?.find(item=>item.symbol===symbol)?.dimension??""}
+         onChange={e=>{setUnitDimensionChoices(state=>({...state,[symbol]:e.target.value}));reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");}}>
+         <option value="">{ja?"分類を選択":"Select dimension"}</option>
+         <option value="mass">{ja?"質量":"Mass"}</option><option value="volume">{ja?"体積":"Volume"}</option>
+         <option value="count">{ja?"個数":"Count"}</option><option value="other">{ja?"その他":"Other"}</option>
+        </select>
+       </label>)}
+       <p>{ja?"新規単位はレシピ保存の承認時だけ登録されます。":"New units are created only with the approved recipe save."}</p>
+      </fieldset>:null;})()}
    {draft.interpretations?.map((item,index)=><p key={index}>料理の文脈からの解釈案：{item.source} → {item.suggestion}（{item.reason}）</p>)}
    {(()=>{
     let partial=0,missing=0;
-    const factor=(unit:string)=>unit==="kg"||unit==="L"?1000:unit==="g"||unit==="ml"?1:null;
+    const findUnit=(symbol:string)=>unitCatalog?.find(u=>[u.symbol,...(u.aliases||[])].some(a=>a.toLocaleLowerCase()===symbol.toLocaleLowerCase()));
     for(const material of draft.materials){
      const qty=Number(material.quantity),price=Number(material.price_jpy),basis=Number(material.price_quantity);
-     const a=factor(material.unit),b=factor(material.price_unit);
-     const compatible=a!==null&&b!==null&&((["g","kg"].includes(material.unit)&&["g","kg"].includes(material.price_unit))||(["ml","L"].includes(material.unit)&&["ml","L"].includes(material.price_unit)));
-     if(material.quantity.trim()&&material.price_jpy.trim()&&material.price_quantity.trim()&&compatible&&Number.isFinite(qty)&&Number.isFinite(price)&&Number.isFinite(basis)&&basis>0&&qty>=0&&price>=0)partial+=qty*a!*price/(basis*b!);
+     const use=findUnit(material.unit),quoted=findUnit(material.price_unit);
+     const compatible=Boolean(use&&quoted&&(use.id===quoted.id||
+       (use.dimension===quoted.dimension&&use.base_factor!=null&&quoted.base_factor!=null)));
+     const a=use&&quoted&&use.id===quoted.id?1:use?.base_factor!=null?Number(use.base_factor):null;
+     const b=use&&quoted&&use.id===quoted.id?1:quoted?.base_factor!=null?Number(quoted.base_factor):null;
+     if(material.quantity.trim()&&material.price_jpy.trim()&&material.price_quantity.trim()&&compatible&&a!==null&&b!==null&&Number.isFinite(qty)&&Number.isFinite(price)&&Number.isFinite(basis)&&basis>0&&qty>=0&&price>=0)partial+=qty*a!*price/(basis*b!);
      else missing++;
     }
     const yen=(value:number)=>new Intl.NumberFormat(ja?"ja-JP":"en-US",{style:"currency",currency:"JPY",maximumFractionDigits:0}).format(value);

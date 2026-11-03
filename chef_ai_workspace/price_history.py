@@ -63,19 +63,27 @@ def _positive(value: str | None) -> Decimal | None:
     return result if result > 0 else None
 
 
-def _to_base(qty: Decimal, unit: str) -> tuple[str, Decimal | None]:
-    """Express a package quantity in g (mass) or ml (volume)."""
-    grams = convert_quantity(qty, unit, "g")
-    if grams is not None:
-        return "g", grams
-    ml = convert_quantity(qty, unit, "ml")
-    if ml is not None:
-        return "ml", ml
-    return unit, None
+def _to_base(qty: Decimal, unit: str,
+             units: Mapping[str, tuple[str, Decimal | None]] | None = None
+             ) -> tuple[str, Decimal | None]:
+    """Find a base unit solely from the approved Unit Master vocabulary."""
+    catalog = units or {}
+    source = catalog.get(unit)
+    if not source or source[1] is None:
+        # Identical quoted units still give a meaningful per-unit price;
+        # only conversion to another unit requires a verified factor.
+        return unit, qty
+    bases = [name for name, (dimension, factor) in catalog.items()
+             if dimension == source[0] and factor == Decimal("1")]
+    if not bases:
+        return unit, qty
+    base = min(bases, key=lambda name: (len(name), name))
+    return base, convert_quantity(qty, unit, base, catalog)
 
 
 def compare_observations(base: PriceObservation,
-                         new: PriceObservation) -> ComparisonResult:
+                         new: PriceObservation,
+                         units: Mapping[str, tuple[str, Decimal | None]] | None = None) -> ComparisonResult:
     """Compare two observations of one ingredient. Numbers only when every
     purchase term matches; otherwise reasons name each blocking condition."""
     reasons: list[str] = []
@@ -110,8 +118,8 @@ def compare_observations(base: PriceObservation,
             base_unit = base_amount / base_qty
             new_unit = new_amount / new_qty
         else:
-            base_dim, base_q = _to_base(base_qty, base.package_unit)
-            new_dim, new_q = _to_base(new_qty, new.package_unit)
+            base_dim, base_q = _to_base(base_qty, base.package_unit, units)
+            new_dim, new_q = _to_base(new_qty, new.package_unit, units)
             if base_q is None or new_q is None or base_dim != new_dim:
                 reasons.append(
                     f"package units not interconvertible: "

@@ -9,6 +9,14 @@ import {
   validateGroundedCandidate,
 } from "../price-web-search";
 
+
+const UNIT_FIXTURE={items:[{id:"00000000-0000-4000-8000-000000000001",symbol:"g",dimension:"mass",base_factor:"1",aliases:[]}]};
+function withUnitCatalog(mock:typeof fetch):typeof fetch{
+ return (async (input:RequestInfo|URL,init?:RequestInit)=>{
+  if(String(input).includes("/demo/units"))return Response.json(UNIT_FIXTURE);
+  return mock(input,init);
+ }) as typeof fetch;
+}
 const PASSWORD = "test-only-preview-password-32-characters";
 function authed(url: string, body: unknown) {
   return new NextRequest(url, {method: "POST",
@@ -149,27 +157,27 @@ test("ledger hit never triggers web search; ledger miss falls back to grounding"
         unit_basis: "g", average_unit_price: "0.7700", observation_count: 2,
         observed_to: "2026-10-28"}, observations: []}]};
     let responsesCalls = 0;
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/demo/price-reference")) return Response.json(ledger);
       if (String(url).includes("/v1/responses")) {
         responsesCalls++;
         return Response.json(grounded([CANDIDATE]));
       }
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(recipe)}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const hit = await parseRecipe(authed("http://localhost/api/voice-recipe", {turns: ["豚バラ肉100g"]}));
     expect(hit.status).toBe(200);
     expect((await hit.json()).price_references[0].origin).toBe("ledger");
     expect(responsesCalls).toBe(0);
     // Ledger miss: empty candidates fall back to a real grounded search.
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/demo/price-reference")) return Response.json({query: "x", candidates: []});
       if (String(url).includes("/v1/responses")) {
         responsesCalls++;
         return Response.json(grounded([CANDIDATE]));
       }
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(recipe)}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const miss = await parseRecipe(authed("http://localhost/api/voice-recipe", {turns: ["豚バラ肉100g"]}));
     expect(miss.status).toBe(200);
     const entry = (await miss.json()).price_references[0];
@@ -195,11 +203,11 @@ test("grounding failure keeps the ledger entry and never fails the draft", async
   try {
     const recipe = RECIPE([{material_name: "豚バラ肉", request: "相場で入れて"}]);
     // Citation-free grounding result: not a search, ledger entry survives.
-    global.fetch = (async (url: unknown) => {
+    global.fetch = withUnitCatalog((async (url: unknown) => {
       if (String(url).includes("/demo/price-reference")) return Response.json({query: "x", candidates: []});
       if (String(url).includes("/v1/responses")) return Response.json(grounded([], []));
       return Response.json({choices: [{finish_reason: "stop", message: {content: JSON.stringify(recipe)}}]});
-    }) as typeof fetch;
+    }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe", {turns: ["豚バラ肉100g"]}));
     expect(res.status).toBe(200);
     const body = await res.json();

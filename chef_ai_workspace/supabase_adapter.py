@@ -17,7 +17,7 @@ def _quote(raw):
         return None
     return PriceQuote(amount_jpy=_tracked(raw["amount_jpy"]),
                       per_quantity=raw["per_quantity"], per_unit=raw["per_unit"],
-                      source=raw["source"])
+                      source=raw["source"], per_unit_id=raw.get("per_unit_id"))
 
 def decode_recipe(raw):
     materials = tuple(MaterialLine(
@@ -25,7 +25,8 @@ def decode_recipe(raw):
         quantity=_tracked(m["quantity"]), unit=m["unit"],
         ingredient_id=m.get("ingredient_id"),
         price_override=_quote(m.get("price_override")),
-        price_mode=m.get("price_mode", "override")) for m in raw.get("materials", ()))
+        price_mode=m.get("price_mode", "override"),
+        unit_id=m.get("unit_id")) for m in raw.get("materials", ()))
     return Recipe(id=raw["id"], title=_tracked(raw["title"]),
                   materials=materials,
                   selling_price_jpy=_tracked(raw["selling_price_jpy"]),
@@ -37,13 +38,15 @@ class SupabasePersistence:
         """trusted_client must be a server-owned Supabase SDK client."""
         self.client = trusted_client
 
-    def create_owned_recipe(self, owner_id, recipe, cost_snapshot):
+    def create_owned_recipe(self, owner_id, recipe, cost_snapshot, unit_candidates=(), ingredient_entries=()):
         response = self.client.rpc("create_owned_recipe", {
             "p_owner_id": owner_id,
             "p_recipe_id": recipe.id,
             "p_title": recipe.title.value,
             "p_initial_state": asdict(recipe),
-            "p_cost_snapshot": cost_snapshot
+            "p_cost_snapshot": cost_snapshot,
+            "p_unit_candidates": list(unit_candidates),
+            "p_ingredient_entries": list(ingredient_entries),
         }).execute()
         if str(response.data) != recipe.id:
             raise RuntimeError("Unexpected create RPC result")
@@ -112,6 +115,70 @@ class SupabasePersistence:
                 id=row["id"], name=row["name"],
                 current_price=_quote(row.get("current_price")))
         return catalog
+
+    def list_owned_units(self, owner_id):
+        """List the complete owner-scoped vocabulary for contextual AI matching."""
+        rows = []
+        page_size = 500
+        while True:
+            # Stable order is essential: an omitted page could turn reuse into
+            # an unsafe new registration or hide an ambiguous alias.
+            response = (self.client.table("units")
+                        .select("id,symbol,dimension,base_factor,aliases")
+                        .eq("owner_id", owner_id)
+                        .order("id")
+                        .range(len(rows), len(rows) + page_size - 1)
+                        .execute())
+            batch = response.data or []
+            rows.extend(batch)
+            if not batch:
+                return rows
+
+    def update_owned_unit(self, owner_id, unit_id, symbol, dimension, base_factor, aliases):
+        response = self.client.rpc("update_owned_unit", {
+            "p_owner_id": owner_id,
+            "p_unit_id": unit_id,
+            "p_symbol": symbol,
+            "p_dimension": dimension,
+            "p_base_factor": base_factor,
+            "p_aliases": list(aliases),
+        }).execute()
+        return bool(response.data)
+
+    def list_owned_ingredient_master(self, owner_id):
+        """Complete owner-scoped ingredient SSOT for the manager."""
+        rows=[]
+        while True:
+            response=(self.client.table("ingredients")
+                      .select("id,name,current_price")
+                      .eq("owner_id",owner_id)
+                      .order("id").range(len(rows),len(rows)+499).execute())
+            batch=response.data or []
+            if not batch:
+                return rows
+            rows.extend(batch)
+
+    def update_owned_ingredient_master(self, owner_id, ingredient_id, name, quote):
+        result=self.client.rpc("update_owned_ingredient",{
+            "p_owner_id":owner_id,
+            "p_ingredient_id":ingredient_id,
+            "p_name":name,
+            "p_price":quote,
+        }).execute()
+        return result.data is True
+
+    def find_owned_ingredients_exact(self, owner_id, name):
+        """Owner-scoped exact product identity lookup (never fuzzy merge)."""
+        if not isinstance(name,str) or not name.strip():
+            return []
+        # Escape LIKE metacharacters; exact match is checked again after
+        # receipt because SQL matching and Python casefold differ by locale.
+        token=name.strip().replace("\\","\\\\").replace("%","\\%").replace("_","\\_")
+        response=(self.client.table("ingredients")
+                  .select("id,name,current_price").eq("owner_id",owner_id)
+                  .ilike("name",token).execute())
+        return [row for row in (response.data or [])
+                if row["name"].strip().casefold()==name.strip().casefold()]
 
     def search_owned_ingredients(self, owner_id, query, limit=20):
         """Owner-scoped ingredient search for reuse candidates and past-recipe
@@ -452,8 +519,10 @@ class SupabasePersistence:
             source=str(candidate["source"]),
             confirmed=bool(candidate.get("confirmed")),
             observed_at=str(candidate.get("observed_at") or ""))
-        should, comparison, reasons = decide_notification(base, cand)
-        comparison = comparison if comparison is not None else compare_observations(base, cand)
+        from .costing import unit_factor_catalog
+        units = unit_factor_catalog(self.list_owned_units(owner_id))
+        should, comparison, reasons = decide_notification(base, cand, units)
+        comparison = comparison if comparison is not None else compare_observations(base, cand, units)
         if not should:
             raise ValueError("incomparable: " + "; ".join(reasons))
         from .price_notifications import comparison_payload

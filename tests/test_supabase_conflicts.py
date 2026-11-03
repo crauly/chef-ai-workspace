@@ -18,6 +18,8 @@ class Query:
     def eq(self, *args): return self
     def single(self): return self
     def limit(self, *args): return self
+    def order(self, *args, **kwargs): return self
+    def range(self, *args): return self
     def execute(self):
         if self.error: raise self.error
         return SimpleNamespace(data=self.data)

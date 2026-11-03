@@ -37,6 +37,33 @@ def sample():
         "cost_adjustment_jpy":value("0")}
 
 class AdapterTests(unittest.TestCase):
+    def test_unit_catalog_fetches_all_capped_pages(self):
+        class CappedQuery(Query):
+            def __init__(self, data):
+                super().__init__(None)
+                self.data = data
+                self.start = 0
+            def range(self, start, end):
+                self.start = start
+                return self
+            def execute(self):
+                return SimpleNamespace(data=self.data[self.start:self.start+2])
+        class CappedClient(Client):
+            def __init__(self):
+                super().__init__()
+                self.data = [{"id":str(i),"symbol":f"unit-{i}",
+                              "dimension":"other","aliases":[]} for i in range(5)]
+            def table(self, name):
+                self.calls.append(name)
+                q = CappedQuery(self.data)
+                self.queries.append(q)
+                return q
+        c = CappedClient()
+        result = SupabasePersistence(c).list_owned_units("user-a")
+        self.assertEqual(len(result), 5)
+        self.assertTrue(all(("owner_id", "user-a") in q.filters for q in c.queries))
+        self.assertEqual(c.calls, ["units"] * 4)
+
     def test_name_search_retains_owner_filter_and_paginates_after_search(self):
         c=Client();c.tables["recipes"]=[]
         repo=SupabasePersistence(c)

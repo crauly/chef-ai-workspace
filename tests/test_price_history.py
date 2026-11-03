@@ -1,6 +1,7 @@
 """M5: observations, comparability, impact. Fixture repo; no live DB."""
 import copy
 import unittest
+from decimal import Decimal
 from uuid import uuid4
 from fastapi.testclient import TestClient
 from chef_ai_workspace.api import app
@@ -65,7 +66,9 @@ class CompareTests(unittest.TestCase):
 
     def test_comparable_kg_to_g_conversion(self):
         out = compare_observations(obs("o1"), obs("o2", qty="1", unit="kg",
-                                                  amount="700"))
+                                                  amount="700"),
+                                   units={"g":("mass",Decimal("1")),
+                                          "kg":("mass",Decimal("1000"))})
         self.assertTrue(out.comparable)
         self.assertEqual(out.unit_basis, "g")
         self.assertEqual(out.new_unit_price, "0.7000")

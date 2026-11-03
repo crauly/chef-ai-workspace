@@ -4,15 +4,40 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Mapping
 from .models import Ingredient, Recipe, PriceQuote, decimal
 
-_FACTORS = {"g": ("mass", Decimal("1")), "kg": ("mass", Decimal("1000")),
-            "ml": ("volume", Decimal("1")), "L": ("volume", Decimal("1000"))}
+def unit_factor_catalog(rows: list[dict]) -> dict[str, tuple[str, Decimal | None]]:
+    """Index owned Unit Master IDs and terms; never invent exchange ratios."""
+    values: dict[str, tuple[str, Decimal | None]] = {}
+    for row in rows:
+        factor_raw = row.get("base_factor")
+        factor = Decimal(str(factor_raw)) if factor_raw is not None else None
+        if factor is not None and (not factor.is_finite() or factor <= 0):
+            raise ValueError("Invalid master unit factor")
+        definition = (row["dimension"], factor)
+        for key in [row["id"], row["symbol"], *(row.get("aliases") or [])]:
+            if key in values and values[key] != definition:
+                raise ValueError("Conflicting unit identity")
+            values[key] = definition
+    return values
 
 
-def convert_quantity(qty: Decimal, from_unit: str, to_unit: str) -> Decimal | None:
-    if from_unit == to_unit:
+def convert_quantity(
+    qty: Decimal, from_unit: str, to_unit: str,
+    units: Mapping[str, tuple[str, Decimal | None]] | None = None,
+    from_id: str | None = None, to_id: str | None = None,
+) -> Decimal | None:
+    """Convert only using approved Unit Master dimensions and factors.
+
+    Matching canonical IDs have a 1:1 ratio. All other conversions require
+    both verified ratios and matching dimensions. Nothing is hardcoded.
+    """
+    if from_id and to_id and from_id == to_id:
         return qty
-    a, b = _FACTORS.get(from_unit), _FACTORS.get(to_unit)
-    if not a or not b or a[0] != b[0]:
+    if not from_id and not to_id and from_unit == to_unit:
+        return qty
+    catalog = units or {}
+    a = catalog.get(from_id or from_unit)
+    b = catalog.get(to_id or to_unit)
+    if not a or not b or a[0] != b[0] or a[1] is None or b[1] is None:
         return None
     return qty * a[1] / b[1]
 
@@ -29,7 +54,8 @@ class CostResult:
     estimated: bool
 
 
-def calculate_cost(recipe: Recipe, ingredients: Mapping[str, Ingredient] | None = None) -> CostResult:
+def calculate_cost(recipe: Recipe, ingredients: Mapping[str, Ingredient] | None = None,
+                   units: Mapping[str, tuple[str, Decimal | None]] | None = None) -> CostResult:
     catalog = ingredients or {}
     costs: dict[str, Decimal] = {}
     price_sources: dict[str, str] = {}
@@ -44,7 +70,8 @@ def calculate_cost(recipe: Recipe, ingredients: Mapping[str, Ingredient] | None 
         if q.value is None or line.unit is None or quote is None or quote.amount_jpy.value is None:
             unresolved.append(line.id)
             continue
-        qty = convert_quantity(decimal(q.value), line.unit, quote.per_unit)
+        qty = convert_quantity(decimal(q.value), line.unit, quote.per_unit,
+                               units, line.unit_id, quote.per_unit_id)
         if qty is None:
             unresolved.append(line.id)
             continue

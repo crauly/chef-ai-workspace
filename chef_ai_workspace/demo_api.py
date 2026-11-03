@@ -9,7 +9,7 @@ from dataclasses import asdict
 from uuid import uuid4
 from pydantic import BaseModel, Field, ConfigDict
 from .models import Recipe, TrackedValue
-from .costing import calculate_cost
+from .costing import calculate_cost, unit_factor_catalog
 from .mutations import Proposal, MutationError, prepare_mutation
 from .persistence_service import save_validated_mutation, _json
 from uuid import UUID
@@ -31,6 +31,70 @@ def demo_context(request: Request, x_demo_access: str | None = Header(default=No
     if not x_demo_access or not hmac.compare_digest(x_demo_access, secret):
         raise HTTPException(403, "Demo access denied")
     return str(owner), factory()
+
+
+def _owned_unit_definitions(owner, repository):
+    loader = getattr(repository, "list_owned_units", None)
+    return unit_factor_catalog(loader(owner)) if callable(loader) else {}
+
+
+@router.get("/units")
+def list_demo_units(ctx=Depends(demo_context)):
+    """Owner-scoped vocabulary for Muse proposals and the unit manager."""
+    owner, repository = ctx
+    loader = getattr(repository, "list_owned_units", None)
+    if not callable(loader):
+        raise HTTPException(503, "Unit master repository unavailable")
+    return {"items": loader(owner)}
+
+
+@router.get("/units/resolve")
+def resolve_demo_unit(
+    q: str = Query(min_length=1, max_length=32),
+    ctx=Depends(demo_context),
+):
+    """Never creates data: AI candidates require the normal Human Gate."""
+    from .unit_master import resolve_unit
+    owner, repository = ctx
+    loader = getattr(repository, "list_owned_units", None)
+    if not callable(loader):
+        raise HTTPException(503, "Unit master repository unavailable")
+    return asdict(resolve_unit(q, loader(owner)))
+
+
+class UnitEditBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    base_factor: str | None = None
+    symbol: str = Field(min_length=1, max_length=32)
+    dimension: str = Field(pattern=r"^(mass|volume|count|other)$")
+    aliases: list[str] = Field(max_length=20)
+
+
+@router.put("/units/{unit_id}")
+def edit_demo_unit(unit_id: UUID, body: UnitEditBody,
+                   ctx=Depends(demo_context)):
+    """Explicit unit manager edit, independent from Muse proposal parsing."""
+    owner, repository = ctx
+    aliases = [alias.strip() for alias in body.aliases]
+    if any(not alias or len(alias) > 32 for alias in aliases):
+        raise HTTPException(422, "Invalid unit alias")
+    if body.base_factor is not None:
+        from decimal import Decimal, InvalidOperation
+        try:
+            factor = Decimal(body.base_factor)
+            if not factor.is_finite() or factor <= 0:
+                raise ValueError("factor")
+        except (InvalidOperation, ValueError):
+            raise HTTPException(422, "Invalid unit conversion factor")
+    editor = getattr(repository, "update_owned_unit", None)
+    if not callable(editor):
+        raise HTTPException(503, "Unit manager unavailable")
+    if not editor(owner, str(unit_id), body.symbol.strip(), body.dimension,
+                  body.base_factor, aliases):
+        raise HTTPException(404, "Unit not found")
+    return {"id": str(unit_id), "symbol": body.symbol.strip(),
+            "dimension": body.dimension, "base_factor": body.base_factor,
+            "aliases": aliases}
 
 
 @router.get("/recipes")
@@ -179,6 +243,48 @@ def delete_demo_supplier(supplier_id: UUID, ctx=Depends(demo_context)):
     return Response(status_code=204)
 
 
+@router.get("/ingredients")
+def list_demo_ingredient_master(ctx=Depends(demo_context)):
+    owner, repository=ctx
+    loader=getattr(repository,"list_owned_ingredient_master",None)
+    if not callable(loader):
+        raise HTTPException(503,"Ingredient master unavailable")
+    return {"items":loader(owner)}
+
+
+class IngredientMasterEditBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    name: str=Field(min_length=1,max_length=200)
+    price_jpy: str | None=None
+    price_quantity: str | None=None
+    price_unit: str | None=Field(default=None,min_length=1,max_length=32)
+
+
+@router.put("/ingredients/{ingredient_id}")
+def edit_demo_ingredient_master(ingredient_id:UUID, body:IngredientMasterEditBody,
+                                ctx=Depends(demo_context)):
+    """One explicitly authorized manager action changes shared master price."""
+    owner, repository=ctx
+    from .models import PriceQuote
+    fields=(body.price_jpy,body.price_quantity,body.price_unit)
+    if any(value is not None for value in fields) and not all(value is not None for value in fields):
+        raise HTTPException(422,"Partial master price")
+    quote=None
+    if all(value is not None for value in fields):
+        try:
+            quote=PriceQuote(TrackedValue(body.price_jpy,"confirmed","user"),
+                             body.price_quantity,body.price_unit,"manual")
+        except (TypeError,ValueError) as exc:
+            raise HTTPException(422,"Invalid master price") from exc
+    editor=getattr(repository,"update_owned_ingredient_master",None)
+    if not callable(editor):
+        raise HTTPException(503,"Ingredient master unavailable")
+    if not editor(owner,str(ingredient_id),body.name.strip(),
+                  asdict(quote) if quote is not None else None):
+        raise HTTPException(404,"Ingredient not found")
+    return {"id":str(ingredient_id),"name":body.name.strip(),"updated":True}
+
+
 @router.get("/ingredients/search")
 def search_demo_ingredients(q: str = Query(default="", max_length=200),
                             limit: int = Query(default=20, ge=1, le=50),
@@ -269,12 +375,18 @@ class CompleteRecipeMaterial(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=200)
     quantity: str | None = Field(default=None, max_length=30)
-    unit: str | None = Field(default=None, pattern=r"^(g|kg|ml|L)$")
+    unit: str | None = Field(default=None, min_length=1, max_length=32)
     # Prices are optional (M4): missing prices save the line unpriced and the
     # cost stays partial with explicit unresolved IDs -- never zero-filled.
     price_jpy: str | None = Field(default=None, max_length=30)
     price_quantity: str | None = Field(default=None, max_length=30)
-    price_unit: str | None = Field(default=None, pattern=r"^(g|kg|ml|L)$")
+    price_unit: str | None = Field(default=None, min_length=1, max_length=32)
+
+
+class UnitCandidateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    symbol: str = Field(min_length=1, max_length=32)
+    dimension: str = Field(pattern=r"^(mass|volume|count|other)$")
 
 
 class CompleteRecipeBody(BaseModel):
@@ -282,6 +394,7 @@ class CompleteRecipeBody(BaseModel):
     request_id: UUID
     title: str = Field(min_length=1, max_length=200)
     materials: list[CompleteRecipeMaterial] = Field(max_length=40)
+    unit_candidates: list[UnitCandidateBody] = Field(default_factory=list, max_length=80)
     selling_price_jpy: str | None = None
 
 
@@ -294,6 +407,38 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
     title = body.title.strip()
     if not title:
         raise HTTPException(422, "Recipe title required")
+    recipe_id = str(body.request_id)
+    try:
+        existing = repository.load_owned_recipe(owner, recipe_id)
+    except ValueError:
+        existing = None
+    if existing is not None:
+        # An uncertain network retry must not create duplicates.
+        return _displayed_recipe(owner, repository, existing)
+    # The explicit recipe-save action is the only approval gate for new units.
+    # Candidates are checked against the owned catalog; unknown spelling may
+    # register only when its proposed dimension is present in the reviewed body.
+    from .unit_master import prepare_unit_approval
+    loader = getattr(repository, "list_owned_units", None)
+    if not callable(loader):
+        raise HTTPException(503, "Unit master unavailable")
+    known_units = loader(owner)
+    entered = list(dict.fromkeys(
+        unit for material in body.materials
+        for unit in (material.unit, material.price_unit) if unit is not None
+    ))
+    dimensions = {c.symbol: c.dimension for c in body.unit_candidates}
+    if len(dimensions) != len(body.unit_candidates):
+        raise HTTPException(422, "Duplicate unit candidate")
+    try:
+        approvals = prepare_unit_approval(entered, known_units, dimensions)
+    except ValueError as exc:
+        raise HTTPException(422, "Unresolved unit approval") from exc
+    new_units = [{"symbol": item.symbol, "dimension": item.dimension}
+                 for item in approvals if item.status == "new_candidate"]
+    if any(symbol not in entered for symbol in dimensions):
+        raise HTTPException(422, "Unreferenced unit candidate")
+    canonical = {item.entered: item.symbol for item in approvals}
     operations = []
     for material in body.materials:
         if not material.name.strip():
@@ -305,9 +450,9 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
                 raise HTTPException(422, "Priced lines require quantity and unit")
             operations.append({"op": "add_material", "material_id": str(uuid4()),
                                "name": material.name.strip(), "quantity": material.quantity,
-                               "unit": material.unit, "price_jpy": material.price_jpy,
+                               "unit": canonical[material.unit], "price_jpy": material.price_jpy,
                                "price_quantity": material.price_quantity,
-                               "price_unit": material.price_unit})
+                               "price_unit": canonical[material.price_unit]})
         else:
             # Price trio is all-or-nothing: any single field (including a lone
             # price_unit) is an explicit input error, never silently dropped.
@@ -320,18 +465,10 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
                 if material.unit is None:
                     raise HTTPException(422, "Quantity requires unit")
                 op["quantity"] = material.quantity
-                op["unit"] = material.unit
+                op["unit"] = canonical[material.unit]
             operations.append(op)
     if body.selling_price_jpy is not None:
         operations.append({"op": "set_selling_price", "value_jpy": body.selling_price_jpy})
-    recipe_id = str(body.request_id)
-    try:
-        existing = repository.load_owned_recipe(owner, recipe_id)
-    except ValueError:
-        existing = None
-    if existing is not None:
-        # An uncertain network retry must not create duplicates.
-        return _displayed_recipe(owner, repository, existing)
     recipe = Recipe(recipe_id, TrackedValue(title, "confirmed", "user"))
     if operations:
         try:
@@ -340,14 +477,64 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
                 user_confirmed=True)
         except (MutationError, ValueError, TypeError, KeyError) as exc:
             raise HTTPException(422, "Invalid spoken recipe values") from exc
+    # Product V1: every recipe row references a concrete owner Ingredient.
+    # A recipe never owns purchase prices; approved quotes update the same
+    # master transaction and all linked recipes see the updated current cost.
+    from .models import Ingredient
+    finder=getattr(repository,"find_owned_ingredients_exact",None)
+    if not callable(finder):
+        raise HTTPException(503,"Ingredient master lookup unavailable")
+    reader=getattr(repository,"load_owned_ingredients",None)
+    prepared_lines=[]
+    catalog={}
+    entries_by_name={}
+    for line in recipe.materials:
+        name=(line.material_name.value or "").strip()
+        key=name.casefold()
+        entry=entries_by_name.get(key)
+        if entry is None:
+            matches=finder(owner,name)
+            if len(matches)>1:
+                raise HTTPException(409,"Ambiguous ingredient identity; select a master")
+            if matches:
+                raw=matches[0]
+                ing_id=str(raw["id"])
+                if not callable(reader):
+                    raise HTTPException(503,"Ingredient master lookup unavailable")
+                saved_catalog=reader(owner,[ing_id])
+                ingredient=saved_catalog.get(ing_id)
+                if ingredient is None:
+                    raise HTTPException(409,"Ingredient master disappeared")
+                existing_price=ingredient.current_price
+            else:
+                ing_id=str(uuid4())
+                existing_price=None
+            entry={"id":ing_id,"name":name,"current_price":None}
+            entries_by_name[key]=entry
+            catalog[ing_id]=Ingredient(ing_id,name,existing_price)
+        ing_id=entry["id"]
+        quote=line.price_override
+        if quote is not None:
+            if entry["current_price"] is not None and entry["current_price"]!=asdict(quote):
+                raise HTTPException(422,"Conflicting quotes for one shared ingredient")
+            entry["current_price"]=asdict(quote)
+            catalog[ing_id]=Ingredient(ing_id,name,quote)
+        prepared_lines.append(replace(line,ingredient_id=ing_id,
+                                      price_mode="inherit",price_override=None))
+    recipe=replace(recipe,materials=tuple(prepared_lines))
+    ingredient_entries=tuple(entries_by_name.values())
     # The Supabase create_owned_recipe RPC requires initial revision 0.
     recipe = replace(recipe, revision=0)
     try:
-        snapshot = _json(asdict(calculate_cost(recipe)))
-        repository.create_owned_recipe(owner, recipe, snapshot)
+        snapshot = _json(asdict(calculate_cost(recipe, catalog, unit_factor_catalog(known_units))))
+        repository.create_owned_recipe(owner, recipe, snapshot, unit_candidates=new_units,
+                                       ingredient_entries=ingredient_entries)
     except ValueError as exc:
         raise HTTPException(409, "Recipe already exists") from exc
-    return _displayed_recipe(owner, repository, recipe)
+    # The transaction resolves canonical unit IDs in the stored state.
+    # Return the persisted representation, not the pre-commit proposal.
+    committed = repository.load_owned_recipe(owner, recipe_id)
+    return _displayed_recipe(owner, repository, committed)
 
 @router.post("/recipes/{recipe_id}/confirm")
 def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
@@ -394,7 +581,9 @@ def get_demo_recipe_cost(recipe_id: UUID, ctx=Depends(demo_context)):
         raise HTTPException(404, "Recipe not found") from exc
     catalog = (repository.load_owned_catalog(owner, recipe)
                if any(m.price_mode == "inherit" for m in recipe.materials) else {})
-    return _json(asdict(calculate_cost(recipe, catalog)))
+    unit_loader = getattr(repository, "list_owned_units", None)
+    units = unit_factor_catalog(unit_loader(owner)) if callable(unit_loader) else {}
+    return _json(asdict(calculate_cost(recipe, catalog, units)))
 
 
 class AIProposalBody(BaseModel):
@@ -659,7 +848,7 @@ def compare_demo_observations(ingredient_id: UUID, body: CompareBody,
     for obs in (base, candidate):
         if obs.ingredient_id != str(ingredient_id):
             raise HTTPException(422, "Observation does not belong to this ingredient")
-    return _json(asdict(compare_observations(base, candidate)))
+    return _json(asdict(compare_observations(base, candidate, _owned_unit_definitions(owner, repository))))
 
 
 def _impact_envelope(owner: str, repository, ingredient_id: str,
@@ -703,7 +892,7 @@ def _impact_envelope(owner: str, repository, ingredient_id: str,
                     "comparable": False,
                     "reasons": ["original price basis unavailable"],
                     "items": []}
-        comparison = compare_observations(base, obs)
+        comparison = compare_observations(base, obs, _owned_unit_definitions(owner, repository))
         if not comparison.comparable:
             return {"basis_observation_id": str(basis_id),
                     "comparable": False,
@@ -1071,7 +1260,8 @@ def suggest_demo_axis(ingredient_id: UUID,
         ingredient_id=str(ingredient_id), ingredient_name=loaded["name"],
         candidates=candidates, evaluations=evaluations,
         skipped_evaluations=skipped, muse_used=muse_used,
-        muse_error=muse_error, max_picks=max_candidates)
+        muse_error=muse_error, max_picks=max_candidates,
+        unit_definitions=_owned_unit_definitions(owner, repository))
     result["provider"] = {"external": dict(EXTERNAL_PROVIDER_STATUS),
                           "muse": result.pop("muse_status")}
     if pool.get("shortage_note") and not result.get("shortage_note"):
