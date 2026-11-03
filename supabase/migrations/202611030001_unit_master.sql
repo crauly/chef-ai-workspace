@@ -25,7 +25,7 @@ create or replace function public.resolve_owned_unit_id(
  p_owner_id uuid,p_spoken text
 ) returns uuid
 language plpgsql stable security definer set search_path=''
-as $
+as $$
 declare v_ids uuid[];
 begin
  select array_agg(u.id) into v_ids
@@ -38,7 +38,7 @@ begin
    raise exception 'Unknown or ambiguous unit';
  end if;
  return v_ids[1];
-end; $;
+end; $$;
 revoke all on function public.resolve_owned_unit_id(uuid,text)
  from public,anon,authenticated;
 grant execute on function public.resolve_owned_unit_id(uuid,text) to service_role;
