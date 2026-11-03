@@ -27,6 +27,14 @@ VOICE_RECIPE_SCHEMA_PY = {
             "required": ["name", "quantity", "unit", "price_jpy",
                          "price_quantity", "price_unit", "supplier"],
             "additionalProperties": False}},
+        "unit_proposals": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string"},
+                "dimension": {"type": "string", "enum": [
+                    "mass", "volume", "count", "other"]}},
+            "required": ["symbol", "dimension"],
+            "additionalProperties": False}},
         "selling_price_jpy": {"type": "string"},
         "notes": {"type": "array", "items": {"type": "string"}},
         "interpretations": {"type": "array", "items": {
@@ -60,7 +68,7 @@ VOICE_RECIPE_SCHEMA_PY = {
                     "additionalProperties": False}}},
             "required": ["material_name", "heard", "candidates"],
             "additionalProperties": False}}},
-    "required": ["title", "materials", "selling_price_jpy",
+    "required": ["title", "materials", "unit_proposals", "selling_price_jpy",
                  "notes", "interpretations", "price_research",
                  "name_corrections"],
     "additionalProperties": False}
