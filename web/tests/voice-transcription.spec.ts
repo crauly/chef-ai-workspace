@@ -58,11 +58,15 @@ test("empty transcript is silence, not a provider fault: 200 no_speech without t
 
 test("live-observed Spark notes-string response is rejected; typed notes array yields a reviewable draft", async () => {
   const previousFetch = global.fetch, password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
+  const base=process.env.FASTAPI_BASE_URL, token=process.env.DEMO_ACCESS_TOKEN;
+  process.env.FASTAPI_BASE_URL="http://127.0.0.1:8100";
+  process.env.DEMO_ACCESS_TOKEN="test-unit-token";
   process.env.DEMO_PREVIEW_PASSWORD = "test-only-preview-password-32-characters";
   process.env.MODEL_API_KEY = "fixture-key";
   try {
     for (const notes of ["", []]) {
-      global.fetch = async (_, init) => {
+      global.fetch = async (url, init) => {
+        if(String(url).includes("/demo/units"))return Response.json({items:[{id:"00000000-0000-4000-8000-000000000001",symbol:"g",dimension:"mass",base_factor:"1",aliases:[]}]});
         const sent = JSON.parse(String(init?.body));
         expect(sent.messages[0].content).toContain("notes MUST be an array of strings");
         expect(sent.messages[0].role).toBe("developer");
@@ -80,6 +84,8 @@ test("live-observed Spark notes-string response is rejected; typed notes array y
     }
   } finally {
     global.fetch = previousFetch;
+    if (base === undefined) delete process.env.FASTAPI_BASE_URL; else process.env.FASTAPI_BASE_URL = base;
+    if (token === undefined) delete process.env.DEMO_ACCESS_TOKEN; else process.env.DEMO_ACCESS_TOKEN = token;
     if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
     if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
   }
