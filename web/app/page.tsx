@@ -133,8 +133,10 @@ export default function Library(){
        }
        setSelected(persisted);setError("");
      }catch(e){
-       setError(`保存APIは成功しましたが、再取得による検証に失敗しました: ${String(e)}`);
-       return false;
+       setError(`保存APIは成功し変更を受け付けましたが、再取得による検証に失敗しました。再度保存せず、画面を更新して結果を確認してください: ${String(e)}`);
+       // The POST has committed. Returning false would let callers retry a new mutation
+       // (notably add_material with fresh IDs), duplicating ingredients and costs.
+       return true;
      }
      return true;
    }catch(e){setError(String(e));return false;}finally{setBusy(false);}
