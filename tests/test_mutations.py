@@ -64,6 +64,32 @@ class MutationTests(unittest.TestCase):
         self.assertEqual(r.materials[-1].material_name.status,"assumed")
         self.assertEqual(r.materials[-1].price_override.amount_jpy.status,"assumed")
 
+    def test_material_rename_and_remove(self):
+        original = fixture()
+        renamed = apply(original, {"op": "set_material_name", "material_id": "m1", "value": "有頭海老"})
+        self.assertEqual(renamed.materials[0].material_name.value, "有頭海老")
+        self.assertEqual(renamed.revision, 1)
+        self.assertEqual(original.materials[0].material_name.value, "海老")
+        removed = apply(renamed, {"op": "remove_material", "material_id": "m1"})
+        self.assertEqual(removed.materials, ())
+        self.assertEqual(removed.revision, 2)
+
+    def test_material_rename_remove_reject_invalid_operations_atomically(self):
+        original = fixture()
+        for op in (
+            {"op": "set_material_name", "material_id": "m1", "value": " "},
+            {"op": "set_material_name", "material_id": "missing", "value": "海老"},
+            {"op": "remove_material", "material_id": "missing"},
+            {"op": "remove_material", "material_id": "m1", "extra": "bad"},
+        ):
+            with self.subTest(op=op), self.assertRaises(MutationError):
+                apply(original, op)
+        self.assertEqual(len(original.materials), 1)
+        with self.assertRaises(MutationError):
+            apply(original, {"op": "remove_material", "material_id": "m1"},
+                  {"op": "set_material_quantity", "material_id": "m1", "value": "2", "unit": "尾"})
+        self.assertEqual(original.revision, 0)
+
     def test_quantity_and_revision(self):
         r=fixture()
         out=apply(r, {"op":"set_material_quantity","material_id":"m1","value":"4","unit":"尾"})
