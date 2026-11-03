@@ -77,6 +77,10 @@ begin
    v_id := (v_line->>'ingredient_id')::uuid;
    if not exists(select 1 from public.ingredients where id=v_id and owner_id=p_owner_id)
    then raise exception 'Recipe ingredient must belong to owner'; end if;
+   if nullif(v_line->>'supplier_id','') is not null and not exists(
+     select 1 from public.suppliers
+     where id=(v_line->>'supplier_id')::uuid and owner_id=p_owner_id
+   ) then raise exception 'Recipe supplier must belong to owner'; end if;
    if v_line->>'unit' is not null then
      v_unit := public.resolve_owned_unit_id(p_owner_id,v_line->>'unit');
      v_line := jsonb_set(v_line,'{unit_id}',to_jsonb(v_unit::text),true);
