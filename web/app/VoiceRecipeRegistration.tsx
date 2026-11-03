@@ -445,7 +445,10 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    // clear preview/failure so neither survives into the next recipe (this
    // panel stays mounted while hidden). The saved draft itself is untouched.
    dishAbort.current?.abort();dishAbort.current=null;setDishGenerating(false);setDishFailed(false);dishPreviewRef.current=null;setDishImageUrl(null);setDishHint("");
-   say((mode==="confirmed"?(sharedVoice?"保存済みです。":"レシピを保存しました。"):"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。")+(imageRetained?"":" 料理画像はこのブラウザに保存できませんでした。"));onCreated(recipe,mode,suppliers);
+   // The workspace owns the visible success notification after switching to browse.
+   // Do not leave a second, hidden success message inside the registration panel.
+   if(!sharedVoice)say((mode==="confirmed"?"レシピを保存しました。":"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。")+(imageRetained?"":" 料理画像はこのブラウザに保存できませんでした。"));
+   onCreated(recipe,mode,suppliers);
   }catch{setStage("review");say("保存結果を確認できませんでした。再送時も同じ登録IDを使います。一覧を確認してから再試行してください。");}
   finally{if(alive.current&&!draining.current)setBusy(false);}
  }
