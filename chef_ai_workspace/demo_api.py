@@ -57,25 +57,28 @@ def resolve_demo_unit(
     return asdict(resolve_unit(q, loader(owner)))
 
 
-class UnitAliasesBody(BaseModel):
+class UnitEditBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    symbol: str = Field(min_length=1, max_length=32)
+    dimension: str = Field(pattern=r"^(mass|volume|count|other)$")
     aliases: list[str] = Field(max_length=20)
 
 
-@router.put("/units/{unit_id}/aliases")
-def edit_demo_unit_aliases(unit_id: UUID, body: UnitAliasesBody,
-                           ctx=Depends(demo_context)):
-    """Explicit unit manager edit; AI never invokes this write path."""
+@router.put("/units/{unit_id}")
+def edit_demo_unit(unit_id: UUID, body: UnitEditBody,
+                   ctx=Depends(demo_context)):
+    """Explicit unit manager edit, independent from Muse proposal parsing."""
     owner, repository = ctx
     aliases = [alias.strip() for alias in body.aliases]
     if any(not alias or len(alias) > 32 for alias in aliases):
         raise HTTPException(422, "Invalid unit alias")
-    editor = getattr(repository, "update_owned_unit_aliases", None)
+    editor = getattr(repository, "update_owned_unit", None)
     if not callable(editor):
         raise HTTPException(503, "Unit manager unavailable")
-    if not editor(owner, str(unit_id), aliases):
+    if not editor(owner, str(unit_id), body.symbol.strip(), body.dimension, aliases):
         raise HTTPException(404, "Unit not found")
-    return {"id": str(unit_id), "aliases": aliases}
+    return {"id": str(unit_id), "symbol": body.symbol.strip(),
+            "dimension": body.dimension, "aliases": aliases}
 
 
 @router.get("/recipes")
