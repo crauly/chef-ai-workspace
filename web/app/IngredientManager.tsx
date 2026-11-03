@@ -12,6 +12,9 @@ export default function IngredientManager({locale}:{locale:Locale}){
  const [error,setError]=useState("");
  const [editing,setEditing]=useState<string|null>(null);
  const [newName,setNewName]=useState("");
+ const [query,setQuery]=useState("");
+ const [page,setPage]=useState(1);
+ const pageSize=10;
  const [name,setName]=useState("");
  const [price,setPrice]=useState("");
  const [quantity,setQuantity]=useState("");
@@ -71,26 +74,61 @@ export default function IngredientManager({locale}:{locale:Locale}){
   }catch{setError(ja?"削除できません。レシピや仕入履歴から参照されている可能性があります。":"Unable to delete. This ingredient may be referenced.");}
   finally{setBusy(false);}
  }
- return <section className="workspace-section" aria-label={ja?"食材マスター":"Ingredient master"}>
-  <div className="workspace-section-head"><h3>{ja?"食材マスター":"Ingredient master"}</h3></div>
-  <p>{ja?"共通食材の名称と仕入単価を管理します。変更は関連レシピの現在原価に反映されます。":"Manage shared ingredient names and purchase prices. Updates affect current recipe costs."}</p>
-  <div><label>{ja?"新規食材名":"New ingredient name"}<input value={newName} maxLength={200} disabled={busy} onChange={e=>setNewName(e.target.value)}/></label><button type="button" disabled={busy||!newName.trim()} onClick={()=>void create()}>{ja?"食材を登録":"Create ingredient"}</button></div>
+
+ const filtered=items.filter(item=>item.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+ const pages=Math.max(1,Math.ceil(filtered.length/pageSize));
+ const visible=filtered.slice((Math.min(page,pages)-1)*pageSize,Math.min(page,pages)*pageSize);
+ const priceLabel=(item:Ingredient)=>item.current_price?.amount_jpy?.value!=null
+  ? `¥${Number(item.current_price.amount_jpy.value).toLocaleString("ja-JP")} / ${item.current_price.per_quantity??""} ${item.current_price.per_unit??""}`
+  : (ja?"価格未設定":"Price not set");
+ const editor=(item:Ingredient)=><div className="ingredient-editor" key={item.id}>
+  <h4>{ja?"食材を編集":"Edit ingredient"}</h4>
+  <div className="ingredient-editor-fields">
+   <label>{ja?"食材名":"Ingredient name"}<input value={name} maxLength={200} disabled={busy} onChange={e=>setName(e.target.value)}/></label>
+   <label>{ja?"仕入価格（円）":"Purchase price (JPY)"}<input inputMode="decimal" value={price} disabled={busy} onChange={e=>setPrice(e.target.value)}/></label>
+   <label>{ja?"仕入数量":"Purchase quantity"}<input inputMode="decimal" value={quantity} disabled={busy} onChange={e=>setQuantity(e.target.value)}/></label>
+   <label>{ja?"仕入単位":"Purchase unit"}<input value={unit} maxLength={32} disabled={busy} onChange={e=>setUnit(e.target.value)}/></label>
+  </div>
+  <div className="ingredient-actions">
+   <button type="button" disabled={busy} onClick={()=>void save(item.id)}>{ja?"変更を保存":"Save changes"}</button>
+   <button type="button" className="secondary" disabled={busy} onClick={()=>setEditing(null)}>{ja?"キャンセル":"Cancel"}</button>
+  </div>
+ </div>;
+ return <section className="workspace-section ingredient-manager" aria-label={ja?"食材ライブラリ":"Ingredient library"}>
+  <div className="workspace-section-head"><h3>{ja?"食材ライブラリ":"Ingredient Library"}</h3></div>
+  <p>{ja?"食材名と仕入単価を管理します。変更は関連レシピの現在原価に反映されます。":"Manage ingredient names and purchase prices. Changes affect current recipe costs."}</p>
+  <div className="ingredient-create">
+   <label>{ja?"新規食材名":"New ingredient name"}<input value={newName} maxLength={200} disabled={busy} onChange={e=>setNewName(e.target.value)}/></label>
+   <button type="button" disabled={busy||!newName.trim()} onClick={()=>void create()}>{ja?"食材を登録":"Add ingredient"}</button>
+  </div>
   {error&&<p role="alert">{error}</p>}
-  <button type="button" className="secondary" disabled={busy||loading} onClick={()=>void load()}>{ja?"更新":"Refresh"}</button>
-  {loading?<p>{ja?"読み込み中":"Loading"}</p>:items.length===0?<p>{ja?"登録済み食材はありません。上のフォームから食材を登録できます。":"No ingredients yet. Use the form above to register an ingredient."}</p>:
-  <ul>{items.map(item=><li key={item.id}>
-   {editing===item.id?<div>
-    <label>{ja?"食材名":"Ingredient name"}<input value={name} maxLength={200} disabled={busy} onChange={e=>setName(e.target.value)}/></label>
-    <label>{ja?"仕入価格（円）":"Purchase price (JPY)"}<input inputMode="decimal" value={price} disabled={busy} onChange={e=>setPrice(e.target.value)}/></label>
-    <label>{ja?"仕入数量":"Purchase quantity"}<input inputMode="decimal" value={quantity} disabled={busy} onChange={e=>setQuantity(e.target.value)}/></label>
-    <label>{ja?"仕入単位":"Purchase unit"}<input value={unit} maxLength={32} disabled={busy} onChange={e=>setUnit(e.target.value)}/></label>
-    <button type="button" disabled={busy} onClick={()=>void save(item.id)}>{ja?"変更を保存":"Save changes"}</button>
-    <button type="button" className="secondary" disabled={busy} onClick={()=>setEditing(null)}>{ja?"取消":"Cancel"}</button>
-   </div>:<>
-    <strong>{item.name}</strong>{" "}
-    <span>{item.current_price?.amount_jpy?.value!=null?`¥${item.current_price.amount_jpy.value} / ${item.current_price.per_quantity??""} ${item.current_price.per_unit??""}`:(ja?"価格未設定":"Price not set")}</span>{" "}
-    <button type="button" className="secondary" disabled={busy} onClick={()=>begin(item)}>{ja?"編集":"Edit"}</button>{" "}<button type="button" className="secondary" disabled={busy} onClick={()=>void remove(item)}>{ja?"削除":"Delete"}</button>
-   </>}
-  </li>)}</ul>}
+  <div className="ingredient-controls">
+   <label>{ja?"食材を検索":"Search ingredients"}<input type="search" value={query} onChange={e=>{setQuery(e.target.value);setPage(1);}} placeholder={ja?"食材名で検索":"Search by name"}/></label>
+   <button type="button" className="secondary" disabled={busy||loading} onClick={()=>void load()}>{ja?"更新":"Refresh"}</button>
+  </div>
+  {loading?<p>{ja?"読み込み中":"Loading"}</p>:items.length===0?<p>{ja?"登録済み食材はありません。":"No ingredients registered."}</p>:<>
+   <div className="ingredient-table-wrap"><table className="ingredient-table">
+    <thead><tr><th scope="col">{ja?"食材名":"Ingredient"}</th><th scope="col">{ja?"価格・規格":"Price / unit"}</th><th scope="col">{ja?"仕入れ先":"Supplier"}</th><th scope="col">{ja?"操作":"Actions"}</th></tr></thead>
+    <tbody>{visible.map(item=><tr key={item.id}>
+     <td><strong>{item.name}</strong></td>
+     <td><span className={item.current_price?.amount_jpy?.value==null?"ingredient-unset":""}>{priceLabel(item)}</span></td>
+     <td><span className="ingredient-muted">{ja?"購入条件で管理":"Managed in purchase offers"}</span></td>
+     <td><div className="ingredient-actions"><button type="button" className="secondary" disabled={busy} onClick={()=>begin(item)}>{ja?"編集":"Edit"}</button><button type="button" className="secondary ingredient-delete" disabled={busy} onClick={()=>void remove(item)}>{ja?"削除":"Delete"}</button></div></td>
+    </tr>)}</tbody>
+   </table></div>
+   <div className="ingredient-cards">{visible.map(item=><article key={item.id} className="ingredient-item-card">
+    <div className="ingredient-item-head"><strong>{item.name}</strong><button type="button" className="secondary" disabled={busy} onClick={()=>begin(item)}>{ja?"編集":"Edit"}</button></div>
+    <dl><div><dt>{ja?"価格・規格":"Price / unit"}</dt><dd className={item.current_price?.amount_jpy?.value==null?"ingredient-unset":""}>{priceLabel(item)}</dd></div>
+    <div><dt>{ja?"仕入れ先":"Supplier"}</dt><dd>{ja?"購入条件で管理":"Managed in purchase offers"}</dd></div></dl>
+    <button type="button" className="secondary ingredient-delete" disabled={busy} onClick={()=>void remove(item)}>{ja?"削除":"Delete"}</button>
+   </article>)}</div>
+   {visible.length===0&&<p>{ja?"該当する食材がありません。":"No matching ingredients."}</p>}
+   <div className="ingredient-pagination"><span>{ja?`全${filtered.length}件`:`${filtered.length} ingredients`}</span><div className="ingredient-actions">
+    <button type="button" className="secondary" disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>{ja?"前へ":"Previous"}</button>
+    <span>{Math.min(page,pages)} / {pages}</span>
+    <button type="button" className="secondary" disabled={page>=pages} onClick={()=>setPage(p=>Math.min(pages,p+1))}>{ja?"次へ":"Next"}</button>
+   </div></div>
+  </>}
+  {editing&&items.find(item=>item.id===editing)&&editor(items.find(item=>item.id===editing)!)}
  </section>;
 }
