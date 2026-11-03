@@ -9,7 +9,7 @@ from dataclasses import asdict
 from uuid import uuid4
 from pydantic import BaseModel, Field, ConfigDict
 from .models import Recipe, TrackedValue
-from .costing import calculate_cost
+from .costing import calculate_cost, unit_factor_catalog
 from .mutations import Proposal, MutationError, prepare_mutation
 from .persistence_service import save_validated_mutation, _json
 from uuid import UUID
@@ -432,7 +432,7 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
     # The Supabase create_owned_recipe RPC requires initial revision 0.
     recipe = replace(recipe, revision=0)
     try:
-        snapshot = _json(asdict(calculate_cost(recipe)))
+        snapshot = _json(asdict(calculate_cost(recipe, units=unit_factor_catalog(known_units))))
         repository.create_owned_recipe(owner, recipe, snapshot, unit_candidates=new_units)
     except ValueError as exc:
         raise HTTPException(409, "Recipe already exists") from exc
@@ -486,7 +486,9 @@ def get_demo_recipe_cost(recipe_id: UUID, ctx=Depends(demo_context)):
         raise HTTPException(404, "Recipe not found") from exc
     catalog = (repository.load_owned_catalog(owner, recipe)
                if any(m.price_mode == "inherit" for m in recipe.materials) else {})
-    return _json(asdict(calculate_cost(recipe, catalog)))
+    unit_loader = getattr(repository, "list_owned_units", None)
+    units = unit_factor_catalog(unit_loader(owner)) if callable(unit_loader) else {}
+    return _json(asdict(calculate_cost(recipe, catalog, units)))
 
 
 class AIProposalBody(BaseModel):
