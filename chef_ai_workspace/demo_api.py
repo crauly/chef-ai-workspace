@@ -243,6 +243,48 @@ def delete_demo_supplier(supplier_id: UUID, ctx=Depends(demo_context)):
     return Response(status_code=204)
 
 
+@router.get("/ingredients")
+def list_demo_ingredient_master(ctx=Depends(demo_context)):
+    owner, repository=ctx
+    loader=getattr(repository,"list_owned_ingredient_master",None)
+    if not callable(loader):
+        raise HTTPException(503,"Ingredient master unavailable")
+    return {"items":loader(owner)}
+
+
+class IngredientMasterEditBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    name: str=Field(min_length=1,max_length=200)
+    price_jpy: str | None=None
+    price_quantity: str | None=None
+    price_unit: str | None=Field(default=None,min_length=1,max_length=32)
+
+
+@router.put("/ingredients/{ingredient_id}")
+def edit_demo_ingredient_master(ingredient_id:UUID, body:IngredientMasterEditBody,
+                                ctx=Depends(demo_context)):
+    """One explicitly authorized manager action changes shared master price."""
+    owner, repository=ctx
+    from .models import PriceQuote
+    fields=(body.price_jpy,body.price_quantity,body.price_unit)
+    if any(value is not None for value in fields) and not all(value is not None for value in fields):
+        raise HTTPException(422,"Partial master price")
+    quote=None
+    if all(value is not None for value in fields):
+        try:
+            quote=PriceQuote(TrackedValue(body.price_jpy,"confirmed","user"),
+                             body.price_quantity,body.price_unit,"manual")
+        except (TypeError,ValueError) as exc:
+            raise HTTPException(422,"Invalid master price") from exc
+    editor=getattr(repository,"update_owned_ingredient_master",None)
+    if not callable(editor):
+        raise HTTPException(503,"Ingredient master unavailable")
+    if not editor(owner,str(ingredient_id),body.name.strip(),
+                  asdict(quote) if quote is not None else None):
+        raise HTTPException(404,"Ingredient not found")
+    return {"id":str(ingredient_id),"name":body.name.strip(),"updated":True}
+
+
 @router.get("/ingredients/search")
 def search_demo_ingredients(q: str = Query(default="", max_length=200),
                             limit: int = Query(default=20, ge=1, le=50),
