@@ -57,8 +57,7 @@ export default function UnitManager({locale}:{locale:Locale}){
   }catch{setError(ja?"削除できません。レシピや食材価格で使用中の可能性があります。":"Cannot delete a unit that is in use.");}
   finally{setBusy(false);}
  }
- return <section className="workspace-section" aria-label={ja?"単位マスター":"Unit master"}>
-  <div className="workspace-section-head"><h3>{ja?"単位マスター":"Unit master"}</h3></div>
+ return <section className="workspace-section settings-manager-unit" aria-label={ja?"単位マスター":"Unit master"}>
   <p>{ja?"レシピで使用する単位と別名を確認・編集します。新規単位はレシピ保存時に一括承認されます。":"Review unit names and aliases. New units are approved with recipe saving."}</p>
   <div><label>{ja?"新規単位名":"New unit"}<input maxLength={32} value={newSymbol} disabled={busy} onChange={e=>setNewSymbol(e.target.value)}/></label><label>{ja?"単位分類":"Dimension"}<select value={newDimension} disabled={busy} onChange={e=>setNewDimension(e.target.value)}><option value="mass">Mass</option><option value="volume">Volume</option><option value="count">Count</option><option value="other">Other</option></select></label><button type="button" disabled={busy||!newSymbol.trim()} onClick={()=>void create()}>{ja?"単位を登録":"Create unit"}</button></div>
   {error&&<p role="alert">{error}</p>}

@@ -84,7 +84,6 @@ export default function SourcingSuggestions({locale}:{locale:string}){
    <p className="muted">{ja?"比較":"Comparison"}: {verdict(c,ja)}{c.source?` / ${ja?"出典":"Source"}: ${c.source}`:""}{c.observed_at?` (${c.observed_at})`:""}{c.unknowns.length>0?` [${c.unknowns.join("; ")}]`:""}</p></div>;
  }
  return <section className="card" aria-label={ja?"代替・購入先候補":"Sourcing suggestions"}>
-  <div className="toolbar"><h2>{ja?"代替・購入先候補":"Substitute sourcing"}</h2></div>
   <p className="muted">{ja?"提案のみ。食材・仕入先・価格の変更は行いません。":"Proposals only. Nothing is changed."}</p>
   {error&&<p role="alert" className="error">{error}</p>}
   <form onSubmit={lookup}>

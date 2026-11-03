@@ -13,6 +13,12 @@ class MasterRepo:
     def list_owned_ingredient_master(self,owner):
         self.calls.append(("list_ingredient",owner))
         return [{"id":str(uuid4()),"name":"Flour","current_price":None}]
+    def list_owned_ingredient_suppliers(self, owner):
+        self.calls.append(("list_suppliers_by_ingredient", owner))
+        return {"11111111-1111-1111-1111-111111111111": ["A食品"]}
+    def link_owned_ingredient_supplier(self, owner, ingredient_id, supplier_id):
+        self.calls.append(("link_ingredient_supplier", owner, ingredient_id, supplier_id))
+        return str(uuid4())
     def list_owned_units(self,owner):
         self.calls.append(("list_unit",owner))
         return []
@@ -50,6 +56,23 @@ class MasterCrudApiTests(unittest.TestCase):
         del app.state.repository_factory
         self.client.close()
 
+    def test_supplier_mapping_and_link_use_demo_owner(self):
+        ingredients=self.client.get("/demo/ingredients",headers=self.headers)
+        self.assertEqual(ingredients.status_code,200)
+        self.assertEqual(ingredients.json()["suppliers_by_ingredient"],
+                         {"11111111-1111-1111-1111-111111111111": ["A食品"]})
+        ingredient=str(uuid4())
+        supplier=str(uuid4())
+        denied=self.client.post(f"/demo/ingredients/{ingredient}/suppliers",
+                                json={"supplier_id":supplier})
+        self.assertEqual(denied.status_code,403)
+        linked=self.client.post(f"/demo/ingredients/{ingredient}/suppliers",
+                                headers=self.headers,
+                                json={"supplier_id":supplier})
+        self.assertEqual(linked.status_code,201)
+        self.assertIn(("link_ingredient_supplier",self.owner,ingredient,supplier),
+                      self.repo.calls)
+
     def test_all_writes_reject_missing_secret_without_repository_access(self):
         id=str(uuid4())
         cases=[("post","/demo/ingredients",{"name":"Flour"}),
@@ -74,7 +97,7 @@ class MasterCrudApiTests(unittest.TestCase):
         self.assertEqual(self.client.put(f"/demo/units/{id}",json={"symbol":"kg","dimension":"mass","aliases":["kilo"]},headers=self.headers).status_code,200)
         self.assertEqual(self.client.delete(f"/demo/ingredients/{id}",headers=self.headers).status_code,200)
         self.assertEqual(self.client.delete(f"/demo/units/{id}",headers=self.headers).status_code,200)
-        self.assertEqual(len(self.repo.calls),8)
+        self.assertEqual(len(self.repo.calls),9)
         self.assertTrue(all(call[1]==self.owner for call in self.repo.calls))
 
     def test_invalid_payloads_do_not_write(self):

@@ -39,7 +39,7 @@ test("axis picks show every returned candidate and never mix ingredients",async(
   return route.fulfill({json:axisBody()});
  });
  await page.goto("/settings");
- await page.locator("details").filter({has:page.locator("summary", {hasText:"購入先候補"})}).locator("summary").click();
+ await page.getByRole("navigation",{name:"設定項目"}).getByRole("button",{name:"購入先候補"}).click();
  // Load A's candidates, then start its (blocked) axis request.
  await page.getByLabel("食材ID").fill(A);
  await page.getByRole("button",{name:"候補を探す",exact:true}).click();

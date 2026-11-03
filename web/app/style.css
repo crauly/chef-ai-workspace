@@ -457,3 +457,156 @@ main.recipe-detail-page>div[hidden]{display:none!important}
 .bottom-nav a:not(.bottom-nav-mic),.bottom-nav button:not(.bottom-nav-mic){display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
 .bottom-nav .bottom-nav-icon{width:21px;height:21px;display:block;flex:none}
 .bottom-nav a:not(.bottom-nav-mic) span,.bottom-nav button:not(.bottom-nav-mic) span{font-size:.73rem;line-height:1.1}
+
+
+/* Settings ingredient library: use the existing chef palette and layout. */
+.ingredient-manager{min-width:0}
+.ingredient-create,.ingredient-controls{display:flex;flex-wrap:wrap;align-items:end;gap:12px;margin:14px 0}
+.ingredient-create label,.ingredient-controls label{display:grid;gap:5px;flex:1;min-width:180px}
+.ingredient-manager input{width:100%;background:#fff;color:#1e2522}
+.ingredient-table-wrap{width:100%;overflow-x:auto;border:1px solid rgba(163,186,174,.3);border-radius:12px}
+.ingredient-table{width:100%;border-collapse:collapse;text-align:left;font-size:.9rem}
+.ingredient-table th{background:rgba(114,145,128,.17);font-weight:700}
+.ingredient-table th,.ingredient-table td{padding:12px;border-bottom:1px solid rgba(163,186,174,.23);vertical-align:middle}
+.ingredient-table tbody tr:last-child td{border-bottom:0}
+.ingredient-table td:first-child{overflow-wrap:anywhere;min-width:120px}
+.ingredient-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ingredient-actions button{padding:7px 12px}
+.ingredient-delete{color:#bd6565;border:1px solid rgba(189,101,101,.45);background:transparent}
+.ingredient-unset{color:#f3b6b6}
+.ingredient-muted{opacity:.72;font-size:.83rem}
+.ingredient-pagination{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-top:15px}
+.ingredient-editor{margin-top:18px;padding:16px;border:1px solid rgba(163,186,174,.35);border-radius:12px}
+.ingredient-editor h4{margin:0 0 12px}
+.ingredient-editor-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:14px}
+.ingredient-editor-fields label{display:grid;gap:5px}
+.ingredient-cards{display:none}
+@media(max-width:650px){
+ .ingredient-table-wrap{display:none}
+ .ingredient-cards{display:grid;gap:10px}
+ .ingredient-item-card{border:1px solid rgba(163,186,174,.3);border-radius:12px;padding:12px;min-width:0}
+ .ingredient-item-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+ .ingredient-item-head strong{overflow-wrap:anywhere}
+ .ingredient-item-card dl{margin:12px 0;display:grid;gap:8px}
+ .ingredient-item-card dl>div{display:grid;grid-template-columns:95px minmax(0,1fr);gap:8px}
+ .ingredient-item-card dt{font-size:.8rem;opacity:.75}
+ .ingredient-item-card dd{margin:0;overflow-wrap:anywhere}
+ .ingredient-editor-fields{grid-template-columns:1fr}
+ .ingredient-create button{width:100%}
+}
+
+
+/* Shared settings section rhythm; retain existing brand/header/navigation. */
+.settings-page .workspace-settings-content>details{border:1px solid rgba(163,186,174,.28);border-radius:12px;padding:12px 14px;min-width:0;background:rgba(114,145,128,.07)}
+.settings-page .workspace-settings-content>details[open]{background:rgba(114,145,128,.11)}
+.settings-page .workspace-settings-content>details>summary{cursor:pointer;font-weight:700;min-height:30px}
+.settings-page .workspace-settings-content>details>.workspace-section,
+.settings-page .workspace-settings-content>details>.card{max-width:none;margin:12px 0 0}
+.settings-page .workspace-settings-content button{min-height:38px}
+@media(max-width:650px){.settings-page .workspace-settings-content>details{padding:10px}.settings-page .workspace-settings-content>details>.workspace-section{padding:12px 8px}}
+
+
+/* Approved management layout. Brand/header/footer and dark Chef palette stay intact. */
+.settings-page{max-width:1400px}
+.settings-layout{display:grid;grid-template-columns:240px minmax(0,1fr);gap:24px;align-items:start;margin-top:14px}
+.settings-sidebar{padding:16px 10px;border:1px solid var(--chef-edge);border-radius:16px;background:var(--chef-raised);position:sticky;top:14px}
+.settings-sidebar h2{font-size:1.12rem;margin:0 12px 14px}
+.settings-side-items{display:grid;gap:5px}
+.settings-side-items button{display:flex;gap:12px;align-items:center;width:100%;background:transparent;color:var(--chef-text);padding:12px 10px;text-align:left;border:1px solid transparent;font-size:.91rem;font-weight:600;border-radius:10px}
+.settings-side-items button:hover{background:rgba(163,186,174,.13)}
+.settings-side-items button.is-selected{background:rgba(83,160,255,.14);border-color:rgba(83,160,255,.35);color:#b7d8ff}
+.settings-side-items button svg{flex:none}
+.settings-main-panel{background:#15231f;border:1px solid #2c473c;border-radius:18px;padding:26px;min-width:0}
+.settings-panel-title{font-size:1.6rem;line-height:1.35;margin:0 0 8px}
+.settings-panel-description{margin:0 0 22px;color:#bfd0c6;font-size:.91rem}
+.settings-mobile-picker{display:none}
+.settings-main-panel .workspace-section{margin:0;max-width:none}
+.settings-main-panel .card{margin:0;max-width:none}
+.settings-main-panel .plate-settings-body{margin:0;max-width:none}
+.settings-main-panel .ingredient-controls{display:grid;grid-template-columns:auto minmax(150px,1fr) minmax(150px,220px);align-items:end;gap:12px;margin:14px 0 22px}
+.settings-main-panel .ingredient-controls label{min-width:0;margin:0}
+.settings-main-panel .ingredient-supplier-filter{display:flex;align-items:center;gap:8px}
+.settings-main-panel .ingredient-supplier-filter span{white-space:nowrap;font-size:.85rem}
+.settings-main-panel .ingredient-controls select{min-width:0;width:100%;background:var(--chef-raised);color:var(--chef-text);border:1px solid #68796e;border-radius:9px;padding:11px}
+.settings-main-panel .ingredient-add-button{background:#244a39;border:1px solid #527560;font-weight:700;white-space:nowrap}
+.settings-main-panel .ingredient-create{border:1px solid rgba(163,186,174,.3);background:rgba(114,145,128,.09);border-radius:12px;padding:14px;margin:10px 0 22px}
+.settings-main-panel .ingredient-create label{min-width:200px}
+.settings-main-panel .ingredient-table th{background:rgba(114,145,128,.24)}
+.settings-main-panel .ingredient-table td,.settings-main-panel .ingredient-table th{padding:13px 10px}
+.settings-main-panel .ingredient-table th:first-child{width:48px}
+.settings-main-panel .ingredient-table th:nth-child(5){width:70px}
+.settings-main-panel .ingredient-table td:last-child{min-width:155px}
+.settings-main-panel .ingredient-unset{color:#f2b0b0}
+.settings-main-panel .ingredient-muted{color:#aebeb5;opacity:1}
+.settings-main-panel .ingredient-pagination{margin-top:20px}
+.settings-main-panel .ingredient-editor{background:rgba(0,0,0,.15)}
+.settings-main-panel .ingredient-editor-head{display:flex;gap:12px;align-items:center;justify-content:space-between}
+.settings-main-panel .ingredient-editor-fields input{width:100%}
+.settings-main-panel .supplier-manager-list li,.settings-main-panel .ingredient-item-card{background:rgba(114,145,128,.08)}
+.settings-main-panel select,.settings-main-panel textarea{color:inherit;max-width:100%}
+@media(max-width:900px){
+ .settings-layout{grid-template-columns:190px minmax(0,1fr);gap:12px}
+ .settings-main-panel{padding:18px}
+ .settings-main-panel .ingredient-controls{grid-template-columns:1fr 1fr}
+ .settings-main-panel .ingredient-add-button{grid-column:1/-1}
+ .settings-main-panel .ingredient-search{grid-column:1}
+ .settings-main-panel .ingredient-supplier-filter{grid-column:2;flex-wrap:wrap}
+}
+@media(max-width:650px){
+ .settings-page{padding-left:12px;padding-right:12px}
+ .settings-layout{display:block}
+ .settings-sidebar{display:none}
+ .settings-mobile-picker{display:block;margin-bottom:14px}
+ .settings-mobile-picker label{display:grid;gap:6px;font-weight:600}
+ .settings-mobile-picker select{width:100%;background:#253c34;color:var(--chef-text);border:1px solid #5a7567;border-radius:10px;padding:12px}
+ .settings-main-panel{padding:16px 12px;border-radius:14px}
+ .settings-panel-title{font-size:1.35rem}
+ .settings-main-panel .ingredient-controls{grid-template-columns:1fr;gap:12px}
+ .settings-main-panel .ingredient-add-button,.settings-main-panel .ingredient-search,.settings-main-panel .ingredient-supplier-filter{grid-column:1}
+ .settings-main-panel .ingredient-supplier-filter{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center}
+ .settings-main-panel .ingredient-controls input{min-width:0}
+ .settings-main-panel .ingredient-create{padding:10px}
+ .settings-main-panel .ingredient-item-head button{font-size:1.3rem}
+ .settings-main-panel .ingredient-item-card dl>div{grid-template-columns:92px minmax(0,1fr)}
+}
+
+
+.settings-main-panel .ingredient-sort{border:0;background:none;color:inherit;font-weight:700;padding:3px;text-align:left;min-height:30px;white-space:nowrap}
+.settings-main-panel .ingredient-sort:hover{text-decoration:underline}
+.settings-main-panel .ingredient-supplier-link{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:14px 0}
+.settings-main-panel .ingredient-supplier-link label{display:grid;gap:6px;flex:1;min-width:200px}
+.settings-main-panel .ingredient-supplier-link select{width:100%;padding:11px;border-radius:9px;border:1px solid #68796e;background:var(--chef-raised);color:var(--chef-text)}
+.settings-main-panel .ingredient-supplier-link button{min-height:45px}
+
+
+/* Consistent forms and list density for every management subsection. */
+.settings-main-panel .settings-manager-unit,.settings-main-panel .supplier-manager,.settings-main-panel .card{background:transparent;border:0;padding:0;box-shadow:none}
+.settings-main-panel .settings-manager-unit>div:has(>label){display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:18px 0}
+.settings-main-panel .settings-manager-unit label,.settings-main-panel .supplier-manager label{display:grid;gap:6px;min-width:0}
+.settings-main-panel .settings-manager-unit>div:has(>label)>label{flex:1;min-width:130px}
+.settings-main-panel .settings-manager-unit input,.settings-main-panel .settings-manager-unit select,
+.settings-main-panel .supplier-manager input{background:#fff;color:#1e2522;border:1px solid #b9c8bd;padding:10px;border-radius:9px;width:100%;max-width:100%}
+.settings-main-panel .settings-manager-unit ul{list-style:none;padding:0;margin:14px 0;display:grid;gap:9px}
+.settings-main-panel .settings-manager-unit li{border:1px solid rgba(163,186,174,.3);background:rgba(114,145,128,.08);padding:13px;border-radius:11px;overflow-wrap:anywhere}
+.settings-main-panel .settings-manager-unit li>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}
+.settings-main-panel .settings-manager-unit li>div>button{justify-self:start}
+.settings-main-panel .settings-manager-unit li>button{margin:6px 8px 0 0}
+.settings-main-panel .supplier-manager form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0}
+.settings-main-panel .supplier-manager form>.toolbar{grid-column:1/-1;justify-content:flex-start}
+.settings-main-panel .supplier-manager-list li .toolbar{flex-direction:row;gap:8px;align-items:center;justify-content:flex-end}
+.settings-main-panel .supplier-manager-list li small{color:#b7c6bd}
+.settings-main-panel .supplier-manager-list li .toolbar button{padding:8px 12px}
+.settings-main-panel .supplier-manager>.toolbar{flex-direction:row;justify-content:flex-end}
+.settings-main-panel .supplier-manager p,.settings-main-panel .settings-manager-unit p{font-size:.9rem}
+@media(max-width:650px){
+ .settings-main-panel .supplier-manager form{grid-template-columns:1fr}
+ .settings-main-panel .settings-manager-unit li>div{grid-template-columns:1fr}
+ .settings-main-panel .settings-manager-unit>div:has(>label){display:grid;grid-template-columns:1fr}
+ .settings-main-panel .supplier-manager-list li .toolbar{width:100%;justify-content:flex-start}
+}
+
+
+.settings-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.settings-panel-heading .settings-panel-title{margin:0}
+.settings-help-button{white-space:nowrap;padding:8px 12px;font-size:.86rem}
+.settings-help{background:rgba(114,145,128,.13);border:1px solid rgba(163,186,174,.32);border-radius:10px;padding:12px 14px;color:#d4e4da;font-size:.88rem;margin:0 0 18px}

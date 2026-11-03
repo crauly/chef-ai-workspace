@@ -51,9 +51,8 @@ export default function SupplierManager({locale}:{locale:string}){
   catch{setError(ja?"削除できません。購入条件に使用されている仕入先は保持されます。":"Could not delete. Suppliers linked to purchase offers are retained.");}
   finally{setBusy(false);}
  }
- return <section className="card supplier-manager" aria-label={ja?"仕入先マスター":"Supplier master"}>
-  <h2>{ja?"仕入先マスター":"Supplier Master"}</h2>
-  <p className="muted">{ja?"登録済み仕入先を管理します。購入条件や価格履歴は削除しません。":"Manage suppliers without changing purchase offers or price history."}</p>
+ return <section className="card supplier-manager" aria-label={ja?"仕入れ先管理":"Suppliers"}>
+    <p className="muted">{ja?"登録済み仕入先を管理します。購入条件や価格履歴は削除しません。":"Manage suppliers without changing purchase offers or price history."}</p>
   {error&&<p role="alert">{error}</p>}
   <form onSubmit={save}>
    <label>{ja?"仕入先名":"Supplier name"}<input value={name} maxLength={200} onChange={e=>setName(e.target.value)} required/></label>
