@@ -121,32 +121,57 @@ revoke all on function public.create_owned_recipe(uuid,uuid,text,jsonb,jsonb,jso
 grant execute on function public.create_owned_recipe(uuid,uuid,text,jsonb,jsonb,jsonb)
  to service_role;
 
--- Explicit management action only: change aliases without changing canonical ID
--- or touching recipe history. No creation through this function.
-create or replace function public.update_owned_unit_aliases(
- p_owner_id uuid, p_unit_id uuid, p_aliases text[]
+-- Explicit chef-approved master edit. Preserve canonical ID and the old
+-- symbol as an alias so existing recipe snapshots remain readable.
+create or replace function public.update_owned_unit(
+ p_owner_id uuid, p_unit_id uuid, p_symbol text,
+ p_dimension text, p_aliases text[]
 ) returns boolean
 language plpgsql security definer set search_path = ''
 as $$
+declare v_symbol text := btrim(p_symbol);
 declare v_aliases text[] := coalesce(p_aliases, '{}');
+declare v_old_symbol text;
 begin
  if p_owner_id is null or p_unit_id is null
+    or length(v_symbol) not between 1 and 32
+    or p_dimension not in ('mass','volume','count','other')
     or cardinality(v_aliases)>20
     or exists(select 1 from unnest(v_aliases) a
               where length(btrim(a)) not between 1 and 32)
- then raise exception 'Invalid unit aliases'; end if;
- -- A changed alias must not make another unit's identity ambiguous.
- if exists(
-   select 1 from public.units u
-   where u.owner_id=p_owner_id and u.id<>p_unit_id
-     and (lower(u.symbol)=any(select lower(btrim(a)) from unnest(v_aliases) a)
-       or exists(select 1 from unnest(u.aliases) a, unnest(v_aliases) b
-                 where lower(btrim(a))=lower(btrim(b))))
- ) then raise exception 'Unit alias collides with an existing unit'; end if;
- update public.units set aliases=v_aliases, updated_at=now()
- where owner_id=p_owner_id and id=p_unit_id;
+ then raise exception 'Invalid unit edit'; end if;
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_owner_id::text,0));
+ select symbol into v_old_symbol from public.units
+ where owner_id=p_owner_id and id=p_unit_id for update;
  if not found then raise exception 'Unit not found'; end if;
+ if lower(v_old_symbol)<>lower(v_symbol) then
+   v_aliases := array_append(v_aliases,v_old_symbol);
+ end if;
+ if cardinality(v_aliases)>20 or exists(
+   select 1 from unnest(v_aliases) a
+   where lower(btrim(a))=lower(v_symbol)
+ ) or exists(
+   select 1 from unnest(v_aliases) a group by lower(btrim(a)) having count(*)>1
+ ) then raise exception 'Duplicate unit token'; end if;
+ if exists(
+   select 1 from public.units other
+   where other.owner_id=p_owner_id and other.id<>p_unit_id
+     and (
+       lower(other.symbol)=lower(v_symbol)
+       or lower(other.symbol)=any(select lower(btrim(a)) from unnest(v_aliases) a)
+       or exists(
+         select 1 from unnest(other.aliases) old_alias
+         where lower(btrim(old_alias))=lower(v_symbol)
+            or lower(btrim(old_alias))=any(select lower(btrim(a)) from unnest(v_aliases) a)
+       )
+     )
+ ) then raise exception 'Unit identity collision'; end if;
+ update public.units set symbol=v_symbol,dimension=p_dimension,
+                         aliases=v_aliases,updated_at=now()
+ where owner_id=p_owner_id and id=p_unit_id;
  return true;
 end; $$;
-revoke all on function public.update_owned_unit_aliases(uuid,uuid,text[]) from public, anon, authenticated;
-grant execute on function public.update_owned_unit_aliases(uuid,uuid,text[]) to service_role;
+revoke all on function public.update_owned_unit(uuid,uuid,text,text,text[])
+ from public,anon,authenticated;
+grant execute on function public.update_owned_unit(uuid,uuid,text,text,text[])
+ to service_role;
