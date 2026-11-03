@@ -34,7 +34,7 @@ begin
      select 1 from unnest(u.aliases) a
      where lower(btrim(a))=lower(btrim(p_spoken))
    ));
- if cardinality(v_ids)<>1 then
+ if v_ids is null or cardinality(v_ids)<>1 then
    raise exception 'Unknown or ambiguous unit';
  end if;
  return v_ids[1];
