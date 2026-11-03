@@ -50,12 +50,18 @@ grant execute on function public.resolve_owned_unit_id(uuid,text) to service_rol
 drop function if exists public.create_owned_recipe(uuid,uuid,text,jsonb,jsonb);
 create or replace function public.create_owned_recipe(
  p_owner_id uuid, p_recipe_id uuid, p_title text,
- p_initial_state jsonb, p_cost_snapshot jsonb, p_unit_candidates jsonb
+ p_initial_state jsonb, p_cost_snapshot jsonb,
+ p_unit_candidates jsonb, p_ingredient_entries jsonb
 ) returns uuid
 language plpgsql security definer set search_path = ''
 as $$
 declare v_item jsonb;
 declare v_unit_id uuid;
+declare v_ing_id uuid;
+declare v_ing_name text;
+declare v_ing_owner uuid;
+declare v_ing_existing_name text;
+declare v_price jsonb;
 declare v_symbol text;
 declare v_dim text;
 declare v_material jsonb;
@@ -70,6 +76,7 @@ begin
     or v_state->>'revision' is distinct from '0'
     or p_cost_snapshot is null or jsonb_typeof(p_cost_snapshot) <> 'object'
     or p_unit_candidates is null or jsonb_typeof(p_unit_candidates) <> 'array'
+    or p_ingredient_entries is null or jsonb_typeof(p_ingredient_entries) <> 'array'
  then raise exception 'Invalid initial recipe'; end if;
  -- Serializes unit token admission and alias edits for this owner.
  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_owner_id::text,0));
@@ -93,10 +100,56 @@ begin
    insert into public.units(owner_id,symbol,dimension)
    values(p_owner_id,v_symbol,v_dim) on conflict do nothing;
  end loop;
+ -- Ingredient is the only price SSOT. Register/reuse/modify it under
+ -- this SAME recipe-save transaction and owner-scoped lock. No recipe quote
+ -- can be persisted, even if the backend is compromised or out of date.
+ for v_item in select * from jsonb_array_elements(p_ingredient_entries) loop
+   if jsonb_typeof(v_item)<>'object' then raise exception 'Invalid ingredient entry'; end if;
+   begin
+     v_ing_id := (v_item->>'id')::uuid;
+   exception when others then raise exception 'Invalid ingredient ID'; end;
+   v_ing_name := btrim(coalesce(v_item->>'name',''));
+   v_price := v_item->'current_price';
+   if length(v_ing_name) not between 1 and 200 or
+      (v_price is not null and jsonb_typeof(v_price) not in ('object','null'))
+   then raise exception 'Invalid ingredient entry'; end if;
+   if jsonb_typeof(v_price)='object' then
+     v_unit_id := public.resolve_owned_unit_id(p_owner_id,v_price->>'per_unit');
+     v_price := jsonb_set(v_price,'{per_unit_id}',to_jsonb(v_unit_id::text),true);
+   end if;
+   select i.owner_id,i.name into v_ing_owner,v_ing_existing_name
+     from public.ingredients i where i.id=v_ing_id for update;
+   if found then
+     if v_ing_owner<>p_owner_id or lower(btrim(v_ing_existing_name))<>lower(v_ing_name)
+     then raise exception 'Ingredient identity mismatch'; end if;
+     if jsonb_typeof(v_price)='object' then
+       update public.ingredients set current_price=v_price
+         where id=v_ing_id and owner_id=p_owner_id;
+     end if;
+   else
+     if exists(select 1 from public.ingredients i where i.owner_id=p_owner_id
+                  and lower(btrim(i.name))=lower(v_ing_name))
+     then raise exception 'Existing ingredient ID must be reused'; end if;
+     insert into public.ingredients(id,owner_id,name,current_price)
+     values(v_ing_id,p_owner_id,v_ing_name,
+            case when jsonb_typeof(v_price)='object' then v_price else null end);
+   end if;
+ end loop;
  -- No missing or foreign unit can enter the saved recipe.
  if jsonb_typeof(v_state->'materials') <> 'array'
  then raise exception 'Invalid material lines'; end if;
  for v_material in select * from jsonb_array_elements(v_state->'materials') loop
+   if jsonb_typeof(v_material)<>'object'
+      or v_material->>'price_mode' is distinct from 'inherit'
+      or (v_material->'price_override' is not null
+          and jsonb_typeof(v_material->'price_override')<>'null')
+   then raise exception 'Recipe-specific prices prohibited'; end if;
+   begin
+     v_ing_id := (v_material->>'ingredient_id')::uuid;
+   exception when others then raise exception 'Ingredient link required'; end;
+   if not exists(select 1 from public.ingredients i
+                 where i.owner_id=p_owner_id and i.id=v_ing_id)
+   then raise exception 'Foreign or missing ingredient link'; end if;
    if v_material->>'unit' is not null then
      v_unit_id := public.resolve_owned_unit_id(p_owner_id,v_material->>'unit');
      v_material := jsonb_set(v_material,'{unit_id}',to_jsonb(v_unit_id::text),true);
@@ -117,9 +170,9 @@ begin
  values(p_recipe_id,p_owner_id,0,v_state,p_cost_snapshot);
  return p_recipe_id;
 end; $$;
-revoke all on function public.create_owned_recipe(uuid,uuid,text,jsonb,jsonb,jsonb)
+revoke all on function public.create_owned_recipe(uuid,uuid,text,jsonb,jsonb,jsonb,jsonb)
  from public,anon,authenticated;
-grant execute on function public.create_owned_recipe(uuid,uuid,text,jsonb,jsonb,jsonb)
+grant execute on function public.create_owned_recipe(uuid,uuid,text,jsonb,jsonb,jsonb,jsonb)
  to service_role;
 
 -- Explicit chef-approved master edit. Preserve canonical ID and the old
