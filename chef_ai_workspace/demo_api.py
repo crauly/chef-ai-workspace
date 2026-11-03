@@ -59,6 +59,7 @@ def resolve_demo_unit(
 
 class UnitEditBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    base_factor: str | None = None
     symbol: str = Field(min_length=1, max_length=32)
     dimension: str = Field(pattern=r"^(mass|volume|count|other)$")
     aliases: list[str] = Field(max_length=20)
@@ -72,13 +73,23 @@ def edit_demo_unit(unit_id: UUID, body: UnitEditBody,
     aliases = [alias.strip() for alias in body.aliases]
     if any(not alias or len(alias) > 32 for alias in aliases):
         raise HTTPException(422, "Invalid unit alias")
+    if body.base_factor is not None:
+        from decimal import Decimal, InvalidOperation
+        try:
+            factor = Decimal(body.base_factor)
+            if not factor.is_finite() or factor <= 0:
+                raise ValueError("factor")
+        except (InvalidOperation, ValueError):
+            raise HTTPException(422, "Invalid unit conversion factor")
     editor = getattr(repository, "update_owned_unit", None)
     if not callable(editor):
         raise HTTPException(503, "Unit manager unavailable")
-    if not editor(owner, str(unit_id), body.symbol.strip(), body.dimension, aliases):
+    if not editor(owner, str(unit_id), body.symbol.strip(), body.dimension,
+                  body.base_factor, aliases):
         raise HTTPException(404, "Unit not found")
     return {"id": str(unit_id), "symbol": body.symbol.strip(),
-            "dimension": body.dimension, "aliases": aliases}
+            "dimension": body.dimension, "base_factor": body.base_factor,
+            "aliases": aliases}
 
 
 @router.get("/recipes")
