@@ -3,6 +3,7 @@ import NavIcon from "../NavIcon";
 
 import {useEffect,useState} from "react";
 import SupplierManager from "../SupplierManager";
+import UnitManager from "../UnitManager";
 import SourcingSuggestions from "../SourcingSuggestions";
 import PlateSettingsSection from "../PlateSettingsSection";
 import PriceBell from "../PriceBell";
@@ -18,6 +19,7 @@ export default function SettingsPage(){
   <section className="workspace-section workspace-settings-section" aria-labelledby="settings-title">
    <div className="workspace-section-head"><div><h2 id="settings-title">{ja?"管理・設定":"Management & Settings"}</h2><p>{ja?"仕入先・購入先候補・料理画像設定":"Suppliers, sourcing suggestions, and dish image settings"}</p></div></div>
    <div className="workspace-settings-content">
+    <UnitManager locale={locale}/>
     <SupplierManager locale={locale}/>
     <SourcingSuggestions locale={locale}/>
     <details className="plate-settings"><summary>{ja?"料理画像設定（デフォルト皿）":"Dish image settings (default plate)"}</summary><PlateSettingsSection locale={locale}/></details>
