@@ -17,6 +17,8 @@ export default function IngredientManager({locale}:{locale:Locale}){
  const [supplierMap,setSupplierMap]=useState<Record<string,string[]>|null>(null);
  const [showCreate,setShowCreate]=useState(false);
  const [page,setPage]=useState(1);
+ const [sort,setSort]=useState<"name"|"price"|"supplier">("name");
+ const [descending,setDescending]=useState(false);
  const pageSize=10;
  const [name,setName]=useState("");
  const [price,setPrice]=useState("");
@@ -87,9 +89,16 @@ export default function IngredientManager({locale}:{locale:Locale}){
   const linked=supplierMap[item.id]??[];
   return nameMatches&&(supplierFilter==="unset"?linked.length===0:linked.includes(supplierFilter));
  });
- const pages=Math.max(1,Math.ceil(filtered.length/pageSize));
+ const compare=(a:Ingredient,b:Ingredient)=>{
+  if(sort==="price")return Number(a.current_price?.amount_jpy?.value??-1)-Number(b.current_price?.amount_jpy?.value??-1);
+  if(sort==="supplier")return (supplierMap?.[a.id]?.join("、")??"").localeCompare(supplierMap?.[b.id]?.join("、")??"",locale);
+  return a.name.localeCompare(b.name,locale);
+ };
+ const ordered=[...filtered].sort((a,b)=>(descending?-1:1)*compare(a,b));
+ const sortBy=(field:"name"|"price"|"supplier")=>{setDescending(sort===field?!descending:false);setSort(field);setPage(1);};
+ const pages=Math.max(1,Math.ceil(ordered.length/pageSize));
  const effectivePage=Math.min(page,pages);
- const visible=filtered.slice((effectivePage-1)*pageSize,effectivePage*pageSize);
+ const visible=ordered.slice((effectivePage-1)*pageSize,effectivePage*pageSize);
  const priceLabel=(item:Ingredient)=>item.current_price?.amount_jpy?.value!=null
   ? `¥${Number(item.current_price.amount_jpy.value).toLocaleString("ja-JP")} / ${item.current_price.per_quantity??""} ${item.current_price.per_unit??""}`
   : (ja?"未設定":"Not set");
@@ -125,7 +134,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
   {error&&<p role="alert" className="error">{error}</p>}
   {loading?<p>{ja?"読み込み中":"Loading"}</p>:items.length===0?<p>{ja?"登録済み食材はありません。":"No ingredients registered."}</p>:<>
    <div className="ingredient-table-wrap"><table className="ingredient-table">
-    <thead><tr><th scope="col">{ja?"No.":"No."}</th><th scope="col">{ja?"食材名":"Ingredient"}</th><th scope="col">{ja?"価格・規格":"Price / Unit"}</th><th scope="col">{ja?"仕入れ先":"Supplier"}</th><th scope="col">{ja?"備考":"Notes"}</th><th scope="col">{ja?"操作":"Actions"}</th></tr></thead>
+    <thead><tr><th scope="col">{ja?"No.":"No."}</th><th scope="col" aria-sort={sort==="name"?(descending?"descending":"ascending"):"none"}><button type="button" className="ingredient-sort" onClick={()=>sortBy("name")}>{ja?"食材名":"Ingredient"} ↕</button></th><th scope="col" aria-sort={sort==="price"?(descending?"descending":"ascending"):"none"}><button type="button" className="ingredient-sort" onClick={()=>sortBy("price")}>{ja?"価格・規格":"Price / Unit"} ↕</button></th><th scope="col" aria-sort={sort==="supplier"?(descending?"descending":"ascending"):"none"}><button type="button" className="ingredient-sort" onClick={()=>sortBy("supplier")}>{ja?"仕入れ先":"Supplier"} ↕</button></th><th scope="col">{ja?"備考":"Notes"}</th><th scope="col">{ja?"操作":"Actions"}</th></tr></thead>
     <tbody>{visible.map((item,i)=><tr key={item.id}>
      <td>{(effectivePage-1)*pageSize+i+1}</td>
      <td><strong>{item.name}</strong></td>
