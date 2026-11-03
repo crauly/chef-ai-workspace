@@ -597,24 +597,15 @@ def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
     proposal = Proposal(str(recipe_id), body.base_revision, str(body.request_id),
                         tuple(body.operations))
     try:
-        if body.ledger:
-            from .persistence_service import LedgerIngredient, save_recipe_with_ledger
-            if not callable(getattr(repository, "commit_recipe_with_ledger", None)):
-                raise HTTPException(409, "Ledger commit not supported by repository")
-            ledger = tuple(LedgerIngredient(
-                e.kind, id=str(e.id) if e.id is not None else None,
-                name=e.name, brand=e.brand, spec=e.spec) for e in body.ledger)
-            saved = save_recipe_with_ledger(
-                owner_id=owner, trusted_user_confirmed=True,
-                proposal=proposal, ledger=ledger, repository=repository,
-                save_version=body.save_version)
-            shown = _displayed_recipe(owner, repository, saved.recipe)
-            return {"recipe": shown, "revision": saved.resulting_revision,
-                    "replayed": saved.replayed,
-                    "saved_ingredient_ids": list(saved.saved_ingredient_ids)}
+        from .persistence_service import LedgerIngredient
         from .recipe_crud import save_recipe_crud
+        ledger = tuple(LedgerIngredient(
+            entry.kind, id=str(entry.id) if entry.id is not None else None,
+            name=entry.name, brand=entry.brand, spec=entry.spec)
+            for entry in body.ledger)
         saved = save_recipe_crud(owner_id=owner, proposal=proposal,
-                                 repository=repository, save_version=body.save_version)
+                                 repository=repository, save_version=body.save_version,
+                                 ledger=ledger)
     except MutationError as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
