@@ -33,6 +33,10 @@ class ReviewWorkflowTests(unittest.TestCase):
         for key in ("demo_owner_id", "demo_access_token", "repository_factory", "ai_provider", "correction_hints"):
             delattr(app.state, key)
 
+    def list_owned_units(self, owner):
+        return [{"id":"g-id","symbol":"g","dimension":"mass","base_factor":"1","aliases":[]},
+                {"id":"kg-id","symbol":"kg","dimension":"mass","base_factor":"1000","aliases":[]}]
+
     def load_owned_recipe(self, owner, rid):
         assert (owner, rid) == (self.owner, self.rid)
         return self.recipe
