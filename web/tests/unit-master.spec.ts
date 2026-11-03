@@ -7,7 +7,7 @@ test("unknown units are visible in review and registered only on explicit recipe
  await page.route("**/api/voice-recipe",async route=>route.fulfill({status:200,contentType:"application/json",
   body:JSON.stringify({title:"野菜のソテー",materials:[{name:"青菜",quantity:"2",unit:"束",
    price_jpy:"300",price_quantity:"1",price_unit:"束",supplier:""}],
-   selling_price_jpy:"1200",notes:[],missing:[],interpretations:[],price_research:[],name_corrections:[]})}));
+   selling_price_jpy:"1200",unit_proposals:[{symbol:"束",dimension:"count"}],notes:[],missing:[],interpretations:[],price_research:[],name_corrections:[]})}));
  await page.route("**/api/recipes/full",async route=>{
   writes++;approved=route.request().postDataJSON();
   await route.fulfill({status:201,contentType:"application/json",body:JSON.stringify({
@@ -23,7 +23,7 @@ test("unknown units are visible in review and registered only on explicit recipe
  await page.getByRole("button",{name:"レシピを登録"}).click();
  await expect(page.getByText("レシピを保存しました。")).toBeVisible();
  expect(writes).toBe(1);
- expect(approved.unit_candidates).toEqual([{symbol:"束",dimension:"other"}]);
+ expect(approved.unit_candidates).toEqual([{symbol:"束",dimension:"count"}]);
 });
 
 test("unit master settings edit canonical name, dimension and aliases",async({page})=>{
