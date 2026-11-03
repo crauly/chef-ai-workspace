@@ -25,6 +25,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  const [mode,setMode]=useState<VoiceMode>("idle"),[volume,setVolume]=useState(.5),[manual,setManual]=useState("");
  const [message,setMessage]=useState(locale==="ja"?"登録・呼び出し・修正を一つのマイクで続けられます。":"Create, browse and edit with one microphone."),[heard,setHeard]=useState("");
  const [routing,setRouting]=useState(false);
+ const [supplierMemo,setSupplierMemo]=useState("");
  const [settingsOpen,setSettingsOpen]=useState(false);
  // The initial guidance is state, so changing locale must update it explicitly.
  useEffect(()=>{setMessage(previous=>previous==="登録・呼び出し・修正を一つのマイクで続けられます。"||previous==="Create, browse and edit with one microphone."?(locale==="ja"?"登録・呼び出し・修正を一つのマイクで続けられます。":"Create, browse and edit with one microphone."):previous);},[locale]);
@@ -240,6 +241,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    <p role="status">{micRecording?(locale==="ja"?"音声受付中":"Listening"):micBusy?(locale==="ja"?"音声受付は一時停止・受信済みの音声を処理中":"Processing recorded audio; microphone paused"):(micError||micNotice)?(locale==="ja"?"音声受付は停止中・再開できます":"Microphone stopped; you can resume"):(locale==="ja"?"音声受付は停止中":"Microphone stopped")}</p>
    {micNotice&&<p role="status">{micNotice}</p>}
    {realtimeActive&&realtime.partial&&<p role="status">{locale==="ja"?"認識中：":"Recognizing: "}{realtime.partial}</p>}
+   {supplierMemo&&<p className="muted">{supplierMemo}</p>}
    <p aria-live="polite">{micRecording?(locale==="ja"?"聞き取り中… ":"Listening… "):""}{micBusy?(locale==="ja"?"音声を文字にしています… ":"Transcribing… "):""}{routing?(locale==="ja"?"操作を処理中… ":"Processing… "):""}{message}</p>
    {micError&&<p role="alert">{micError}</p>}
    <form onSubmit={event=>{event.preventDefault();receive(manual);setManual("");}}>
@@ -270,8 +272,8 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    // The spoken purchase source survives as a memo in this always-visible
   // region (the registration panel hides in browse mode). Formal linkage
   // reuses the ledger path behind the Human Gate; nothing auto-registers.
-  const supplierNote=suppliers.length?`（仕入先メモ：${suppliers.join("／")} — 台帳の仕入先連携で登録できます）`:"";
-  setDraftPending(false);transition("browse");feedback((mode==="unconfirmed"?(locale==="ja"?"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"Saved with unconfirmed prices. Only partial food costs are shown."):(locale==="ja"?"レシピを保存しました。":"Recipe saved."))+(locale==="ja"?supplierNote:(suppliers.length?` (Supplier notes: ${suppliers.join(", ")})`:"")));onCreated(recipe);
+  setSupplierMemo(suppliers.length?(locale==="ja"?`仕入先メモ：${suppliers.join("／")} — 台帳の仕入先連携で登録できます`:`Supplier notes: ${suppliers.join(", ")}`):"");
+  setDraftPending(false);transition("browse");feedback(mode==="unconfirmed"?(locale==="ja"?"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"Saved with unconfirmed prices. Only partial food costs are shown."):(locale==="ja"?"レシピを保存しました。":"Recipe saved."));onCreated(recipe);
   }}/></div>
   <nav aria-label={locale==="ja"?"主要":"Primary"} className="bottom-nav">
    <a href="#top"><NavIcon name="home"/><span>{locale==="ja"?"ホーム":"Home"}</span></a>
