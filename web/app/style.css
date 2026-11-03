@@ -577,3 +577,30 @@ main.recipe-detail-page>div[hidden]{display:none!important}
 .settings-main-panel .ingredient-supplier-link label{display:grid;gap:6px;flex:1;min-width:200px}
 .settings-main-panel .ingredient-supplier-link select{width:100%;padding:11px;border-radius:9px;border:1px solid #68796e;background:var(--chef-raised);color:var(--chef-text)}
 .settings-main-panel .ingredient-supplier-link button{min-height:45px}
+
+
+/* Consistent forms and list density for every management subsection. */
+.settings-main-panel .settings-manager-unit,.settings-main-panel .supplier-manager,.settings-main-panel .card{background:transparent;border:0;padding:0;box-shadow:none}
+.settings-main-panel .settings-manager-unit>div:has(>label){display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:18px 0}
+.settings-main-panel .settings-manager-unit label,.settings-main-panel .supplier-manager label{display:grid;gap:6px;min-width:0}
+.settings-main-panel .settings-manager-unit>div:has(>label)>label{flex:1;min-width:130px}
+.settings-main-panel .settings-manager-unit input,.settings-main-panel .settings-manager-unit select,
+.settings-main-panel .supplier-manager input{background:#fff;color:#1e2522;border:1px solid #b9c8bd;padding:10px;border-radius:9px;width:100%;max-width:100%}
+.settings-main-panel .settings-manager-unit ul{list-style:none;padding:0;margin:14px 0;display:grid;gap:9px}
+.settings-main-panel .settings-manager-unit li{border:1px solid rgba(163,186,174,.3);background:rgba(114,145,128,.08);padding:13px;border-radius:11px;overflow-wrap:anywhere}
+.settings-main-panel .settings-manager-unit li>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}
+.settings-main-panel .settings-manager-unit li>div>button{justify-self:start}
+.settings-main-panel .settings-manager-unit li>button{margin:6px 8px 0 0}
+.settings-main-panel .supplier-manager form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0}
+.settings-main-panel .supplier-manager form>.toolbar{grid-column:1/-1;justify-content:flex-start}
+.settings-main-panel .supplier-manager-list li .toolbar{flex-direction:row;gap:8px;align-items:center;justify-content:flex-end}
+.settings-main-panel .supplier-manager-list li small{color:#b7c6bd}
+.settings-main-panel .supplier-manager-list li .toolbar button{padding:8px 12px}
+.settings-main-panel .supplier-manager>.toolbar{flex-direction:row;justify-content:flex-end}
+.settings-main-panel .supplier-manager p,.settings-main-panel .settings-manager-unit p{font-size:.9rem}
+@media(max-width:650px){
+ .settings-main-panel .supplier-manager form{grid-template-columns:1fr}
+ .settings-main-panel .settings-manager-unit li>div{grid-template-columns:1fr}
+ .settings-main-panel .settings-manager-unit>div:has(>label){display:grid;grid-template-columns:1fr}
+ .settings-main-panel .supplier-manager-list li .toolbar{width:100%;justify-content:flex-start}
+}
