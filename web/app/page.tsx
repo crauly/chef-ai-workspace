@@ -55,6 +55,7 @@ export default function Library(){
  const [editQty,setEditQty]=useState(""),[editUnit,setEditUnit]=useState("");
  const [editPrice,setEditPrice]=useState(""),[editPriceQty,setEditPriceQty]=useState("1"),[editPriceUnit,setEditPriceUnit]=useState("");
  const [aiOpen,setAiOpen]=useState(false);
+ const [sellingPriceEdit,setSellingPriceEdit]=useState("");
  const [confirmQty,setConfirmQty]=useState(false),[confirmPrice,setConfirmPrice]=useState(false);
  const detailRef=useRef<HTMLElement|null>(null);
  useEffect(()=>{
@@ -191,6 +192,10 @@ export default function Library(){
   <div><span>{locale==="ja"?"原価率":"Cost rate"}</span><strong>{cost?.cost_rate_pct==null?"—":`${cost.cost_rate_pct}%`}</strong></div>
  </div>
 
+ <details className="detail-action"><summary>{locale==="ja"?"✎ 販売価格を変更":"✎ Edit selling price"}</summary>
+ <form onSubmit={async e=>{e.preventDefault();if(!selected||!sellingPriceEdit.trim())return;const saved=await saveOperations([{op:"set_selling_price",value_jpy:sellingPriceEdit.trim()}]);if(saved)setSellingPriceEdit("");}}>
+ <label>{locale==="ja"?"販売価格（円）":"Selling price (JPY)"}<input inputMode="decimal" value={sellingPriceEdit} onChange={e=>setSellingPriceEdit(e.target.value)} placeholder={selected.selling_price_jpy.value??""} required/></label>
+ <button type="submit" disabled={busy||!sellingPriceEdit.trim()||!Number.isFinite(Number(sellingPriceEdit))||Number(sellingPriceEdit)<=0}>{t("save")}</button></form></details>
  <div className="detail-section-heading"><h3>{t("ingredients")}</h3><span>{selected.materials.length}{locale==="ja"?"品目":" items"}</span></div>{selected.materials.length===0?<p className="muted">{t("noIngredients")}</p>:<ul className="detail-ingredients">{selected.materials.map(m=>{
   const name=selected.display_names?.[m.id]?.display?.trim()||m.material_name.value?.trim()||t("unnamed");
   const qtyMark=m.quantity.status==="assumed"?` (${t("assumed")})`:m.quantity.status==="unresolved"?` (${t("unresolved")})`:"";
