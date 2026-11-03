@@ -12,6 +12,7 @@ class ReviewWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.owner, self.rid, self.mid = (str(uuid4()) for _ in range(3))
         value = lambda v: TrackedValue(v, "confirmed", "user")
+        self.ingredient_id = str(uuid4())
         self.recipe = Recipe(self.rid, value("片栗粉"), materials=(
             MaterialLine(self.mid, value("片栗粉"), value("10"), "g",
                          ingredient_id=self.ingredient_id, price_mode="inherit"),),
@@ -19,7 +20,6 @@ class ReviewWorkflowTests(unittest.TestCase):
         self.operations = [{"op": "set_material_quantity", "material_id": self.mid, "value": "15", "unit": "g"},
                            {"op": "set_selling_price", "value_jpy": "1800"}]
         self.writes, self.corrections, self.receipts = [], [], {}
-        self.ingredient_id = str(uuid4())
         app.state.demo_owner_id = self.owner
         app.state.demo_access_token = "test-secret"
         app.state.repository_factory = lambda: self
