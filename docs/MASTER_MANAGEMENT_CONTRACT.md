@@ -13,7 +13,7 @@ This document is the single contract for the ingredient and unit management UI, 
 - `ingredients`: canonical ingredient identity and current purchase price.
 - `units`: canonical unit identity, dimension, aliases and optional explicit conversion.
 - Recipe materials reference canonical owner-owned ingredient and unit IDs. Current recipe valuation inherits the ingredient master; immutable recipe-version snapshots remain historical records.
-- The recipe-save Human Gate may register proposed ingredients/units **only** inside the authorized atomic save transaction. The settings CRUD route is a separate explicit human manager action, not an AI approval bypass.
+- The recipe-save Human Gate registers AI-proposed ingredients/units **only** inside the authorized atomic save transaction. Separately, the settings CRUD route permits **explicit human-initiated** master creation. This is not an AI approval bypass; the server must not invoke manager CRUD from an AI proposal or automatic background workflow.
 - No inferred unit conversion or automatic fuzzy merge. Ambiguous identity must be resolved by a person.
 
 ## CRUD contract
