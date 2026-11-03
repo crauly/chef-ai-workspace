@@ -405,7 +405,8 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   const d=draftRef.current;
   const mode=reviewMode.current;
   if(phaseRef.current!=="review"||!d||!mode||reviewed.current!==d||saveModeFor(d)!==mode||!unitCatalog)return;
-  const allUnits=[...new Set(d.materials.flatMap(m=>[m.unit,m.price_unit]).filter(Boolean))];
+  const materials=toSaveMaterials(d);
+  const allUnits=[...new Set(materials.flatMap(m=>[m.unit,m.price_unit]).filter((x):x is string=>Boolean(x)))];
   const unknown=allUnits.filter(symbol=>!unitCatalog.some(u=>[u.symbol,...(u.aliases||[])].some(a=>a.toLocaleLowerCase()===symbol.toLocaleLowerCase())));
   const unit_candidates=unknown.map(symbol=>({symbol,dimension:"other"}));
   voice.cancel();setStage("saving");if(!draining.current)setBusy(true);say("承認された内容を保存しています…");
@@ -414,7 +415,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   try{await saveWorkingDraft({draft:d,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current});}
   catch{setStage("dictating");say("保存IDを端末に保持できません。安全のため登録を中止しました。");return;}
   try{
-   const recipe=await request<Recipe>("/api/recipes/full",{method:"POST",body:JSON.stringify({request_id:requestId.current,title:d.title,materials:toSaveMaterials(d),unit_candidates,selling_price_jpy:d.selling_price_jpy||null})});
+   const recipe=await request<Recipe>("/api/recipes/full",{method:"POST",body:JSON.stringify({request_id:requestId.current,title:d.title,materials,unit_candidates,selling_price_jpy:d.selling_price_jpy||null})});
    if(!alive.current)return;
    // Associate the optional preview only after the formal save succeeded.
    // Local cache failure must never retry or roll back the confirmed recipe.
