@@ -163,6 +163,13 @@ def _displayed_recipe(owner, repository, found):
     else:
         catalog = {}
     out = asdict(found)
+    for line in out["materials"]:
+        ingredient = catalog.get(line.get("ingredient_id"))
+        line["effective_price"] = (
+            asdict(ingredient.current_price)
+            if ingredient is not None and ingredient.current_price is not None
+            else line.get("price_override")
+        )
     out["display_names"] = resolve_display_names(found, catalog)
     return out
 
