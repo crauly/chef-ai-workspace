@@ -209,7 +209,7 @@ test("grounding failure keeps the draft and reports the stage", async () => {
     expect(body.research_status).toEqual([{material_name: "pasta", material_index: 0,
       request: "r", trigger: "muse",
       ledger: "invalid_response", web: "provider_error", provisional: false}]);
-    expect(body.price_references[0].status).toBe("unavailable");
+    expect(body.price_references[0].status).toBe("invalid_response");
     expect(body.provisional_prices).toEqual([null]);
     expect(body.materials[0].price_jpy).toBe("");
   } finally {
