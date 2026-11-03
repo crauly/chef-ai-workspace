@@ -46,6 +46,8 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
     finder = repository.find_owned_ingredients_exact
     loader = repository.load_owned_ingredients
     entries = {}
+    name_to_new_id = {}
+    ledger_by_id = {item["id"]: item for item in prepared_ledger if item["kind"] == "new"}
     effective = dict(catalog)
     normalized = []
     for line in candidate.materials:
@@ -59,8 +61,8 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
         if line.ingredient_id and line.ingredient_id in effective and not renamed:
             ingredient_id = line.ingredient_id
             ingredient = effective[ingredient_id]
-        elif key in entries:
-            ingredient_id = entries[key]["id"]
+        elif key in name_to_new_id:
+            ingredient_id = name_to_new_id[key]
             ingredient = effective[ingredient_id]
         else:
             matches = finder(owner_id, name)
@@ -77,6 +79,8 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
                     f"chef-ai-crud:{owner_id}:{proposal.request_id}:{key}"))
                 ingredient = Ingredient(ingredient_id, name, None)
             effective[ingredient_id] = ingredient
+            if ingredient_id not in catalog:
+                name_to_new_id[key] = ingredient_id
         quote = line.price_override
         # Only an explicit price edit may change the master; pre-existing
         # legacy line quotes must not silently overwrite a shared master.
@@ -86,8 +90,12 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
             and op.get("material_id") == line.id for op in proposal.operations)
         if price_edited and quote is not None:
             effective[ingredient_id] = Ingredient(ingredient_id, ingredient.name, quote)
-        entry = entries.setdefault(key, {"id": ingredient_id, "name": ingredient.name,
-                                         "current_price": None})
+        metadata = ledger_by_id.get(ingredient_id, {})
+        entry = entries.setdefault(ingredient_id, {
+            "id": ingredient_id, "name": ingredient.name,
+            "brand": metadata.get("brand"), "spec": metadata.get("spec"),
+            "current_price": None,
+        })
         if price_edited and quote is not None:
             value = asdict(quote)
             if entry["current_price"] is not None and entry["current_price"] != value:
