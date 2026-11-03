@@ -11,6 +11,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState("");
  const [editing,setEditing]=useState<string|null>(null);
+ const [newName,setNewName]=useState("");
  const [name,setName]=useState("");
  const [price,setPrice]=useState("");
  const [quantity,setQuantity]=useState("");
@@ -50,12 +51,33 @@ export default function IngredientManager({locale}:{locale:Locale}){
   }catch{setError(ja?"食材マスターを保存できませんでした。":"Failed to save ingredient master.");}
   finally{setBusy(false);}
  }
+ async function create(){
+  if(busy||!newName.trim())return;
+  setBusy(true);
+  try{
+   const r=await fetch("/api/ingredients",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:newName.trim()})});
+   if(!r.ok)throw new Error("create");
+   setNewName("");await load();
+  }catch{setError(ja?"食材を登録できませんでした。重複名を確認してください。":"Could not create ingredient. Check for duplicate names.");}
+  finally{setBusy(false);}
+ }
+ async function remove(item:Ingredient){
+  if(busy||!window.confirm(ja?`「${item.name}」を削除しますか？使用中の食材は削除できません。`:`Delete ${item.name}? Ingredients in use cannot be deleted.`))return;
+  setBusy(true);
+  try{
+   const r=await fetch("/api/ingredients/"+item.id,{method:"DELETE"});
+   if(!r.ok)throw new Error("delete");
+   await load();
+  }catch{setError(ja?"削除できません。レシピや仕入履歴から参照されている可能性があります。":"Unable to delete. This ingredient may be referenced.");}
+  finally{setBusy(false);}
+ }
  return <section className="workspace-section" aria-label={ja?"食材マスター":"Ingredient master"}>
   <div className="workspace-section-head"><h3>{ja?"食材マスター":"Ingredient master"}</h3></div>
   <p>{ja?"共通食材の名称と仕入単価を管理します。変更は関連レシピの現在原価に反映されます。":"Manage shared ingredient names and purchase prices. Updates affect current recipe costs."}</p>
+  <div><label>{ja?"新規食材名":"New ingredient name"}<input value={newName} maxLength={200} disabled={busy} onChange={e=>setNewName(e.target.value)}/></label><button type="button" disabled={busy||!newName.trim()} onClick={()=>void create()}>{ja?"食材を登録":"Create ingredient"}</button></div>
   {error&&<p role="alert">{error}</p>}
   <button type="button" className="secondary" disabled={busy||loading} onClick={()=>void load()}>{ja?"更新":"Refresh"}</button>
-  {loading?<p>{ja?"読み込み中":"Loading"}</p>:items.length===0?<p>{ja?"登録済み食材はありません。食材はレシピ保存時に登録されます。":"No ingredients yet. Ingredients are registered when saving recipes."}</p>:
+  {loading?<p>{ja?"読み込み中":"Loading"}</p>:items.length===0?<p>{ja?"登録済み食材はありません。上のフォームから食材を登録できます。":"No ingredients yet. Use the form above to register an ingredient."}</p>:
   <ul>{items.map(item=><li key={item.id}>
    {editing===item.id?<div>
     <label>{ja?"食材名":"Ingredient name"}<input value={name} maxLength={200} disabled={busy} onChange={e=>setName(e.target.value)}/></label>
@@ -67,7 +89,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
    </div>:<>
     <strong>{item.name}</strong>{" "}
     <span>{item.current_price?.amount_jpy?.value!=null?`¥${item.current_price.amount_jpy.value} / ${item.current_price.per_quantity??""} ${item.current_price.per_unit??""}`:(ja?"価格未設定":"Price not set")}</span>{" "}
-    <button type="button" className="secondary" disabled={busy} onClick={()=>begin(item)}>{ja?"編集":"Edit"}</button>
+    <button type="button" className="secondary" disabled={busy} onClick={()=>begin(item)}>{ja?"編集":"Edit"}</button>{" "}<button type="button" className="secondary" disabled={busy} onClick={()=>void remove(item)}>{ja?"削除":"Delete"}</button>
    </>}
   </li>)}</ul>}
  </section>;
