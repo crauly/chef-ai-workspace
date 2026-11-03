@@ -20,6 +20,9 @@ class Repo:
     def load_owned_catalog(self, owner_id, recipe):
         return {}
 
+    def load_owned_ingredients(self, owner_id, ids):
+        return {}
+
     def find_owned_ingredients_exact(self, owner_id, name):
         return []
 
