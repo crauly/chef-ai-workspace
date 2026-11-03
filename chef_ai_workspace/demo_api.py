@@ -68,7 +68,14 @@ def delete_demo_unit(unit_id:UUID,ctx=Depends(demo_context)):
     owner,repo=ctx
     delete=getattr(repo,"delete_owned_unit_master",None)
     if not callable(delete): raise HTTPException(503,"Unit manager unavailable")
-    if not delete(owner,str(unit_id)): raise HTTPException(404,"Unit not found")
+    try:
+        deleted = delete(owner,str(unit_id))
+    except Exception as exc:
+        from postgrest.exceptions import APIError
+        if isinstance(exc, APIError) and any(x in str(exc) for x in ("Unit has dependent references", "23503")):
+            raise HTTPException(409, "Unit is referenced and cannot be deleted") from exc
+        raise
+    if not deleted: raise HTTPException(404,"Unit not found")
     return {"deleted":True}
 
 
@@ -113,8 +120,15 @@ def edit_demo_unit(unit_id: UUID, body: UnitEditBody,
     editor = getattr(repository, "update_owned_unit", None)
     if not callable(editor):
         raise HTTPException(503, "Unit manager unavailable")
-    if not editor(owner, str(unit_id), body.symbol.strip(), body.dimension,
-                  body.base_factor, aliases):
+    try:
+        updated = editor(owner, str(unit_id), body.symbol.strip(), body.dimension,
+                         body.base_factor, aliases)
+    except Exception as exc:
+        from postgrest.exceptions import APIError
+        if isinstance(exc, APIError) and any(x in str(exc) for x in ("Invalid unit edit", "Duplicate unit token", "Unit identity collision", "Unknown or ambiguous unit")):
+            raise HTTPException(409, "Unit name or conversion conflicts with the unit master") from exc
+        raise
+    if not updated:
         raise HTTPException(404, "Unit not found")
     return {"id": str(unit_id), "symbol": body.symbol.strip(),
             "dimension": body.dimension, "base_factor": body.base_factor,
@@ -295,7 +309,14 @@ def delete_demo_ingredient_master(ingredient_id:UUID,ctx=Depends(demo_context)):
     owner,repo=ctx
     delete=getattr(repo,"delete_owned_ingredient_master",None)
     if not callable(delete): raise HTTPException(503,"Ingredient master unavailable")
-    if not delete(owner,str(ingredient_id)): raise HTTPException(404,"Ingredient not found")
+    try:
+        deleted = delete(owner,str(ingredient_id))
+    except Exception as exc:
+        from postgrest.exceptions import APIError
+        if isinstance(exc, APIError) and any(x in str(exc) for x in ("Ingredient has dependent references", "23503")):
+            raise HTTPException(409, "Ingredient is referenced by recipes or purchases and cannot be deleted") from exc
+        raise
+    if not deleted: raise HTTPException(404,"Ingredient not found")
     return {"deleted":True}
 
 
@@ -326,8 +347,15 @@ def edit_demo_ingredient_master(ingredient_id:UUID, body:IngredientMasterEditBod
     editor=getattr(repository,"update_owned_ingredient_master",None)
     if not callable(editor):
         raise HTTPException(503,"Ingredient master unavailable")
-    if not editor(owner,str(ingredient_id),body.name.strip(),
-                  asdict(quote) if quote is not None else None):
+    try:
+        updated = editor(owner,str(ingredient_id),body.name.strip(),
+                         asdict(quote) if quote is not None else None)
+    except Exception as exc:
+        from postgrest.exceptions import APIError
+        if isinstance(exc, APIError) and any(x in str(exc) for x in ("Ingredient identity collision", "Unknown or ambiguous unit", "Invalid ingredient update")):
+            raise HTTPException(409, "Ingredient name or price unit conflicts with the master") from exc
+        raise
+    if not updated:
         raise HTTPException(404,"Ingredient not found")
     return {"id":str(ingredient_id),"name":body.name.strip(),"updated":True}
 
