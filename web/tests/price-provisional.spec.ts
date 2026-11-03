@@ -169,7 +169,7 @@ test("omitted price_research still reaches grounding; provisional stays unapprov
     // Grounding ran (heuristic trigger), materials untouched, provisional separate.
     expect(body.research_status).toEqual([{material_name: "pasta", material_index: 0,
       request: "pasta100g、平均仕入価格を調べて", trigger: "heuristic",
-      ledger: "unavailable", web: "available", provisional: true}]);
+      ledger: "invalid_response", web: "available", provisional: true}]);
     expect(body.price_references[0].origin).toBe("external");
     expect(body.materials[0].price_jpy).toBe("");
     expect(body.missing).toContain("pastaの仕入単価・基準数量・単位");
@@ -208,7 +208,7 @@ test("grounding failure keeps the draft and reports the stage", async () => {
     const body = await res.json();
     expect(body.research_status).toEqual([{material_name: "pasta", material_index: 0,
       request: "r", trigger: "muse",
-      ledger: "unavailable", web: "provider_error", provisional: false}]);
+      ledger: "invalid_response", web: "provider_error", provisional: false}]);
     expect(body.price_references[0].status).toBe("unavailable");
     expect(body.provisional_prices).toEqual([null]);
     expect(body.materials[0].price_jpy).toBe("");
@@ -223,6 +223,8 @@ test("grounding failure keeps the draft and reports the stage", async () => {
 
 test("no request means no search, no provisional, no status", async () => {
   const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
+  const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
+  process.env.FASTAPI_BASE_URL = "http://127.0.0.1:8100"; process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
   process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
   const previousFetch = global.fetch;
   try {
@@ -241,6 +243,8 @@ test("no request means no search, no provisional, no status", async () => {
     global.fetch = previousFetch;
     if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;
     if (key === undefined) delete process.env.MODEL_API_KEY; else process.env.MODEL_API_KEY = key;
+    if (base === undefined) delete process.env.FASTAPI_BASE_URL; else process.env.FASTAPI_BASE_URL = base;
+    if (token === undefined) delete process.env.DEMO_ACCESS_TOKEN; else process.env.DEMO_ACCESS_TOKEN = token;
   }
 });
 
@@ -274,7 +278,7 @@ test("named heuristic request survives the entry cap; only saffron is searched",
     expect(groundingCalls).toBe(1);
     expect(body.research_status).toEqual([{material_name: "サフラン", material_index: 3,
       request: "サフランの平均仕入価格を調べて", trigger: "heuristic",
-      ledger: "unavailable", web: "available", provisional: true}]);
+      ledger: "invalid_response", web: "available", provisional: true}]);
     expect(body.provisional_prices.map((x: {material_name: string} | null) => x?.material_name ?? null))
       .toEqual([null, null, null, "サフラン"]);
   } finally {
@@ -362,7 +366,7 @@ test("drifted Muse name with material_index still binds the right row", async ()
     const body = await res.json();
     expect(body.research_status).toEqual([{material_name: "パスタ", material_index: 0,
       request: "平均価格を調べて", trigger: "muse",
-      ledger: "unavailable", web: "available", provisional: true}]);
+      ledger: "invalid_response", web: "available", provisional: true}]);
     expect(body.price_references[0].material_name).toBe("パスタ");
     expect(body.price_references[0].material_index).toBe(0);
     const prov = body.provisional_prices[0];
