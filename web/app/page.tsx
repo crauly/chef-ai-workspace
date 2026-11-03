@@ -205,7 +205,7 @@ export default function Library(){
   <ul>{recipeGaps(selected).map((gap,index)=><li key={index}>{gap}</li>)}</ul>
   <p>{locale==="ja"?"内容は保存されています。編集画面で後から補完できます。":"The recipe is saved. You can fill in these fields later."}</p>
  </details>}
- <DishImageSection key={selected.id} recipeId={selected.id} title={selected.title.value||""} names={selected.materials.map(m=>selected.display_names?.[m.id]?.display?.trim()||m.material_name.value||"")} locale={locale} disabled={busy}/>
+ <DishImageSection key={selected.id} recipeId={selected.id} title={selected.title.value||""} names={selected.materials.map(m=>m.material_name.value?.trim()||selected.display_names?.[m.id]?.display?.trim()||"")} locale={locale} disabled={busy}/>
  <div className="detail-metrics" role="region" aria-label="Recipe cost summary">
   <div><span>{locale==="ja"?"販売価格":"Selling price"}</span><strong>{selected.selling_price_jpy.value===null?"—":`¥${selected.selling_price_jpy.value}`}</strong></div>
   <div><span>{locale==="ja"?"材料原価":"Food cost"}</span><strong>{cost?.total_cost_jpy==null?"—":`¥${cost.total_cost_jpy}`}</strong></div>
@@ -217,7 +217,7 @@ export default function Library(){
  <label>{locale==="ja"?"販売価格（円）":"Selling price (JPY)"}<input inputMode="decimal" value={sellingPriceEdit} onChange={e=>setSellingPriceEdit(e.target.value)} placeholder={selected.selling_price_jpy.value??""} required/></label>
  <button type="submit" disabled={busy||!sellingPriceEdit.trim()||!Number.isFinite(Number(sellingPriceEdit))||Number(sellingPriceEdit)<=0}>{t("save")}</button></form></details>
  <div className="detail-section-heading"><h3>{t("ingredients")}</h3><span>{selected.materials.length}{locale==="ja"?"品目":" items"}</span></div>{selected.materials.length===0?<p className="muted">{t("noIngredients")}</p>:<ul className="detail-ingredients">{selected.materials.map(m=>{
-  const name=selected.display_names?.[m.id]?.display?.trim()||m.material_name.value?.trim()||t("unnamed");
+  const name=m.material_name.value?.trim()||selected.display_names?.[m.id]?.display?.trim()?.trim()||t("unnamed");
   const qtyMark=m.quantity.status==="assumed"?` (${t("assumed")})`:m.quantity.status==="unresolved"?` (${t("unresolved")})`:"";
   const price=m.price_override;
   const priceText=price?`${locale==="ja"?"仕入単価":"Purchase"} ¥${price.amount_jpy.value} / ${price.per_quantity}${price.per_unit}${price.amount_jpy.status==="assumed"?` (${t("assumed")})`:price.amount_jpy.status==="unresolved"?` (${t("unresolved")})`:""}`:m.price_mode==="inherit"?(locale==="ja"?"共通食材の継承価格（詳細値は未取得）":"Inherited ingredient price (not loaded)"):(locale==="ja"?"仕入単価 未設定":"Purchase price not set");
@@ -225,7 +225,7 @@ export default function Library(){
  {editingId!==null&&(()=>{
   const line=selected.materials.find(m=>m.id===editingId);
   if(!line)return null;
-  const name=selected.display_names?.[line.id]?.display?.trim()||line.material_name.value?.trim()||t("unnamed");
+  const name=line.material_name.value?.trim()||selected.display_names?.[line.id]?.display?.trim()||t("unnamed");
   const qtyChanged=editQty.trim()!==line.quantity.value||editUnit!==(line.unit||"g");
   const priceChanged=editPrice.trim()!==(line.price_override?.amount_jpy.value||"")||editPriceQty!==(line.price_override?.per_quantity||"1")||editPriceUnit!==(line.price_override?.per_unit||line.unit||"g");
   return <div className="name-choice-overlay" onClick={()=>setEditingId(null)}>
