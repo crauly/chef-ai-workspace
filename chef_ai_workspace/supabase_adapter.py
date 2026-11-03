@@ -38,7 +38,7 @@ class SupabasePersistence:
         """trusted_client must be a server-owned Supabase SDK client."""
         self.client = trusted_client
 
-    def create_owned_recipe(self, owner_id, recipe, cost_snapshot, unit_candidates=()):
+    def create_owned_recipe(self, owner_id, recipe, cost_snapshot, unit_candidates=(), ingredient_entries=()):
         response = self.client.rpc("create_owned_recipe", {
             "p_owner_id": owner_id,
             "p_recipe_id": recipe.id,
@@ -46,6 +46,7 @@ class SupabasePersistence:
             "p_initial_state": asdict(recipe),
             "p_cost_snapshot": cost_snapshot,
             "p_unit_candidates": list(unit_candidates),
+            "p_ingredient_entries": list(ingredient_entries),
         }).execute()
         if str(response.data) != recipe.id:
             raise RuntimeError("Unexpected create RPC result")
@@ -143,6 +144,19 @@ class SupabasePersistence:
             "p_aliases": list(aliases),
         }).execute()
         return bool(response.data)
+
+    def find_owned_ingredients_exact(self, owner_id, name):
+        """Owner-scoped exact product identity lookup (never fuzzy merge)."""
+        if not isinstance(name,str) or not name.strip():
+            return []
+        # Escape LIKE metacharacters; exact match is checked again after
+        # receipt because SQL matching and Python casefold differ by locale.
+        token=name.strip().replace("\\","\\\\").replace("%","\\%").replace("_","\\_")
+        response=(self.client.table("ingredients")
+                  .select("id,name,current_price").eq("owner_id",owner_id)
+                  .ilike("name",token).execute())
+        return [row for row in (response.data or [])
+                if row["name"].strip().casefold()==name.strip().casefold()]
 
     def search_owned_ingredients(self, owner_id, query, limit=20):
         """Owner-scoped ingredient search for reuse candidates and past-recipe
