@@ -123,7 +123,7 @@ class SupabasePersistence:
             # Stable order is essential: an omitted page could turn reuse into
             # an unsafe new registration or hide an ambiguous alias.
             response = (self.client.table("units")
-                        .select("id,symbol,dimension,aliases")
+                        .select("id,symbol,dimension,base_factor,aliases")
                         .eq("owner_id", owner_id)
                         .order("id")
                         .range(len(rows), len(rows) + page_size - 1)
@@ -133,12 +133,13 @@ class SupabasePersistence:
             if not batch:
                 return rows
 
-    def update_owned_unit(self, owner_id, unit_id, symbol, dimension, aliases):
+    def update_owned_unit(self, owner_id, unit_id, symbol, dimension, base_factor, aliases):
         response = self.client.rpc("update_owned_unit", {
             "p_owner_id": owner_id,
             "p_unit_id": unit_id,
             "p_symbol": symbol,
             "p_dimension": dimension,
+            "p_base_factor": base_factor,
             "p_aliases": list(aliases),
         }).execute()
         return bool(response.data)
