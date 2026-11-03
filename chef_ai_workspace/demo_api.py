@@ -613,6 +613,22 @@ def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(404, "Recipe not found or inaccessible") from exc
+    except Exception as exc:
+        # The database is the final SSOT guard. Known integrity violations
+        # must not surface as opaque HTTP 500s or be silently retried.
+        from postgrest.exceptions import APIError
+        if isinstance(exc, APIError):
+            message = str(exc)
+            if any(token in message for token in (
+                "Per-recipe purchase price is prohibited",
+                "Canonical recipe unit ID required",
+                "Recipe ingredient ID required",
+                "Ingredient must belong to recipe owner",
+                "Stale recipe revision",
+                "Request ID reused with a different mutation",
+            )):
+                raise HTTPException(409, "Recipe data conflicts with the current ingredient/unit master contract; review the recipe before saving") from exc
+        raise
     return {"recipe": _displayed_recipe(owner, repository, saved.recipe),
             "revision": saved.resulting_revision,
             "replayed": saved.replayed}
