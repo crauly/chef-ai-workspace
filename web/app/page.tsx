@@ -126,7 +126,7 @@ export default function Library(){
        if(op.op==="set_material_price"&&(!material||material.price_override?.amount_jpy.value!==op.price_jpy))throw new Error("Price not persisted");
        if(op.op==="set_selling_price"&&persisted.selling_price_jpy.value!==op.value_jpy)throw new Error("Selling price not persisted");
      }
-     setSelected(persisted);await reload();setError("");return true;
+     setSelected(persisted);setError("");void reload();return true;
    }catch(e){setError(String(e));return false;}finally{setBusy(false);}
  }
  async function addFood(e:React.FormEvent){e.preventDefault();
