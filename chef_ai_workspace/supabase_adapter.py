@@ -131,6 +131,15 @@ class SupabasePersistence:
             if not batch:
                 return rows
 
+    def update_owned_unit_aliases(self, owner_id, unit_id, aliases):
+        """Explicit manager action; canonical unit identity is unchanged."""
+        response = self.client.rpc("update_owned_unit_aliases", {
+            "p_owner_id": owner_id,
+            "p_unit_id": unit_id,
+            "p_aliases": list(aliases),
+        }).execute()
+        return response.data is True
+
     def ensure_owned_unit(self, owner_id, symbol, dimension, aliases=()):
         """Trusted-server only. Call after the real user approval boundary."""
         response = self.client.rpc("ensure_owned_unit", {
