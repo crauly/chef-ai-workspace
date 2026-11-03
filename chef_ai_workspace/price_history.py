@@ -70,11 +70,13 @@ def _to_base(qty: Decimal, unit: str,
     catalog = units or {}
     source = catalog.get(unit)
     if not source or source[1] is None:
-        return unit, None
+        # Identical quoted units still give a meaningful per-unit price;
+        # only conversion to another unit requires a verified factor.
+        return unit, qty
     bases = [name for name, (dimension, factor) in catalog.items()
              if dimension == source[0] and factor == Decimal("1")]
     if not bases:
-        return unit, None
+        return unit, qty
     base = min(bases, key=lambda name: (len(name), name))
     return base, convert_quantity(qty, unit, base, catalog)
 
