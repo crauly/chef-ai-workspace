@@ -62,6 +62,21 @@ begin
     or exists(select 1 from unnest(v_aliases) a
               where length(btrim(a)) not between 1 and 32)
  then raise exception 'Invalid unit aliases'; end if;
+ -- A changed alias must not make another unit's identity ambiguous.
+ if exists(
+   select 1 from public.units u
+   where u.owner_id=p_owner_id and u.id<>p_unit_id
+     and (lower(u.symbol)=any(select lower(btrim(a)) from unnest(v_aliases) a)
+       or exists(select 1 from unnest(u.aliases) a, unnest(v_aliases) b
+                 where lower(btrim(a))=lower(btrim(b))))
+ ) then raise exception 'Unit alias collides with an existing unit'; end if;
+ if exists(select 1 from public.units u
+           where u.owner_id=p_owner_id and u.id=p_unit_id
+             and exists(select 1 from unnest(u.aliases) a
+                        where lower(btrim(a))=lower(u.symbol))) then
+   -- Existing self aliases are harmless; candidate aliases checked below.
+   null;
+ end if;
  update public.units set aliases=v_aliases, updated_at=now()
  where owner_id=p_owner_id and id=p_unit_id;
  if not found then raise exception 'Unit not found'; end if;
