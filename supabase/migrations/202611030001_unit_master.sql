@@ -8,7 +8,7 @@ create table public.units (
  aliases text[] not null default '{}',
  created_at timestamptz not null default now(),
  updated_at timestamptz not null default now(),
- unique (owner_id, symbol),
+ unique (owner_id, (lower(symbol))),
  unique (owner_id, id)
 );
 create index units_owner_idx on public.units(owner_id);
@@ -19,7 +19,7 @@ create policy units_owner_read on public.units for select to authenticated
 revoke insert, update, delete on public.units from anon, authenticated;
 
 -- Atomic, owner-scoped reuse or creation. Only the trusted backend can call.
--- Same normalized symbol reuses one ID under concurrent requests.
+-- Case-insensitive symbol uniqueness matches the resolver casefold contract.
 create or replace function public.ensure_owned_unit(
  p_owner_id uuid, p_symbol text, p_dimension text, p_aliases text[] default '{}'
 ) returns uuid
@@ -35,11 +35,11 @@ begin
  then raise exception 'Invalid unit candidate'; end if;
  insert into public.units(owner_id,symbol,dimension,aliases)
  values (p_owner_id,v_symbol,p_dimension,coalesce(p_aliases,'{}'))
- on conflict(owner_id,symbol) do nothing
+ on conflict do nothing
  returning id into v_id;
  if v_id is not null then return v_id; end if;
  select id into v_id from public.units
- where owner_id=p_owner_id and symbol=v_symbol and dimension=p_dimension;
+ where owner_id=p_owner_id and lower(symbol)=lower(v_symbol) and dimension=p_dimension;
  if v_id is null then
    raise exception 'Unit symbol already exists with a different dimension';
  end if;
