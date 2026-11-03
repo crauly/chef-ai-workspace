@@ -47,3 +47,25 @@ begin
 end; $$;
 revoke all on function public.ensure_owned_unit(uuid,text,text,text[]) from public, anon, authenticated;
 grant execute on function public.ensure_owned_unit(uuid,text,text,text[]) to service_role;
+
+-- Explicit management action only: change aliases without changing canonical ID
+-- or touching recipe history. No creation through this function.
+create or replace function public.update_owned_unit_aliases(
+ p_owner_id uuid, p_unit_id uuid, p_aliases text[]
+) returns boolean
+language plpgsql security definer set search_path = ''
+as $$
+declare v_aliases text[] := coalesce(p_aliases, '{}');
+begin
+ if p_owner_id is null or p_unit_id is null
+    or cardinality(v_aliases)>20
+    or exists(select 1 from unnest(v_aliases) a
+              where length(btrim(a)) not between 1 and 32)
+ then raise exception 'Invalid unit aliases'; end if;
+ update public.units set aliases=v_aliases, updated_at=now()
+ where owner_id=p_owner_id and id=p_unit_id;
+ if not found then raise exception 'Unit not found'; end if;
+ return true;
+end; $$;
+revoke all on function public.update_owned_unit_aliases(uuid,uuid,text[]) from public, anon, authenticated;
+grant execute on function public.update_owned_unit_aliases(uuid,uuid,text[]) to service_role;
