@@ -29,7 +29,17 @@ class FakeRepo:
         return {i: self.catalog[i] for i in ids if i in self.catalog}
     def get_mutation_receipt(self, owner_id, request_id):
         return self.receipts.get(request_id)
-    def create_owned_recipe(self, owner, recipe, snapshot, unit_candidates=()):
+    def find_owned_ingredients_exact(self, owner, name):
+        return [{"id":id,"name":v.name} for id,v in self.catalog.items()
+                if v.name.casefold()==name.casefold()]
+    def create_owned_recipe(self, owner, recipe, snapshot, unit_candidates=(), ingredient_entries=()):
+        from chef_ai_workspace.models import Ingredient
+        from chef_ai_workspace.supabase_adapter import _quote
+        for entry in ingredient_entries:
+            existing=self.catalog.get(entry["id"])
+            price=_quote(entry["current_price"]) if entry["current_price"] else (
+                existing.current_price if existing else None)
+            self.catalog[entry["id"]]=Ingredient(entry["id"],entry["name"],price)
         if recipe.id in self.recipes:
             raise ValueError("exists")
         from dataclasses import replace
