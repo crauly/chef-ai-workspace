@@ -16,7 +16,7 @@ const names:Record<Tab,{ja:string;en:string}>={
  supplier:{ja:"仕入れ先管理",en:"Suppliers"},
  unit:{ja:"単位管理",en:"Units"},
  sourcing:{ja:"購入先候補",en:"Sourcing Suggestions"},
- plate:{ja:"盛り付け用の皿",en:"Plating Plates"},
+ plate:{ja:"盛り付け用の皿",en:"Plate Library"},
 };
 function SettingsGlyph({tab}:{tab:Tab}){
  const paths:Record<Tab,React.ReactNode>={
