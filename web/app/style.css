@@ -639,5 +639,8 @@ main.recipe-detail-page>div[hidden]{display:none!important}
 main.recipe-detail-page #voice-controls[hidden]{display:none!important}
 @media(max-width:650px){
  .settings-main-panel .ingredient-edit-overlay .ingredient-editor{padding:16px}
- .settings-page .bottom-nav .settings-voice-link{flex:0 0 50px!important;width:50px;height:50px;min-width:50px;max-width:50px}
+ .settings-page .bottom-nav .settings-voice-link{flex:0 0 50px!important;width:50px;height:50px;min-width:50px;min-height:50px;max-width:50px;max-height:50px}
 }
+
+.recipe-voice-capture-status{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;margin:0 0 12px;border:1px solid rgba(83,160,255,.5);background:rgba(83,160,255,.12);border-radius:12px;font-weight:650;font-size:.9rem}
+.recipe-voice-capture-status button{padding:8px 12px;background:#17573f;border:1px solid #4eae81;white-space:nowrap}
