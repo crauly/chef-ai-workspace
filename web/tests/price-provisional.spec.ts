@@ -153,7 +153,7 @@ test("fallback never averages an unsourced price on another row's URL", async ()
 test("omitted price_research still reaches grounding; provisional stays unapproved", async () => {
   const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
   const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
-  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.FASTAPI_BASE_URL = "http://127.0.0.1:8100"; process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
   process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
   const previousFetch = global.fetch;
   try {
@@ -194,7 +194,7 @@ test("omitted price_research still reaches grounding; provisional stays unapprov
 test("grounding failure keeps the draft and reports the stage", async () => {
   const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
   const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
-  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.FASTAPI_BASE_URL = "http://127.0.0.1:8100"; process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
   process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
   const previousFetch = global.fetch;
   try {
@@ -247,7 +247,7 @@ test("no request means no search, no provisional, no status", async () => {
 test("named heuristic request survives the entry cap; only saffron is searched", async () => {
   const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
   const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
-  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.FASTAPI_BASE_URL = "http://127.0.0.1:8100"; process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
   process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
   const previousFetch = global.fetch;
   try {
@@ -337,7 +337,7 @@ test("http internal binding host reaches the ledger (PR #89 contract kept)", asy
 test("drifted Muse name with material_index still binds the right row", async () => {
   const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
   const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
-  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.FASTAPI_BASE_URL = "http://127.0.0.1:8100"; process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
   process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
   const previousFetch = global.fetch;
   try {
@@ -385,7 +385,7 @@ test("drifted Muse name with material_index still binds the right row", async ()
 test("contradictory index loses to an exact row-name match", async () => {
   const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
   const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
-  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.FASTAPI_BASE_URL = "http://127.0.0.1:8100"; process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
   process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
   const previousFetch = global.fetch;
   try {
@@ -422,7 +422,7 @@ test("contradictory index loses to an exact row-name match", async () => {
 test("bad index falls back to the row name; unknown names stay rowless", async () => {
   const password = process.env.DEMO_PREVIEW_PASSWORD, key = process.env.MODEL_API_KEY;
   const base = process.env.FASTAPI_BASE_URL, token = process.env.DEMO_ACCESS_TOKEN;
-  delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
+  process.env.FASTAPI_BASE_URL = "http://127.0.0.1:8100"; process.env.DEMO_ACCESS_TOKEN = "fixture-demo-token";
   process.env.DEMO_PREVIEW_PASSWORD = PASSWORD; process.env.MODEL_API_KEY = "fixture-key";
   const previousFetch = global.fetch;
   async function runWith(research: unknown) {
