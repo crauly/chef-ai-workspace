@@ -116,7 +116,7 @@ def prepare_mutation(recipe: Recipe, proposal: Proposal, *, user_confirmed: bool
             _fields(op, {"op", "material_id", "supplier_id"})
             if not any(m.id == op["material_id"] for m in candidate.materials):
                 raise MutationError("Unknown material ID")
-            supplier_id = op["supplier_id"]
+            supplier_id = op["supplier_id"] or None
             if supplier_id is not None:
                 try:
                     UUID(supplier_id)
