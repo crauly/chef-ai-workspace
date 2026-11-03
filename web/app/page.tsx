@@ -131,6 +131,7 @@ export default function Library(){
        setSelected(persisted);setError("");
      }catch(e){
        setError(`保存APIは成功しましたが、再取得による検証に失敗しました: ${String(e)}`);
+       return true;
      }
      void reload();return true;
    }catch(e){setError(String(e));return false;}finally{setBusy(false);}
