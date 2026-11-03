@@ -8,6 +8,7 @@ class Repository:
     def __init__(self):
         self.stored = {}
         self.snapshots = {}
+        self.catalog = {}
         self.writes = 0
         self.ingredients = {}
     def load_owned_recipe(self, owner_id, recipe_id):
