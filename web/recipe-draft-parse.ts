@@ -3,7 +3,7 @@
 // parse() behind the Human Gate. Structured Output guarantees shape only;
 // all semantic checks (units, decimals, missing facts blocking approval)
 // stay here. Both routes import this; neither may weaken it to pass tests.
-const units=new Set(["g","kg","ml","L"]);
+const validUnit=(unit:string)=>unit.length>0&&unit.length<=32&&unit.trim()===unit;
 const decimal=/^(?:0|[1-9]\d*)(?:\.\d+)?$/;
 export type DraftMaterial={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string;supplier:string};
 export type NameCorrection={material_name:string;heard:string;candidates:{name:string;reason:string}[]};
@@ -73,8 +73,8 @@ export function parseRecipeDraft(raw:unknown):RecipeDraft|null {
  if(o.selling_price_jpy&&!decimal.test(o.selling_price_jpy as string))missing.push("売価の数値");
  for(const [i,m] of materials.entries()){
   if(!m.name.trim())missing.push(`食材${i+1}の名前`);
-  if(!decimal.test(m.quantity)||!units.has(m.unit))missing.push(`${m.name||"食材"}の数量・単位`);
-  if(!decimal.test(m.price_jpy)||!decimal.test(m.price_quantity)||Number(m.price_quantity)<=0||!units.has(m.price_unit))
+  if(!decimal.test(m.quantity)||!validUnit(m.unit))missing.push(`${m.name||"食材"}の数量・単位`);
+  if(!decimal.test(m.price_jpy)||!decimal.test(m.price_quantity)||Number(m.price_quantity)<=0||!validUnit(m.price_unit))
    missing.push(`${m.name||"食材"}の仕入単価・基準数量・単位`);
  }
  return {title:(o.title as string).trim(),materials,selling_price_jpy:o.selling_price_jpy as string,notes:o.notes as string[],missing,interpretations:interpretations as RecipeDraft["interpretations"],priceResearch:priceResearch as PriceResearch[],nameCorrections:nameCorrections as NameCorrection[]};
