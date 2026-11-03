@@ -115,10 +115,21 @@ class SupabasePersistence:
 
     def list_owned_units(self, owner_id):
         """List the complete owner-scoped vocabulary for contextual AI matching."""
-        response = (self.client.table("units")
-                    .select("id,symbol,dimension,aliases")
-                    .eq("owner_id", owner_id).order("symbol").execute())
-        return response.data or []
+        rows = []
+        page_size = 500
+        while True:
+            # Stable order is essential: an omitted page could turn reuse into
+            # an unsafe new registration or hide an ambiguous alias.
+            response = (self.client.table("units")
+                        .select("id,symbol,dimension,aliases")
+                        .eq("owner_id", owner_id)
+                        .order("id")
+                        .range(len(rows), len(rows) + page_size - 1)
+                        .execute())
+            batch = response.data or []
+            rows.extend(batch)
+            if len(batch) < page_size:
+                return rows
 
     def ensure_owned_unit(self, owner_id, symbol, dimension, aliases=()):
         """Trusted-server only. Call after the real user approval boundary."""
