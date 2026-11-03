@@ -120,6 +120,12 @@ export default function Library(){
          request_id:crypto.randomUUID(),operations,save_version:true})});
      const persisted=await request<Recipe>(`/api/recipes/${selected.id}`);
      if(persisted.revision!==result.recipe.revision)throw new Error("Saved revision mismatch");
+     for(const op of operations){
+       const material=persisted.materials.find(m=>m.id===op.material_id);
+       if(op.op==="set_material_quantity"&&(!material||material.quantity.value!==op.value||material.unit!==op.unit))throw new Error("Quantity not persisted");
+       if(op.op==="set_material_price"&&(!material||material.price_override?.amount_jpy.value!==op.price_jpy))throw new Error("Price not persisted");
+       if(op.op==="set_selling_price"&&persisted.selling_price_jpy.value!==op.value_jpy)throw new Error("Selling price not persisted");
+     }
      setSelected(persisted);await reload();setError("");return true;
    }catch(e){setError(String(e));return false;}finally{setBusy(false);}
  }
