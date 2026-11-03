@@ -1,5 +1,5 @@
 import {NextRequest,NextResponse} from "next/server";
-import {previewAuthorized} from "../../../preview-access";
+import {previewAuthorized,sameOrigin} from "../../../preview-access";
 import {backendUrl} from "../backend-url";
 export async function GET(req:NextRequest){
  if(!await previewAuthorized(req))return NextResponse.json({error:"forbidden"},{status:403});
