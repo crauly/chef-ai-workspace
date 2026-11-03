@@ -222,7 +222,7 @@ test("supplier is extracted without guessing; revision reuses the previous draft
       {turns: ["あと卵50g"], previous}));
     expect(revised.status).toBe(200);
     const sent = JSON.parse(sentBody).messages[1];
-    expect(Object.keys(JSON.parse(sent.content)).sort()).toEqual(["new_turns", "previous_draft"]);
+    expect(Object.keys(JSON.parse(sent.content)).sort()).toEqual(["new_turns", "previous_draft", "unit_catalog"]);
     expect(JSON.parse(sent.content).new_turns).toEqual(["あと卵50g"]);
     // Unrelated follow-up keeps the unresolved correction context.
     expect(JSON.parse(sent.content).previous_draft.name_corrections).toEqual(
