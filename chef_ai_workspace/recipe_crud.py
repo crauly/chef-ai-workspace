@@ -29,6 +29,10 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True):
     if recipe.revision != proposal.base_revision:
         raise MutationError("Stale recipe revision")
     catalog = repository.load_owned_catalog(owner_id, recipe)
+    explicit_links = [op["ingredient_id"] for op in proposal.operations
+                      if op.get("op") == "link_ingredient" and op.get("ingredient_id")]
+    if explicit_links:
+        catalog = {**catalog, **repository.load_owned_ingredients(owner_id, explicit_links)}
     candidate = prepare_mutation(recipe, proposal, user_confirmed=True, catalog=catalog)
     finder = repository.find_owned_ingredients_exact
     loader = repository.load_owned_ingredients
@@ -40,7 +44,10 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True):
         if not name:
             raise MutationError("Ingredient name required")
         key = name.casefold()
-        if line.ingredient_id and line.ingredient_id in effective:
+        renamed = any(op.get("op") == "set_material_name"
+                      and op.get("material_id") == line.id
+                      for op in proposal.operations)
+        if line.ingredient_id and line.ingredient_id in effective and not renamed:
             ingredient_id = line.ingredient_id
             ingredient = effective[ingredient_id]
         elif key in entries:
