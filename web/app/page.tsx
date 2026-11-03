@@ -36,13 +36,24 @@ export default function Library(){
  const [loadingList,setLoadingList]=useState(false);
  const [waking,setWaking]=useState(false);
  const [cost,setCost]=useState<{partial:boolean;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean}|null>(null);
- const [food,setFood]=useState(""),[qty,setQty]=useState(""),[unit,setUnit]=useState("g"),[price,setPrice]=useState(""),[priceQty,setPriceQty]=useState("1"),[priceUnit,setPriceUnit]=useState("kg");
+ const [food,setFood]=useState(""),[qty,setQty]=useState(""),[unit,setUnit]=useState(""),[price,setPrice]=useState(""),[priceQty,setPriceQty]=useState("1"),[priceUnit,setPriceUnit]=useState("");
+ const [units,setUnits]=useState<Array<{id:string;symbol:string;dimension:string;aliases:string[]}>>([]);
+ const [unitsLoaded,setUnitsLoaded]=useState(false);
+ useEffect(()=>{let mounted=true;
+   request<{items:Array<{id:string;symbol:string;dimension:string;aliases:string[]}>}>("/api/units")
+    .then(result=>{if(mounted){setUnits(result.items);setUnitsLoaded(true);}})
+    .catch(()=>{if(mounted)setUnitsLoaded(false);});
+   return()=>{mounted=false;};
+ },[]);
+ const unitChoices=(value:string)=>{const available=units.map(item=>item.symbol);
+   return [...new Set(value&&!available.includes(value)?[value,...available]:available)];
+ };
  // Recipe detail editing (modal) + AI consult toggle. The modal only calls
  // the existing /confirm path (saveOperations); the AI editor stays mounted
  // while collapsed so the voice edit flow keeps working.
  const [editingId,setEditingId]=useState<string|null>(null);
- const [editQty,setEditQty]=useState(""),[editUnit,setEditUnit]=useState("g");
- const [editPrice,setEditPrice]=useState(""),[editPriceQty,setEditPriceQty]=useState("1"),[editPriceUnit,setEditPriceUnit]=useState("g");
+ const [editQty,setEditQty]=useState(""),[editUnit,setEditUnit]=useState("");
+ const [editPrice,setEditPrice]=useState(""),[editPriceQty,setEditPriceQty]=useState("1"),[editPriceUnit,setEditPriceUnit]=useState("");
  const [aiOpen,setAiOpen]=useState(false);
  const [confirmQty,setConfirmQty]=useState(false),[confirmPrice,setConfirmPrice]=useState(false);
  const detailRef=useRef<HTMLElement|null>(null);
@@ -199,10 +210,10 @@ export default function Library(){
     {(qtyChanged||priceChanged)&&<p className="edit-diff">{locale==="ja"?"変更後":"After"}: {editQty.trim()||"?"} {editUnit}{priceChanged?` ／ ¥${editPrice.trim()||"?"} / ${editPriceQty}${editPriceUnit}`:""}</p>}
     <div className="edit-modal-fields">
      <label>{locale==="ja"?"数量":"Quantity"}<input inputMode="decimal" value={editQty} onChange={e=>setEditQty(e.target.value)} disabled={busy}/></label>
-     <label>Unit<select value={editUnit} onChange={e=>setEditUnit(e.target.value)} disabled={busy}><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option>{editUnit&&!["g","kg","ml","L"].includes(editUnit)&&<option value={editUnit}>{editUnit}</option>}</select></label>
+     <label>Unit<select value={editUnit} onChange={e=>setEditUnit(e.target.value)} disabled={busy}><option value="">—</option>{unitChoices(editUnit).map(symbol=><option key={symbol} value={symbol}>{symbol}</option>)}</select></label>
      <label>{locale==="ja"?"仕入単価（円）":"Price (JPY)"}<input inputMode="decimal" value={editPrice} onChange={e=>setEditPrice(e.target.value)} disabled={busy}/></label>
      <label>{locale==="ja"?"単価の基準数量":"Price per quantity"}<input inputMode="decimal" value={editPriceQty} onChange={e=>setEditPriceQty(e.target.value)} disabled={busy}/></label>
-     <label>Price unit<select value={editPriceUnit} onChange={e=>setEditPriceUnit(e.target.value)} disabled={busy}><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option>{editPriceUnit&&!["g","kg","ml","L"].includes(editPriceUnit)&&<option value={editPriceUnit}>{editPriceUnit}</option>}</select></label>
+     <label>Price unit<select value={editPriceUnit} onChange={e=>setEditPriceUnit(e.target.value)} disabled={busy}><option value="">—</option>{unitChoices(editPriceUnit).map(symbol=><option key={symbol} value={symbol}>{symbol}</option>)}</select></label>
      {line.quantity.status==="assumed"&&<label><input type="checkbox" checked={confirmQty} onChange={e=>setConfirmQty(e.target.checked)}/> {locale==="ja"?"現在の数量を明示確定":"Confirm current quantity"}</label>}
      {line.price_override?.amount_jpy.status==="assumed"&&<label><input type="checkbox" checked={confirmPrice} onChange={e=>setConfirmPrice(e.target.checked)}/> {locale==="ja"?"現在の仕入価格を明示確定":"Confirm current price"}</label>}
     </div>
@@ -216,14 +227,14 @@ export default function Library(){
  </fieldset>
  <fieldset><legend>{locale==="ja"?"分量":"Quantity"}</legend>
  <input aria-label={locale==="ja"?"数量":"Quantity"} placeholder={locale==="ja"?"数量":"Quantity"} inputMode="decimal" value={qty} onChange={e=>setQty(e.target.value)} required/>
- <select aria-label="Unit" value={unit} onChange={e=>setUnit(e.target.value)}><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option></select>
+ <select aria-label="Unit" value={unit} onChange={e=>setUnit(e.target.value)}><option value="">—</option>{unitChoices(unit).map(symbol=><option key={symbol} value={symbol}>{symbol}</option>)}</select>
  </fieldset>
  <fieldset><legend>{locale==="ja"?"仕入単価":"Unit price"}</legend>
  <input aria-label={locale==="ja"?"仕入単価（円）":"Price (JPY)"} placeholder={locale==="ja"?"仕入単価 ¥":"Price ¥"} inputMode="decimal" value={price} onChange={e=>setPrice(e.target.value)} required/>
  <input aria-label={locale==="ja"?"単価の基準数量":"Price per quantity"} placeholder="1" inputMode="decimal" value={priceQty} onChange={e=>setPriceQty(e.target.value)} required/>
- <select aria-label="Price unit" value={priceUnit} onChange={e=>setPriceUnit(e.target.value)}><option value="kg">kg</option><option value="g">g</option><option value="L">L</option><option value="ml">ml</option></select>
+ <select aria-label="Price unit" value={priceUnit} onChange={e=>setPriceUnit(e.target.value)}><option value="">—</option>{unitChoices(priceUnit).map(symbol=><option key={symbol} value={symbol}>{symbol}</option>)}</select>
  </fieldset>
- <button disabled={busy||!food.trim()||!qty.trim()||!price.trim()}>{locale==="ja"?"食材を追加":"Add ingredient"}</button>
+ <button disabled={busy||!food.trim()||!qty.trim()||!price.trim()||!unitsLoaded||!unit||!priceUnit}>{locale==="ja"?"食材を追加":"Add ingredient"}</button>
  </form></details>
  {cost?.estimated&&<p className="detail-estimate">{locale==="ja"?"原価に推定値が含まれます":"Cost includes estimates"}</p>}
  <details className="detail-action"><summary>{locale==="ja"?"✎ 料理名を変更":"✎ Rename recipe"}</summary><form onSubmit={change}><input aria-label={t("rename")} value={rename} onChange={e=>setRename(e.target.value)}/><button disabled={busy||!rename.trim()}>{t("save")}</button></form></details>
