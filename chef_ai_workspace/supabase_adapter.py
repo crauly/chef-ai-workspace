@@ -211,6 +211,17 @@ class SupabasePersistence:
         return {ingredient_id: sorted(suppliers)
                 for ingredient_id, suppliers in linked.items()}
 
+    def link_owned_ingredient_supplier(self, owner_id, ingredient_id, supplier_id):
+        """Explicit supplier link through an owned purchase offer; no overwrite."""
+        existing = (self.client.table("offers").select("id")
+                    .eq("owner_id", owner_id)
+                    .eq("ingredient_id", ingredient_id)
+                    .eq("supplier_id", supplier_id)
+                    .limit(1).execute()).data or []
+        if existing:
+            return existing[0]["id"]
+        return self.create_owned_offer(owner_id, ingredient_id, supplier_id)
+
     def update_owned_ingredient_master(self, owner_id, ingredient_id, name, quote):
         result=self.client.rpc("update_owned_ingredient",{
             "p_owner_id":owner_id,
