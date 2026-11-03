@@ -113,6 +113,23 @@ class SupabasePersistence:
                 current_price=_quote(row.get("current_price")))
         return catalog
 
+    def list_owned_units(self, owner_id):
+        """List the complete owner-scoped vocabulary for contextual AI matching."""
+        response = (self.client.table("units")
+                    .select("id,symbol,dimension,aliases")
+                    .eq("owner_id", owner_id).order("symbol").execute())
+        return response.data or []
+
+    def ensure_owned_unit(self, owner_id, symbol, dimension, aliases=()):
+        """Trusted-server only. Call after the real user approval boundary."""
+        response = self.client.rpc("ensure_owned_unit", {
+            "p_owner_id": owner_id,
+            "p_symbol": symbol,
+            "p_dimension": dimension,
+            "p_aliases": list(aliases),
+        }).execute()
+        return str(response.data)
+
     def search_owned_ingredients(self, owner_id, query, limit=20):
         """Owner-scoped ingredient search for reuse candidates and past-recipe
         references. Returns id/name rows only; identity decisions stay with
