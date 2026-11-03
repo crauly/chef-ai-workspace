@@ -57,6 +57,26 @@ class VoiceFullRecipeTests(unittest.TestCase):
             "selling_price_jpy": "2200"
         }
 
+    def test_new_unit_is_proposed_only_in_approved_recipe_save(self):
+        body = self.payload()
+        body["materials"] = [{
+            "name": "香草", "quantity": "2", "unit": "束",
+            "price_jpy": "300", "price_quantity": "1", "price_unit": "束",
+        }]
+        body["unit_candidates"] = [{"symbol": "束", "dimension": "count"}]
+        response = self.client.post("/demo/recipes/full", json=body, headers=self.headers)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(self.repo.unit_candidates,
+                         ({"symbol": "束", "dimension": "count"},))
+        self.assertEqual(self.repo.writes, 1)
+
+    def test_unknown_unit_without_approved_candidate_cannot_save(self):
+        body = self.payload()
+        body["materials"][0]["unit"] = "束"
+        response = self.client.post("/demo/recipes/full", json=body, headers=self.headers)
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(self.repo.writes, 0)
+
     def test_full_recipe_requires_authorized_session(self):
         response = self.client.post("/demo/recipes/full", json=self.payload())
         self.assertEqual(response.status_code, 403)
