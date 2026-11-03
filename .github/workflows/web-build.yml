@@ -1,15 +1,7 @@
 name: Next.js frontend build
+# CI is intentionally manual to preserve GitHub Actions minutes.
+# Run locally before explicitly dispatching this workflow.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'web/**'
-      - '.github/workflows/web-build.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'web/**'
-      - '.github/workflows/web-build.yml'
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

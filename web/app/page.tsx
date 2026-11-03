@@ -114,7 +114,7 @@ export default function Library(){
 
  async function saveOperations(operations:Record<string,string>[]):Promise<boolean> {
    if(!selected||busy)return false;
-   setBusy(true);
+   setError("");setBusy(true);
    try {
      const result=await request<{recipe:Recipe}>(`/api/recipes/${selected.id}/confirm`,{
        method:"POST",body:JSON.stringify({base_revision:selected.revision,
@@ -133,10 +133,12 @@ export default function Library(){
        }
        setSelected(persisted);setError("");
      }catch(e){
-       setError(`保存APIは成功しましたが、再取得による検証に失敗しました: ${String(e)}`);
+       setError(`保存APIは成功し変更を受け付けましたが、再取得による検証に失敗しました。再度保存せず、画面を更新して結果を確認してください: ${String(e)}`);
+       // The POST has committed. Returning false would let callers retry a new mutation
+       // (notably add_material with fresh IDs), duplicating ingredients and costs.
        return true;
      }
-     void reload();return true;
+     return true;
    }catch(e){setError(String(e));return false;}finally{setBusy(false);}
  }
  async function addFood(e:React.FormEvent){e.preventDefault();
@@ -199,6 +201,7 @@ export default function Library(){
  </div>
  {selected&&<section className="recipe-detail" ref={detailRef} aria-label={t("detail")}> 
  <div className="detail-topbar"><button type="button" className="detail-back" onClick={backToLibrary}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button><span className="detail-revision">REV {selected.revision}</span></div>
+ {error&&<p role="alert" className="error">{error}</p>}
  <div className="detail-heading"><p className="detail-eyebrow">{locale==="ja"?"RECIPE DETAIL":"RECIPE DETAIL"}</p><h2>{selected.title.value||t("detail")}</h2></div>
  {recipeGaps(selected).length>0&&<details className="recipe-gap-disclosure">
   <summary title={locale==="ja"?"不足情報を確認":"View incomplete fields"}><span aria-hidden="true">⚠</span> {locale==="ja"?"未確定情報":"Incomplete details"} · {recipeGaps(selected).length}{locale==="ja"?"件":""}</summary>
@@ -243,6 +246,8 @@ export default function Library(){
      {line.quantity.status==="assumed"&&<label><input type="checkbox" checked={confirmQty} onChange={e=>setConfirmQty(e.target.checked)}/> {locale==="ja"?"現在の数量を明示確定":"Confirm current quantity"}</label>}
      {line.price_override?.amount_jpy.status==="assumed"&&<label><input type="checkbox" checked={confirmPrice} onChange={e=>setConfirmPrice(e.target.checked)}/> {locale==="ja"?"現在の仕入価格を明示確定":"Confirm current price"}</label>}
     </div>
+    {error&&<p role="alert" className="error">{error}</p>}
+    {busy&&<p role="status">{locale==="ja"?"保存・再取得を確認中…":"Saving and verifying…"}</p>}
     <div className="actions"><button type="button" disabled={busy||!editName.trim()} onClick={()=>void submitEdit()}>{t("save")}</button>
     <button type="button" disabled={busy} onClick={()=>{if(window.confirm(locale==="ja"?"この食材をレシピから削除しますか？":"Remove this ingredient from the recipe?"))void saveOperations([{op:"remove_material",material_id:line.id}]).then(ok=>{if(ok)setEditingId(null);});}}>{locale==="ja"?"食材を削除":"Remove ingredient"}</button>
     <button className="secondary" type="button" disabled={busy} onClick={()=>setEditingId(null)}>{t("close")}</button></div>
@@ -265,6 +270,8 @@ export default function Library(){
  </form></details>
  {cost?.estimated&&<p className="detail-estimate">{locale==="ja"?"原価に推定値が含まれます":"Cost includes estimates"}</p>}
  <details className="detail-action"><summary>{locale==="ja"?"✎ 料理名を変更":"✎ Rename recipe"}</summary><form onSubmit={change}><input aria-label={t("rename")} value={rename} onChange={e=>setRename(e.target.value)}/><button disabled={busy||!rename.trim()}>{t("save")}</button></form></details>
+ <button type="button" disabled={busy} className="detail-ai-button" onClick={()=>document.getElementById("voice-controls")?.scrollIntoView({behavior:"smooth",block:"start"})}>{locale==="ja"?"🎙 音声でレシピを修正":"🎙 Edit recipe by voice"}</button>
+ <p className="muted">{locale==="ja"?"音声操作の「編集」を選び、マイクをオンにして変更内容を話してください。変更案を確認・承認してから保存します。":"Select Edit in voice controls, enable the microphone and describe changes. Review and approve before saving."}</p>
  <button type="button" disabled={busy} aria-expanded={aiOpen} onClick={()=>setAiOpen(v=>!v)} className="detail-ai-button">{locale==="ja"?"◇ AIに変更相談":"◇ Ask AI to edit"}</button>
  <div hidden={!aiOpen}><AIEditor key={selected.id} recipe={selected} locale={locale} control={editor} markReview={()=>reviewBoundary.current?.()??-1} onBusy={b=>{setBusy(b);if(b)setAiOpen(true);}} onSaved={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");void reload();}} /></div>
  </section>}</main>;
