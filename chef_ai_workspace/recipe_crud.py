@@ -109,7 +109,10 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
                 line.ingredient_id == item["id"] for line in candidate.materials):
             raise MutationError("New ledger ingredient must be linked to a recipe material")
     units = unit_factor_catalog(repository.list_owned_units(owner_id))
-    cost = calculate_cost(candidate, effective, units)
+    try:
+        cost = calculate_cost(candidate, effective, units)
+    except (ValueError, ArithmeticError) as exc:
+        raise MutationError(str(exc)) from exc
     snapshot = asdict(cost)
     if save_version:
         snapshot["effective_quotes"] = {
