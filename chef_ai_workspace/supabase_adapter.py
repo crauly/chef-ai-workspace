@@ -17,7 +17,7 @@ def _quote(raw):
         return None
     return PriceQuote(amount_jpy=_tracked(raw["amount_jpy"]),
                       per_quantity=raw["per_quantity"], per_unit=raw["per_unit"],
-                      source=raw["source"])
+                      source=raw["source"], per_unit_id=raw.get("per_unit_id"))
 
 def decode_recipe(raw):
     materials = tuple(MaterialLine(
@@ -25,7 +25,8 @@ def decode_recipe(raw):
         quantity=_tracked(m["quantity"]), unit=m["unit"],
         ingredient_id=m.get("ingredient_id"),
         price_override=_quote(m.get("price_override")),
-        price_mode=m.get("price_mode", "override")) for m in raw.get("materials", ()))
+        price_mode=m.get("price_mode", "override"),
+        unit_id=m.get("unit_id")) for m in raw.get("materials", ()))
     return Recipe(id=raw["id"], title=_tracked(raw["title"]),
                   materials=materials,
                   selling_price_jpy=_tracked(raw["selling_price_jpy"]),
