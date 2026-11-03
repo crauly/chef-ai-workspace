@@ -18,7 +18,8 @@ test("unknown units are visible in review and registered only on explicit recipe
  const entry=page.getByLabel("音声認識できない場合の入力");
  await entry.fill("野菜のソテー、青菜2束、1束300円、売価1200円");
  await page.getByRole("button",{name:"反映"}).click();
- await expect(page.getByText(/新規単位として登録：.*束/)).toBeVisible();
+ await expect(page.getByRole("group",{name:"保存時に作成する単位マスター"})).toBeVisible();
+ await expect(page.getByLabel("束の単位分類")).toHaveValue("count");
  expect(writes).toBe(0);
  await page.getByRole("button",{name:"レシピを登録"}).click();
  await expect(page.getByText("レシピを保存しました。")).toBeVisible();
