@@ -604,3 +604,9 @@ main.recipe-detail-page>div[hidden]{display:none!important}
  .settings-main-panel .settings-manager-unit>div:has(>label){display:grid;grid-template-columns:1fr}
  .settings-main-panel .supplier-manager-list li .toolbar{width:100%;justify-content:flex-start}
 }
+
+
+.settings-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.settings-panel-heading .settings-panel-title{margin:0}
+.settings-help-button{white-space:nowrap;padding:8px 12px;font-size:.86rem}
+.settings-help{background:rgba(114,145,128,.13);border:1px solid rgba(163,186,174,.32);border-radius:10px;padding:12px 14px;color:#d4e4da;font-size:.88rem;margin:0 0 18px}
