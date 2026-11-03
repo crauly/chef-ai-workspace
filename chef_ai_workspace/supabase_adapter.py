@@ -133,17 +133,15 @@ class SupabasePersistence:
             if not batch:
                 return rows
 
-    def update_owned_unit_aliases(self, owner_id, unit_id, aliases):
-        """Explicit manager action; canonical unit identity is unchanged."""
-        response = self.client.rpc("update_owned_unit_aliases", {
+    def update_owned_unit(self, owner_id, unit_id, symbol, dimension, aliases):
+        response = self.client.rpc("update_owned_unit", {
             "p_owner_id": owner_id,
             "p_unit_id": unit_id,
+            "p_symbol": symbol,
+            "p_dimension": dimension,
             "p_aliases": list(aliases),
         }).execute()
-        return response.data is True
-
-    # New units are created only by create_owned_recipe's approved transaction.
-    # Never expose a standalone unit-create RPC through the adapter.
+        return bool(response.data)
 
     def search_owned_ingredients(self, owner_id, query, limit=20):
         """Owner-scoped ingredient search for reuse candidates and past-recipe
