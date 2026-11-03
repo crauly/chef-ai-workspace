@@ -9,6 +9,8 @@ export default function UnitManager({locale}:{locale:Locale}){
  const [busy,setBusy]=useState(false);
  const [editing,setEditing]=useState<string|null>(null);
  const [aliases,setAliases]=useState("");
+ const [symbol,setSymbol]=useState("");
+ const [dimension,setDimension]=useState("other");
  const load=useCallback(async()=>{
   try{
    const r=await fetch("/api/units",{cache:"no-store"});
@@ -21,12 +23,12 @@ export default function UnitManager({locale}:{locale:Locale}){
  async function save(id:string){
   if(busy)return;
   const values=aliases.split(",").map(x=>x.trim()).filter(Boolean);
-  if(values.length>20||values.some(x=>x.length>32)){
+  if(!symbol.trim()||symbol.trim().length>32||values.length>20||values.some(x=>x.length>32)){
    setError(ja?"別名は20件まで、各32文字以内です。":"Up to 20 aliases of 32 characters each.");return;
   }
   setBusy(true);
   try{
-   const r=await fetch("/api/units/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({aliases:values})});
+   const r=await fetch("/api/units/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol:symbol.trim(),dimension,aliases:values})});
    if(!r.ok)throw new Error("save");
    setEditing(null);await load();
   }catch{setError(ja?"別名の保存に失敗しました。":"Failed to save aliases.");}
@@ -41,6 +43,8 @@ export default function UnitManager({locale}:{locale:Locale}){
    {items.map(u=><li key={u.id}>
     <strong>{u.symbol}</strong> <span>({u.dimension})</span>
     {editing===u.id?<div>
+     <label>{ja?"正式単位名":"Canonical unit name"}<input value={symbol} onChange={e=>setSymbol(e.target.value)} disabled={busy}/></label>
+     <label>{ja?"単位の分類":"Dimension"}<select value={dimension} onChange={e=>setDimension(e.target.value)} disabled={busy}><option value="mass">Mass</option><option value="volume">Volume</option><option value="count">Count</option><option value="other">Other</option></select></label>
      <label>{ja?"別名（カンマ区切り）":"Aliases (comma separated)"}
       <input value={aliases} onChange={e=>setAliases(e.target.value)} disabled={busy}/>
      </label>
@@ -48,7 +52,7 @@ export default function UnitManager({locale}:{locale:Locale}){
      <button type="button" className="secondary" onClick={()=>setEditing(null)} disabled={busy}>{ja?"取消":"Cancel"}</button>
     </div>:<>
      <span> {u.aliases.join(", ")}</span>{" "}
-     <button type="button" className="secondary" onClick={()=>{setEditing(u.id);setAliases(u.aliases.join(", "));}}>{ja?"別名を編集":"Edit aliases"}</button>
+     <button type="button" className="secondary" onClick={()=>{setEditing(u.id);setAliases(u.aliases.join(", "));setSymbol(u.symbol);setDimension(u.dimension);}}>{ja?"単位を編集":"Edit unit"}</button>
     </>}
    </li>)}
   </ul>
