@@ -66,3 +66,13 @@ test("ingredient editor explicitly links a registered supplier through purchase 
  await expect.poll(()=>posted).toEqual({supplier_id:supplier});
  await expect(page.getByRole("row",{name:/バター/})).toBeVisible();
 });
+
+test("ingredient prices keep fractional precision rather than rounding in the list",async({page})=>{
+ await page.route("**/api/ingredients",async route=>route.fulfill({json:{
+  items:[{id:"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",name:"微量材料",current_price:{
+   amount_jpy:{value:"1234.0004"},per_quantity:"1",per_unit:"g",
+  }}],suppliers_by_ingredient:{},
+ }}));
+ await page.goto("/settings");
+ await expect(page.getByRole("row",{name:/微量材料/})).toContainText("¥1,234.0004");
+});
