@@ -8,9 +8,9 @@ create table public.units (
  aliases text[] not null default '{}',
  created_at timestamptz not null default now(),
  updated_at timestamptz not null default now(),
- unique (owner_id, (lower(symbol))),
  unique (owner_id, id)
 );
+create unique index units_owner_symbol_normalized_idx on public.units(owner_id, lower(symbol));
 create index units_owner_idx on public.units(owner_id);
 alter table public.units enable row level security;
 create policy units_owner_read on public.units for select to authenticated
