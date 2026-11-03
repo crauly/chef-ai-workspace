@@ -45,12 +45,6 @@ createServer(async (req, res) => {
       {id:"00000000-0000-4000-8000-000000000004",symbol:"L",dimension:"volume",base_factor:"1000",aliases:[]}
     ]});
   }
-  if (path === "/demo/units" && req.method === "GET") return send(200, {items: [
-    {id:"00000000-0000-4000-8000-000000000001",symbol:"g",dimension:"mass",base_factor:"1",aliases:["グラム"]},
-    {id:"00000000-0000-4000-8000-000000000002",symbol:"kg",dimension:"mass",base_factor:"1000",aliases:["キログラム"]},
-    {id:"00000000-0000-4000-8000-000000000003",symbol:"ml",dimension:"volume",base_factor:"1",aliases:["ミリリットル"]},
-    {id:"00000000-0000-4000-8000-000000000004",symbol:"L",dimension:"volume",base_factor:"1000",aliases:["リットル"]}
-  ]});
   if (path === "/demo/recipes") {
     const params = new URL(req.url, "http://localhost").searchParams;
     const q = params.get("q") || "", page = Number(params.get("page") || 1), size = Number(params.get("page_size") || 20);
@@ -88,7 +82,9 @@ createServer(async (req, res) => {
     return send(201,created);
   }
   const targetId = (path.match(/^\/demo\/recipes\/([^/]+)\//) || [])[1];
-  const target = (targetId && recipes[targetId]) || recipe;
+  // Unknown recipe IDs must never silently mutate the seeded recipe.
+  const target = targetId ? recipes[targetId] : recipe;
+  if (targetId && !target && (path.endsWith("/cost") || path.endsWith("/propose") || path.endsWith("/confirm") || path.endsWith("/corrections"))) return send(404,{detail:"not found"});
   if (path.endsWith("/cost")) return send(200, {total_cost_jpy: target.materials[0].quantity.value, cost_rate_pct: "1.0", estimated: false, partial: false});
   if (path.endsWith("/propose")) {
     if (body.instruction === "failure") return send(502, {detail: "private-test-only-backend-token"});
