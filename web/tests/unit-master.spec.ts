@@ -40,5 +40,5 @@ test("unit master settings edit canonical name, dimension and aliases",async({pa
  await page.getByLabel("単位の分類").selectOption("count");
  await page.getByLabel("別名（カンマ区切り）").fill("束");
  await page.getByRole("button",{name:"保存"}).click();
- await expect.poll(()=>saved).toEqual({symbol:"把",dimension:"count",aliases:["束"]});
+ await expect.poll(()=>saved).toEqual({symbol:"把",dimension:"count",base_factor:null,aliases:["束"]});
 });
