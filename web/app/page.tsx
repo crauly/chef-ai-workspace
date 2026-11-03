@@ -60,6 +60,12 @@ export default function Library(){
   }catch(e){setError(String(e));}
   finally{setBusy(false);}
  }
+ useEffect(()=>{
+  if(!actionItem&&!deleteTarget)return;
+  const onKey=(event:KeyboardEvent)=>{if(event.key==="Escape"&&!busy){setActionItem(null);setDeleteTarget(null);}};
+  document.addEventListener("keydown",onKey);
+  return()=>document.removeEventListener("keydown",onKey);
+ },[actionItem,deleteTarget,busy]);
  const [loadingList,setLoadingList]=useState(false);
  const [waking,setWaking]=useState(false);
  const [cost,setCost]=useState<{partial:boolean;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean}|null>(null);
