@@ -91,11 +91,22 @@ const NAME_CORRECTION_SCHEMA = {
   additionalProperties: false,
 };
 
+const UNIT_PROPOSAL_SCHEMA = {
+  type: "object",
+  properties: {
+    symbol: {type:"string"},
+    dimension: {type:"string",enum:["mass","volume","count","other"]},
+  },
+  required: ["symbol","dimension"],
+  additionalProperties: false,
+} as const;
+
 export const VOICE_RECIPE_SCHEMA = {
   type: "object",
   properties: {
     title: { type: "string" },
     materials: { type: "array", items: MATERIAL_SCHEMA },
+    unit_proposals: {type:"array",items:UNIT_PROPOSAL_SCHEMA},
     selling_price_jpy: { type: "string" },
     notes: { type: "array", items: { type: "string" } },
     interpretations: { type: "array", items: INTERPRETATION_SCHEMA },
@@ -108,7 +119,7 @@ export const VOICE_RECIPE_SCHEMA = {
     // [] when confident. Informational only, never auto-applied.
     name_corrections: { type: "array", items: NAME_CORRECTION_SCHEMA },
   },
-  required: ["title", "materials", "selling_price_jpy", "notes", "interpretations", "price_research", "name_corrections"],
+  required: ["title", "materials", "unit_proposals", "selling_price_jpy", "notes", "interpretations", "price_research", "name_corrections"],
   additionalProperties: false,
 } as const;
 
