@@ -55,6 +55,7 @@ export default function Library(){
  const [editQty,setEditQty]=useState(""),[editUnit,setEditUnit]=useState("");
  const [editPrice,setEditPrice]=useState(""),[editPriceQty,setEditPriceQty]=useState("1"),[editPriceUnit,setEditPriceUnit]=useState("");
  const [aiOpen,setAiOpen]=useState(false);
+ const [sellingPriceEdit,setSellingPriceEdit]=useState("");
  const [confirmQty,setConfirmQty]=useState(false),[confirmPrice,setConfirmPrice]=useState(false);
  const detailRef=useRef<HTMLElement|null>(null);
  useEffect(()=>{
@@ -117,14 +118,29 @@ export default function Library(){
      const result=await request<{recipe:Recipe}>(`/api/recipes/${selected.id}/confirm`,{
        method:"POST",body:JSON.stringify({base_revision:selected.revision,
          request_id:crypto.randomUUID(),operations,save_version:true})});
-     setSelected(result.recipe);await reload();setError("");return true;
+     setSelected(result.recipe);
+     try {
+       const persisted=await request<Recipe>(`/api/recipes/${selected.id}`);
+       if(persisted.revision!==result.recipe.revision)throw new Error("Saved revision mismatch");
+       for(const op of operations){
+         const material=persisted.materials.find(m=>m.id===op.material_id);
+         if(op.op==="set_material_quantity"&&(!material||material.quantity.value!==op.value||material.unit!==op.unit))throw new Error("Quantity not persisted");
+         if(op.op==="set_material_price"&&(!material||material.price_override?.amount_jpy.value!==op.price_jpy))throw new Error("Price not persisted");
+         if(op.op==="set_selling_price"&&persisted.selling_price_jpy.value!==op.value_jpy)throw new Error("Selling price not persisted");
+       }
+       setSelected(persisted);setError("");
+     }catch(e){
+       setError(`保存APIは成功しましたが、再取得による検証に失敗しました: ${String(e)}`);
+       return true;
+     }
+     void reload();return true;
    }catch(e){setError(String(e));return false;}finally{setBusy(false);}
  }
  async function addFood(e:React.FormEvent){e.preventDefault();
    if(!food.trim()||!qty.trim()||!price.trim()||!priceQty.trim())return;
-   await saveOperations([{op:"add_material",material_id:crypto.randomUUID(),name:food.trim(),
+   const saved=await saveOperations([{op:"add_material",material_id:crypto.randomUUID(),name:food.trim(),
      quantity:qty,unit,price_jpy:price,price_quantity:priceQty,price_unit:priceUnit}]);
-   setFood("");setQty("");setPrice("");
+   if(saved){setFood("");setQty("");setPrice("");}
  }
  function openEdit(materialId:string){
    const line=selected?.materials.find(m=>m.id===materialId);
@@ -191,6 +207,10 @@ export default function Library(){
   <div><span>{locale==="ja"?"原価率":"Cost rate"}</span><strong>{cost?.cost_rate_pct==null?"—":`${cost.cost_rate_pct}%`}</strong></div>
  </div>
 
+ <details className="detail-action"><summary>{locale==="ja"?"✎ 販売価格を変更":"✎ Edit selling price"}</summary>
+ <form onSubmit={async e=>{e.preventDefault();if(!selected||!sellingPriceEdit.trim())return;const saved=await saveOperations([{op:"set_selling_price",value_jpy:sellingPriceEdit.trim()}]);if(saved)setSellingPriceEdit("");}}>
+ <label>{locale==="ja"?"販売価格（円）":"Selling price (JPY)"}<input inputMode="decimal" value={sellingPriceEdit} onChange={e=>setSellingPriceEdit(e.target.value)} placeholder={selected.selling_price_jpy.value??""} required/></label>
+ <button type="submit" disabled={busy||!sellingPriceEdit.trim()||!Number.isFinite(Number(sellingPriceEdit))||Number(sellingPriceEdit)<=0}>{t("save")}</button></form></details>
  <div className="detail-section-heading"><h3>{t("ingredients")}</h3><span>{selected.materials.length}{locale==="ja"?"品目":" items"}</span></div>{selected.materials.length===0?<p className="muted">{t("noIngredients")}</p>:<ul className="detail-ingredients">{selected.materials.map(m=>{
   const name=selected.display_names?.[m.id]?.display?.trim()||m.material_name.value?.trim()||t("unnamed");
   const qtyMark=m.quantity.status==="assumed"?` (${t("assumed")})`:m.quantity.status==="unresolved"?` (${t("unresolved")})`:"";

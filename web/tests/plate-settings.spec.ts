@@ -156,8 +156,8 @@ async function openRecipe(page: Page, title: string) {
 test("settings section is reachable from the settings route and starts empty", async ({page}) => {
   await page.goto("/settings");
   const settings = page.locator("details.plate-settings");
-  await expect(settings.getByText("料理画像設定（デフォルト皿）")).toBeVisible();
-  await settings.getByText("料理画像設定（デフォルト皿）").click();
+  await expect(settings.getByText("お皿の管理")).toBeVisible();
+  await settings.getByText("お皿の管理").click();
   await expect(settings.getByText("新しい皿を登録")).toBeVisible();
   await expect(settings.getByRole("button", {name: "この皿を登録"})).toBeDisabled();
 });

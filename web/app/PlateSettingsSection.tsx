@@ -27,11 +27,11 @@ export default function PlateSettingsSection({locale}:{locale:Locale}){
  }
  async function act(fn:()=>Promise<void>){setBusy(true);setError("");try{await fn();await refresh();}catch{setError(ja?"保存に失敗しました。空き容量を確認してください":"Could not save; check device storage");}finally{setBusy(false);}}
  return <div className="plate-settings-body">
-  <div className="plate-settings-heading"><div><strong>{ja?"登録したお皿":"Saved plates"}</strong><p>{ja?"料理ごとに使用する皿を選べます":"Choose a plate for each recipe"}</p></div><span className="plate-settings-status">{plates.length}{ja?"枚":" plates"}</span></div>
+  <div className="plate-settings-heading"><div><strong>{ja?"登録済みのお皿":"Registered plates"}</strong><p>{ja?"登録済みのお皿から標準のお皿を指定できます":"Choose the default plate from the registered plates"}</p></div><span className="plate-settings-status">{plates.length}{ja?"枚":" plates"}</span></div>
   <p className="plate-local-note">{ja?"写真はこのブラウザのIndexedDBに保存され、他の端末とは同期されません。同じブラウザを使う人には見えます。生成時のみ画像を送信します。":"Photos stay in this browser (IndexedDB), not synced between devices; shared-browser users can access them. Sent only for generation."}</p>
   {plates.length>0&&<div className="plate-gallery">{plates.map(p=><div className="plate-gallery-item" key={p.id}>
    <img src={p.image} alt={p.name}/><div className="plate-gallery-copy"><strong>{p.name}</strong><small>{p.note}</small><div className="plate-gallery-actions">
-    <button type="button" disabled={busy||defaultId===p.id} onClick={()=>void act(()=>makeDefault(p.id))}>{defaultId===p.id?(ja?"デフォルト":"Default"):(ja?"標準に設定":"Set default")}</button>
+    <button type="button" disabled={busy||defaultId===p.id} onClick={()=>void act(()=>makeDefault(p.id))}>{defaultId===p.id?(ja?"デフォルト":"Default"):(ja?"この皿をデフォルトにする":"Make default")}</button>
     <button type="button" className="secondary" disabled={busy} onClick={()=>void act(()=>removePlate(p.id))}>{ja?"削除":"Delete"}</button>
    </div></div>
   </div>)}</div>}

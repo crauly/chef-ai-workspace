@@ -35,6 +35,7 @@ test("unit master settings edit canonical name, dimension and aliases",async({pa
   saved=route.request().postDataJSON();await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({ok:true})});
  });
  await page.goto("/settings");
+ await page.locator("details").filter({has:page.locator("summary", {hasText:"単位マスター"})}).locator("summary").click();
  await expect(page.getByRole("region",{name:"単位マスター"})).toBeVisible();
  await page.getByRole("button",{name:"単位を編集"}).click();
  await page.getByLabel("正式単位名").fill("把");
