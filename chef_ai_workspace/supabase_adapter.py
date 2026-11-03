@@ -65,6 +65,18 @@ class SupabasePersistence:
         response = query.order("updated_at", desc=True).range(offset, offset+limit-1).execute()
         return response.data or []
 
+    def delete_owned_recipe(self, owner_id, recipe_id):
+        """Delete only a recipe owned by the authenticated demo owner.
+
+        Recipe versions and mutation receipts have ON DELETE CASCADE
+        constraints; unrelated ingredient master records are preserved.
+        """
+        rows = (self.client.table("recipes").delete()
+                .eq("owner_id", owner_id)
+                .eq("id", recipe_id)
+                .execute()).data or []
+        return bool(rows)
+
     def load_owned_recipe(self, owner_id, recipe_id):
         try:
             response = (self.client.table("recipes").select("state")
