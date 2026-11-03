@@ -213,6 +213,10 @@ class AssignTests(unittest.TestCase):
 
 
 class FakeLedger:
+    def list_owned_units(self, owner):
+        return [{"id":"g-id","symbol":"g","dimension":"mass","base_factor":"1","aliases":[]},
+                {"id":"kg-id","symbol":"kg","dimension":"mass","base_factor":"1000","aliases":[]},
+                {"id":"ml-id","symbol":"ml","dimension":"volume","base_factor":"1","aliases":[]}]
     """Minimal owner-scoped read surface with write traps and counters."""
 
     def __init__(self, owner):
