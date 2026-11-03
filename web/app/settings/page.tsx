@@ -20,7 +20,7 @@ export default function SettingsPage(){
   <section className="workspace-section workspace-settings-section" aria-labelledby="settings-title">
    <div className="workspace-section-head"><div><h2 id="settings-title">{ja?"管理・設定":"Management & Settings"}</h2><p>{ja?"食材・単位・仕入先・購入先候補・料理画像設定":"Ingredients, units, suppliers, sourcing suggestions, and dish image settings"}</p></div></div>
    <div className="workspace-settings-content">
-    <UnitManager locale={locale}/>
+    <details><summary>{ja?"単位マスター":"Unit master"}</summary><UnitManager locale={locale}/></details>
     <IngredientManager locale={locale}/>
     <SupplierManager locale={locale}/>
     <SourcingSuggestions locale={locale}/>
