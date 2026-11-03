@@ -155,11 +155,9 @@ async function openRecipe(page: Page, title: string) {
 
 test("settings section is reachable from the settings route and starts empty", async ({page}) => {
   await page.goto("/settings");
-  const settings = page.locator("details.plate-settings");
-  await expect(settings.getByText("お皿の管理")).toBeVisible();
-  await settings.getByText("お皿の管理").click();
-  await expect(settings.getByText("新しい皿を登録")).toBeVisible();
-  await expect(settings.getByRole("button", {name: "この皿を登録"})).toBeDisabled();
+  await page.getByRole("navigation",{name:"設定項目"}).getByRole("button",{name:"盛り付け用の皿"}).click();
+  await expect(page.getByText("新しい皿を登録")).toBeVisible();
+  await expect(page.getByRole("button", {name: "この皿を登録"})).toBeDisabled();
 });
 
 test("detail section reports plate status and attaches the photo on generate", async ({page}) => {
