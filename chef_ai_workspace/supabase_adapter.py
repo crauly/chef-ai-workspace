@@ -128,7 +128,7 @@ class SupabasePersistence:
                         .execute())
             batch = response.data or []
             rows.extend(batch)
-            if len(batch) < page_size:
+            if not batch:
                 return rows
 
     def ensure_owned_unit(self, owner_id, symbol, dimension, aliases=()):
