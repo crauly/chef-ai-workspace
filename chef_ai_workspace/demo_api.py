@@ -314,12 +314,12 @@ class CompleteRecipeMaterial(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=200)
     quantity: str | None = Field(default=None, max_length=30)
-    unit: str | None = Field(default=None, pattern=r"^(g|kg|ml|L)$")
+    unit: str | None = Field(default=None, min_length=1, max_length=32)
     # Prices are optional (M4): missing prices save the line unpriced and the
     # cost stays partial with explicit unresolved IDs -- never zero-filled.
     price_jpy: str | None = Field(default=None, max_length=30)
     price_quantity: str | None = Field(default=None, max_length=30)
-    price_unit: str | None = Field(default=None, pattern=r"^(g|kg|ml|L)$")
+    price_unit: str | None = Field(default=None, min_length=1, max_length=32)
 
 
 class UnitCandidateBody(BaseModel):
