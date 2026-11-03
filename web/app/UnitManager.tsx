@@ -8,6 +8,8 @@ export default function UnitManager({locale}:{locale:Locale}){
  const [error,setError]=useState("");
  const [busy,setBusy]=useState(false);
  const [editing,setEditing]=useState<string|null>(null);
+ const [newSymbol,setNewSymbol]=useState("");
+ const [newDimension,setNewDimension]=useState("other");
  const [aliases,setAliases]=useState("");
  const [symbol,setSymbol]=useState("");
  const [dimension,setDimension]=useState("other");
@@ -35,9 +37,30 @@ export default function UnitManager({locale}:{locale:Locale}){
   }catch{setError(ja?"別名の保存に失敗しました。":"Failed to save aliases.");}
   finally{setBusy(false);}
  }
+ async function create(){
+  if(busy||!newSymbol.trim())return;
+  setBusy(true);
+  try{
+   const r=await fetch("/api/units",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol:newSymbol.trim(),dimension:newDimension})});
+   if(!r.ok)throw new Error("create");
+   setNewSymbol("");await load();
+  }catch{setError(ja?"単位を登録できません。重複する単位や別名を確認してください。":"Could not create unit. Check duplicate symbols and aliases.");}
+  finally{setBusy(false);}
+ }
+ async function remove(u:Unit){
+  if(busy||!window.confirm(ja?`単位「${u.symbol}」を削除しますか？使用中の単位は削除できません。`:`Delete unit ${u.symbol}? Units in use cannot be deleted.`))return;
+  setBusy(true);
+  try{
+   const r=await fetch("/api/units/"+u.id,{method:"DELETE"});
+   if(!r.ok)throw new Error("delete");
+   await load();
+  }catch{setError(ja?"削除できません。レシピや食材価格で使用中の可能性があります。":"Cannot delete a unit that is in use.");}
+  finally{setBusy(false);}
+ }
  return <section className="workspace-section" aria-label={ja?"単位マスター":"Unit master"}>
   <div className="workspace-section-head"><h3>{ja?"単位マスター":"Unit master"}</h3></div>
   <p>{ja?"レシピで使用する単位と別名を確認・編集します。新規単位はレシピ保存時に一括承認されます。":"Review unit names and aliases. New units are approved with recipe saving."}</p>
+  <div><label>{ja?"新規単位名":"New unit"}<input maxLength={32} value={newSymbol} disabled={busy} onChange={e=>setNewSymbol(e.target.value)}/></label><label>{ja?"単位分類":"Dimension"}<select value={newDimension} disabled={busy} onChange={e=>setNewDimension(e.target.value)}><option value="mass">Mass</option><option value="volume">Volume</option><option value="count">Count</option><option value="other">Other</option></select></label><button type="button" disabled={busy||!newSymbol.trim()} onClick={()=>void create()}>{ja?"単位を登録":"Create unit"}</button></div>
   {error&&<p role="alert">{error}</p>}
   <button type="button" className="secondary" onClick={()=>void load()} disabled={busy}>{ja?"更新":"Refresh"}</button>
   <ul>
@@ -54,7 +77,7 @@ export default function UnitManager({locale}:{locale:Locale}){
      <button type="button" className="secondary" onClick={()=>setEditing(null)} disabled={busy}>{ja?"取消":"Cancel"}</button>
     </div>:<>
      <span> {u.aliases.join(", ")}</span>{" "}
-     <button type="button" className="secondary" onClick={()=>{setEditing(u.id);setAliases(u.aliases.join(", "));setSymbol(u.symbol);setDimension(u.dimension);setFactor(u.base_factor??"");}}>{ja?"単位を編集":"Edit unit"}</button>
+     <button type="button" className="secondary" onClick={()=>{setEditing(u.id);setAliases(u.aliases.join(", "));setSymbol(u.symbol);setDimension(u.dimension);setFactor(u.base_factor??"");}}>{ja?"単位を編集":"Edit unit"}</button>{" "}<button type="button" className="secondary" disabled={busy} onClick={()=>void remove(u)}>{ja?"削除":"Delete"}</button>
     </>}
    </li>)}
   </ul>
