@@ -103,6 +103,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  function feedback(text:string,error=false){setMessage(locale==="ja"?text:(voiceMessagesEn[text]??text));if(error&&volume>0)playVoiceCue("error",volume);}
  function transition(next:VoiceMode,traceId=""){
   if(currentMode.current===next)return;
+  if(next==="create")setSupplierMemo("");
   logVoiceEvent("mode.transition",`${currentMode.current}->${next}`,traceId);
   registration.current?.suspend();editor.current?.invalidate();
   modeBoundary.current=mark();currentMode.current=next;setMode(next);
