@@ -97,7 +97,7 @@ class MasterCrudApiTests(unittest.TestCase):
         self.assertEqual(self.client.put(f"/demo/units/{id}",json={"symbol":"kg","dimension":"mass","aliases":["kilo"]},headers=self.headers).status_code,200)
         self.assertEqual(self.client.delete(f"/demo/ingredients/{id}",headers=self.headers).status_code,200)
         self.assertEqual(self.client.delete(f"/demo/units/{id}",headers=self.headers).status_code,200)
-        self.assertEqual(len(self.repo.calls),8)
+        self.assertEqual(len(self.repo.calls),9)
         self.assertTrue(all(call[1]==self.owner for call in self.repo.calls))
 
     def test_invalid_payloads_do_not_write(self):
