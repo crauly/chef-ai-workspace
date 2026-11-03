@@ -33,6 +33,30 @@ def demo_context(request: Request, x_demo_access: str | None = Header(default=No
     return str(owner), factory()
 
 
+@router.get("/units")
+def list_demo_units(ctx=Depends(demo_context)):
+    """Owner-scoped vocabulary for Muse proposals and the unit manager."""
+    owner, repository = ctx
+    loader = getattr(repository, "list_owned_units", None)
+    if not callable(loader):
+        raise HTTPException(503, "Unit master repository unavailable")
+    return {"items": loader(owner)}
+
+
+@router.get("/units/resolve")
+def resolve_demo_unit(
+    q: str = Query(min_length=1, max_length=32),
+    ctx=Depends(demo_context),
+):
+    """Never creates data: AI candidates require the normal Human Gate."""
+    from .unit_master import resolve_unit
+    owner, repository = ctx
+    loader = getattr(repository, "list_owned_units", None)
+    if not callable(loader):
+        raise HTTPException(503, "Unit master repository unavailable")
+    return asdict(resolve_unit(q, loader(owner)))
+
+
 @router.get("/recipes")
 def list_demo_recipes(page: int = 1, page_size: int = 20,
                       q: str = Query(default="", max_length=200), ctx=Depends(demo_context)):
