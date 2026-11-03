@@ -186,7 +186,10 @@ def save_recipe_with_ledger(*, owner_id: str, trusted_user_confirmed: bool,
     except ValueError as exc:
         raise MutationError(str(exc)) from exc
     try:
-        cost = calculate_cost(candidate, effective)
+        from .costing import unit_factor_catalog
+        unit_loader = getattr(repository, "list_owned_units", None)
+        units = unit_factor_catalog(unit_loader(owner_id)) if callable(unit_loader) else {}
+        cost = calculate_cost(candidate, effective, units)
     except ValueError as exc:
         raise MutationError(str(exc)) from exc
     snapshot = asdict(cost)
@@ -281,7 +284,10 @@ def save_validated_mutation(*, owner_id: str, trusted_user_confirmed: bool,
                 return SavedMutation(canonical, saved_revision, True)
         raise MutationError(str(exc)) from exc
     try:
-        cost = calculate_cost(candidate, catalog)
+        from .costing import unit_factor_catalog
+        unit_loader = getattr(repository, "list_owned_units", None)
+        units = unit_factor_catalog(unit_loader(owner_id)) if callable(unit_loader) else {}
+        cost = calculate_cost(candidate, catalog, units)
     except ValueError as exc:
         raise MutationError(str(exc)) from exc
     snapshot = asdict(cost)
