@@ -48,6 +48,30 @@ def list_demo_units(ctx=Depends(demo_context)):
     return {"items": loader(owner)}
 
 
+class UnitCreateBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    symbol: str=Field(min_length=1,max_length=32)
+    dimension: str=Field(pattern=r"^(mass|volume|count|other)$")
+
+
+@router.post("/units",status_code=201)
+def create_demo_unit(body:UnitCreateBody,ctx=Depends(demo_context)):
+    owner,repo=ctx
+    if not body.symbol.strip(): raise HTTPException(422,"Unit symbol required")
+    create=getattr(repo,"create_owned_unit_master",None)
+    if not callable(create): raise HTTPException(503,"Unit manager unavailable")
+    return {"id":str(create(owner,body.symbol.strip(),body.dimension))}
+
+
+@router.delete("/units/{unit_id}")
+def delete_demo_unit(unit_id:UUID,ctx=Depends(demo_context)):
+    owner,repo=ctx
+    delete=getattr(repo,"delete_owned_unit_master",None)
+    if not callable(delete): raise HTTPException(503,"Unit manager unavailable")
+    if not delete(owner,str(unit_id)): raise HTTPException(404,"Unit not found")
+    return {"deleted":True}
+
+
 @router.get("/units/resolve")
 def resolve_demo_unit(
     q: str = Query(min_length=1, max_length=32),
@@ -250,6 +274,29 @@ def list_demo_ingredient_master(ctx=Depends(demo_context)):
     if not callable(loader):
         raise HTTPException(503,"Ingredient master unavailable")
     return {"items":loader(owner)}
+
+
+class IngredientMasterCreateBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    name: str=Field(min_length=1,max_length=200)
+
+
+@router.post("/ingredients",status_code=201)
+def create_demo_ingredient_master(body:IngredientMasterCreateBody,ctx=Depends(demo_context)):
+    owner,repo=ctx
+    if not body.name.strip(): raise HTTPException(422,"Ingredient name required")
+    create=getattr(repo,"create_owned_ingredient_master",None)
+    if not callable(create): raise HTTPException(503,"Ingredient master unavailable")
+    return {"id":str(create(owner,body.name.strip()))}
+
+
+@router.delete("/ingredients/{ingredient_id}")
+def delete_demo_ingredient_master(ingredient_id:UUID,ctx=Depends(demo_context)):
+    owner,repo=ctx
+    delete=getattr(repo,"delete_owned_ingredient_master",None)
+    if not callable(delete): raise HTTPException(503,"Ingredient master unavailable")
+    if not delete(owner,str(ingredient_id)): raise HTTPException(404,"Ingredient not found")
+    return {"deleted":True}
 
 
 class IngredientMasterEditBody(BaseModel):

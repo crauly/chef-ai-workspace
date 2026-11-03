@@ -1,0 +1,90 @@
+import unittest
+from uuid import uuid4
+from fastapi.testclient import TestClient
+from chef_ai_workspace.api import app
+from chef_ai_workspace.demo_api import router
+
+if not any(getattr(route,"path",None)=="/demo/ingredients" for route in app.routes):
+    app.include_router(router)
+
+class MasterRepo:
+    def __init__(self):
+        self.calls=[]
+    def list_owned_ingredient_master(self,owner):
+        self.calls.append(("list_ingredient",owner))
+        return [{"id":str(uuid4()),"name":"Flour","current_price":None}]
+    def list_owned_units(self,owner):
+        self.calls.append(("list_unit",owner))
+        return []
+    def create_owned_ingredient_master(self,owner,name):
+        self.calls.append(("create_ingredient",owner,name))
+        return str(uuid4())
+    def create_owned_unit_master(self,owner,symbol,dimension):
+        self.calls.append(("create_unit",owner,symbol,dimension))
+        return str(uuid4())
+    def update_owned_ingredient_master(self,owner,id,name,quote):
+        self.calls.append(("update_ingredient",owner,id,name,quote))
+        return True
+    def update_owned_unit(self,owner,id,symbol,dimension,factor,aliases):
+        self.calls.append(("update_unit",owner,id,symbol,dimension,factor,aliases))
+        return True
+    def delete_owned_ingredient_master(self,owner,id):
+        self.calls.append(("delete_ingredient",owner,id))
+        return True
+    def delete_owned_unit_master(self,owner,id):
+        self.calls.append(("delete_unit",owner,id))
+        return True
+
+class MasterCrudApiTests(unittest.TestCase):
+    def setUp(self):
+        self.owner=str(uuid4())
+        self.repo=MasterRepo()
+        app.state.demo_owner_id=self.owner
+        app.state.demo_access_token="test-secret"
+        app.state.repository_factory=lambda:self.repo
+        self.client=TestClient(app)
+        self.headers={"X-Demo-Access":"test-secret"}
+    def tearDown(self):
+        del app.state.demo_owner_id
+        del app.state.demo_access_token
+        del app.state.repository_factory
+        self.client.close()
+
+    def test_all_writes_reject_missing_secret_without_repository_access(self):
+        id=str(uuid4())
+        cases=[("post","/demo/ingredients",{"name":"Flour"}),
+               ("put",f"/demo/ingredients/{id}",{"name":"Flour"}),
+               ("delete",f"/demo/ingredients/{id}",None),
+               ("post","/demo/units",{"symbol":"g","dimension":"mass"}),
+               ("put",f"/demo/units/{id}",{"symbol":"g","dimension":"mass","aliases":[]}),
+               ("delete",f"/demo/units/{id}",None)]
+        for method,path,payload in cases:
+            with self.subTest(method=method,path=path):
+                response=getattr(self.client,method)(path,**({"json":payload} if payload is not None else {}))
+                self.assertEqual(response.status_code,403,response.text)
+        self.assertEqual(self.repo.calls,[])
+
+    def test_crud_is_scoped_to_configured_owner(self):
+        id=str(uuid4())
+        self.assertEqual(self.client.get("/demo/ingredients",headers=self.headers).status_code,200)
+        self.assertEqual(self.client.get("/demo/units",headers=self.headers).status_code,200)
+        self.assertEqual(self.client.post("/demo/ingredients",json={"name":"Flour"},headers=self.headers).status_code,201)
+        self.assertEqual(self.client.post("/demo/units",json={"symbol":"g","dimension":"mass"},headers=self.headers).status_code,201)
+        self.assertEqual(self.client.put(f"/demo/ingredients/{id}",json={"name":"Wheat"},headers=self.headers).status_code,200)
+        self.assertEqual(self.client.put(f"/demo/units/{id}",json={"symbol":"kg","dimension":"mass","aliases":["kilo"]},headers=self.headers).status_code,200)
+        self.assertEqual(self.client.delete(f"/demo/ingredients/{id}",headers=self.headers).status_code,200)
+        self.assertEqual(self.client.delete(f"/demo/units/{id}",headers=self.headers).status_code,200)
+        self.assertEqual(len(self.repo.calls),8)
+        self.assertTrue(all(call[1]==self.owner for call in self.repo.calls))
+
+    def test_invalid_payloads_do_not_write(self):
+        id=str(uuid4())
+        cases=[("post","/demo/ingredients",{"name":""}),
+               ("post","/demo/units",{"symbol":"x","dimension":"invalid"}),
+               ("put",f"/demo/ingredients/{id}",{"name":"Flour","price_jpy":"100"}),
+               ("put",f"/demo/units/{id}",{"symbol":"g","dimension":"mass","aliases":[""]})]
+        for method,path,payload in cases:
+            with self.subTest(path=path):
+                r=getattr(self.client,method)(path,json=payload,headers=self.headers)
+                self.assertEqual(r.status_code,422,r.text)
+        self.assertEqual(self.repo.calls,[])

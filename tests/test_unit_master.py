@@ -8,6 +8,21 @@ class UnitMasterTests(unittest.TestCase):
             {"id": "unit-b", "symbol": "g", "dimension": "mass", "aliases": ["グラム"]},
         ]
 
+    def test_whitespace_is_not_an_implicit_unit(self):
+        self.assertEqual(resolve_unit("   ", self.units).status, "missing")
+
+    def test_new_unit_requires_explicit_dimension(self):
+        for invalid in ({}, {"束": ""}, {"束": None}):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    prepare_unit_approval(["束"], self.units, invalid)
+
+    def test_mixed_known_and_new_units_keep_identity(self):
+        plan = prepare_unit_approval(["グラム", "束", "個"], self.units, {"束": "count"})
+        self.assertEqual([item.status for item in plan],
+                         ["reuse", "new_candidate", "reuse"])
+        self.assertEqual([plan[0].unit_id, plan[2].unit_id], ["unit-b", "unit-a"])
+
     def test_exact_symbol_reuse(self):
         result = resolve_unit("個", self.units)
         self.assertEqual((result.status, result.unit_id), ("reuse", "unit-a"))

@@ -116,6 +116,26 @@ class SupabasePersistence:
                 current_price=_quote(row.get("current_price")))
         return catalog
 
+    def create_owned_ingredient_master(self, owner_id, name):
+        result=self.client.rpc("create_owned_ingredient_master",{
+            "p_owner_id":owner_id,"p_name":name}).execute()
+        return result.data
+
+    def delete_owned_ingredient_master(self, owner_id, ingredient_id):
+        result=self.client.rpc("delete_owned_ingredient_master",{
+            "p_owner_id":owner_id,"p_id":ingredient_id}).execute()
+        return result.data is True
+
+    def create_owned_unit_master(self, owner_id, symbol, dimension):
+        result=self.client.rpc("create_owned_unit_master",{
+            "p_owner_id":owner_id,"p_symbol":symbol,"p_dimension":dimension}).execute()
+        return result.data
+
+    def delete_owned_unit_master(self, owner_id, unit_id):
+        result=self.client.rpc("delete_owned_unit_master",{
+            "p_owner_id":owner_id,"p_id":unit_id}).execute()
+        return result.data is True
+
     def list_owned_units(self, owner_id):
         """List the complete owner-scoped vocabulary for contextual AI matching."""
         rows = []
