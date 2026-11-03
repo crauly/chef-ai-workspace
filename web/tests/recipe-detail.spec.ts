@@ -115,3 +115,24 @@ test("long press on recipe list opens edit/delete without navigating",async({pag
  await recipe.click();
  await expect(page).toHaveURL(/\/recipes\/[^/]+$/);
 });
+
+test("ongoing recording stays stoppable after opening a recipe on desktop",async({page})=>{
+ await page.setViewportSize({width:1280,height:800});
+ await page.addInitScript(()=>{
+  Object.defineProperty(navigator.mediaDevices,"getUserMedia",{value:async()=>{
+   const context=new AudioContext(),oscillator=context.createOscillator(),gain=context.createGain();
+   const destination=context.createMediaStreamDestination();
+   oscillator.connect(gain);gain.connect(destination);gain.gain.value=.0001;
+   oscillator.start();await context.resume();return destination.stream;
+  }});
+ });
+ await page.goto("/");
+ await page.getByRole("button",{name:/音声操作を開始/}).click();
+ await expect(page.getByRole("button",{name:"■ マイクを停止"})).toBeVisible();
+ await page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"}).click();
+ await expect(page.locator("#voice-controls")).toBeHidden();
+ const recording=page.locator(".recipe-voice-capture-status");
+ await expect(recording).toBeVisible();
+ await recording.getByRole("button",{name:"マイクを停止"}).click();
+ await expect(recording).toBeHidden();
+});
