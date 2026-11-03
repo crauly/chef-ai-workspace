@@ -56,6 +56,7 @@ export default function Library(){
  const [editQty,setEditQty]=useState(""),[editUnit,setEditUnit]=useState("");
  const [editPrice,setEditPrice]=useState(""),[editPriceQty,setEditPriceQty]=useState("1"),[editPriceUnit,setEditPriceUnit]=useState("");
  const [aiOpen,setAiOpen]=useState(false);
+ const [voiceEditRequest,setVoiceEditRequest]=useState(0);
  const [sellingPriceEdit,setSellingPriceEdit]=useState("");
  const [confirmQty,setConfirmQty]=useState(false),[confirmPrice,setConfirmPrice]=useState(false);
  const detailRef=useRef<HTMLElement|null>(null);
@@ -176,7 +177,7 @@ export default function Library(){
   return new Promise(resolve=>{browseWaiter.current=resolve;search(target,true);});
  }
  return <main id="top" className={selected?"recipe-detail-page":""}><div><header className="chef-header"><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><PriceBell locale={locale}/><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">Japanese</option><option value="en-US">English</option></select></label></div><div className="chef-brand"><img src="/chef-ai-mark.svg" alt="" width="58" height="58"/><h1>Chef AI</h1></div><p className="muted">{t("intro")}</p></header>
- </div><div><VoiceWorkspace locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} onCreated={recipe=>{showDetail(recipe);setError("");void reload();}}/></div>
+ </div><div><VoiceWorkspace locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} editRequest={voiceEditRequest} onCreated={recipe=>{showDetail(recipe);setError("");void reload();}}/></div>
  <div hidden={Boolean(selected)}>
  <section className="workspace-section recipe-library-section" aria-labelledby="recipe-library-heading">
  <div className="workspace-section-head"><div><h2 id="recipe-library-heading">{locale==="ja"?"レシピ一覧":"Recipes"}</h2><p>{locale==="ja"?"保存したレシピを検索・閲覧":"Search and browse saved recipes"}</p></div></div>
@@ -270,8 +271,8 @@ export default function Library(){
  </form></details>
  {cost?.estimated&&<p className="detail-estimate">{locale==="ja"?"原価に推定値が含まれます":"Cost includes estimates"}</p>}
  <details className="detail-action"><summary>{locale==="ja"?"✎ 料理名を変更":"✎ Rename recipe"}</summary><form onSubmit={change}><input aria-label={t("rename")} value={rename} onChange={e=>setRename(e.target.value)}/><button disabled={busy||!rename.trim()}>{t("save")}</button></form></details>
- <button type="button" disabled={busy} className="detail-ai-button" onClick={()=>document.getElementById("voice-controls")?.scrollIntoView({behavior:"smooth",block:"start"})}>{locale==="ja"?"🎙 音声でレシピを修正":"🎙 Edit recipe by voice"}</button>
- <p className="muted">{locale==="ja"?"音声操作の「編集」を選び、マイクをオンにして変更内容を話してください。変更案を確認・承認してから保存します。":"Select Edit in voice controls, enable the microphone and describe changes. Review and approve before saving."}</p>
+ <button type="button" disabled={busy} className="detail-ai-button" onClick={()=>setVoiceEditRequest(n=>n+1)}>{locale==="ja"?"🎙 音声でレシピを修正":"🎙 Edit recipe by voice"}</button>
+ <p className="muted">{locale==="ja"?"編集モードへ切り替わります。マイクをオンにして変更内容を話してください。変更案を確認・承認してから保存します。":"Edit mode opens automatically. Enable the microphone and describe changes. Review and approve before saving."}</p>
  <button type="button" disabled={busy} aria-expanded={aiOpen} onClick={()=>setAiOpen(v=>!v)} className="detail-ai-button">{locale==="ja"?"◇ AIに変更相談":"◇ Ask AI to edit"}</button>
  <div hidden={!aiOpen}><AIEditor key={selected.id} recipe={selected} locale={locale} control={editor} markReview={()=>reviewBoundary.current?.()??-1} onBusy={b=>{setBusy(b);if(b)setAiOpen(true);}} onSaved={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");void reload();}} /></div>
  </section>}</main>;
