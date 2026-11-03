@@ -114,7 +114,7 @@ export default function Library(){
 
  async function saveOperations(operations:Record<string,string>[]):Promise<boolean> {
    if(!selected||busy)return false;
-   setBusy(true);
+   setError("");setBusy(true);
    try {
      const result=await request<{recipe:Recipe}>(`/api/recipes/${selected.id}/confirm`,{
        method:"POST",body:JSON.stringify({base_revision:selected.revision,
@@ -134,9 +134,9 @@ export default function Library(){
        setSelected(persisted);setError("");
      }catch(e){
        setError(`保存APIは成功しましたが、再取得による検証に失敗しました: ${String(e)}`);
-       return true;
+       return false;
      }
-     void reload();return true;
+     return true;
    }catch(e){setError(String(e));return false;}finally{setBusy(false);}
  }
  async function addFood(e:React.FormEvent){e.preventDefault();
@@ -199,6 +199,7 @@ export default function Library(){
  </div>
  {selected&&<section className="recipe-detail" ref={detailRef} aria-label={t("detail")}> 
  <div className="detail-topbar"><button type="button" className="detail-back" onClick={backToLibrary}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button><span className="detail-revision">REV {selected.revision}</span></div>
+ {error&&<p role="alert" className="error">{error}</p>}
  <div className="detail-heading"><p className="detail-eyebrow">{locale==="ja"?"RECIPE DETAIL":"RECIPE DETAIL"}</p><h2>{selected.title.value||t("detail")}</h2></div>
  {recipeGaps(selected).length>0&&<details className="recipe-gap-disclosure">
   <summary title={locale==="ja"?"不足情報を確認":"View incomplete fields"}><span aria-hidden="true">⚠</span> {locale==="ja"?"未確定情報":"Incomplete details"} · {recipeGaps(selected).length}{locale==="ja"?"件":""}</summary>
@@ -243,6 +244,8 @@ export default function Library(){
      {line.quantity.status==="assumed"&&<label><input type="checkbox" checked={confirmQty} onChange={e=>setConfirmQty(e.target.checked)}/> {locale==="ja"?"現在の数量を明示確定":"Confirm current quantity"}</label>}
      {line.price_override?.amount_jpy.status==="assumed"&&<label><input type="checkbox" checked={confirmPrice} onChange={e=>setConfirmPrice(e.target.checked)}/> {locale==="ja"?"現在の仕入価格を明示確定":"Confirm current price"}</label>}
     </div>
+    {error&&<p role="alert" className="error">{error}</p>}
+    {busy&&<p role="status">{locale==="ja"?"保存・再取得を確認中…":"Saving and verifying…"}</p>}
     <div className="actions"><button type="button" disabled={busy||!editName.trim()} onClick={()=>void submitEdit()}>{t("save")}</button>
     <button type="button" disabled={busy} onClick={()=>{if(window.confirm(locale==="ja"?"この食材をレシピから削除しますか？":"Remove this ingredient from the recipe?"))void saveOperations([{op:"remove_material",material_id:line.id}]).then(ok=>{if(ok)setEditingId(null);});}}>{locale==="ja"?"食材を削除":"Remove ingredient"}</button>
     <button className="secondary" type="button" disabled={busy} onClick={()=>setEditingId(null)}>{t("close")}</button></div>
