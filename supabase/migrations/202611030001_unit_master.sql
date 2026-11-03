@@ -230,3 +230,48 @@ revoke all on function public.update_owned_unit(uuid,uuid,text,text,numeric,text
  from public,anon,authenticated;
 grant execute on function public.update_owned_unit(uuid,uuid,text,text,numeric,text[])
  to service_role;
+
+-- V1 Ingredient identity and price are owned by the master, not individual recipes.
+-- The existing test DB has no products with duplicate normalized names.
+create unique index if not exists ingredients_owner_name_norm_idx
+  on public.ingredients(owner_id,lower(btrim(name)));
+drop policy if exists ingredients_owner on public.ingredients;
+create policy ingredients_owner_read on public.ingredients
+  for select to authenticated using (owner_id=(select auth.uid()));
+revoke insert,update,delete on public.ingredients from anon,authenticated;
+
+-- Explicit manager save: changing a master price automatically changes every
+-- linked recipe's current valuation; saved recipe-version cost snapshots remain.
+create or replace function public.update_owned_ingredient(
+ p_owner_id uuid,p_ingredient_id uuid,p_name text,p_price jsonb
+) returns boolean
+language plpgsql security definer set search_path=''
+as $ingredient_manager$
+declare v_name text := btrim(p_name);
+declare v_unit_id uuid;
+declare v_price jsonb := p_price;
+begin
+ if p_owner_id is null or p_ingredient_id is null or length(v_name) not between 1 and 200
+ or (v_price is not null and jsonb_typeof(v_price) not in ('object','null'))
+ then raise exception 'Invalid ingredient update'; end if;
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_owner_id::text,0));
+ if not exists(select 1 from public.ingredients
+               where owner_id=p_owner_id and id=p_ingredient_id for update)
+ then raise exception 'Ingredient not owned'; end if;
+ if exists(select 1 from public.ingredients i where i.owner_id=p_owner_id
+           and i.id<>p_ingredient_id and lower(btrim(i.name))=lower(v_name))
+ then raise exception 'Ingredient identity collision'; end if;
+ if jsonb_typeof(v_price)='object' then
+   v_unit_id := public.resolve_owned_unit_id(p_owner_id,v_price->>'per_unit');
+   v_price := jsonb_set(v_price,'{per_unit_id}',to_jsonb(v_unit_id::text),true);
+ end if;
+ update public.ingredients
+ set name=v_name,current_price=case when v_price is null or jsonb_typeof(v_price)='null'
+                                     then current_price else v_price end
+ where owner_id=p_owner_id and id=p_ingredient_id;
+ return true;
+end; $ingredient_manager$;
+revoke all on function public.update_owned_ingredient(uuid,uuid,text,jsonb)
+ from public,anon,authenticated;
+grant execute on function public.update_owned_ingredient(uuid,uuid,text,jsonb)
+ to service_role;
