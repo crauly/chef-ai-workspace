@@ -33,6 +33,11 @@ def demo_context(request: Request, x_demo_access: str | None = Header(default=No
     return str(owner), factory()
 
 
+def _owned_unit_definitions(owner, repository):
+    loader = getattr(repository, "list_owned_units", None)
+    return unit_factor_catalog(loader(owner)) if callable(loader) else {}
+
+
 @router.get("/units")
 def list_demo_units(ctx=Depends(demo_context)):
     """Owner-scoped vocabulary for Muse proposals and the unit manager."""
@@ -753,7 +758,7 @@ def compare_demo_observations(ingredient_id: UUID, body: CompareBody,
     for obs in (base, candidate):
         if obs.ingredient_id != str(ingredient_id):
             raise HTTPException(422, "Observation does not belong to this ingredient")
-    return _json(asdict(compare_observations(base, candidate)))
+    return _json(asdict(compare_observations(base, candidate, _owned_unit_definitions(owner, repository))))
 
 
 def _impact_envelope(owner: str, repository, ingredient_id: str,
@@ -797,7 +802,7 @@ def _impact_envelope(owner: str, repository, ingredient_id: str,
                     "comparable": False,
                     "reasons": ["original price basis unavailable"],
                     "items": []}
-        comparison = compare_observations(base, obs)
+        comparison = compare_observations(base, obs, _owned_unit_definitions(owner, repository))
         if not comparison.comparable:
             return {"basis_observation_id": str(basis_id),
                     "comparable": False,
@@ -1165,7 +1170,8 @@ def suggest_demo_axis(ingredient_id: UUID,
         ingredient_id=str(ingredient_id), ingredient_name=loaded["name"],
         candidates=candidates, evaluations=evaluations,
         skipped_evaluations=skipped, muse_used=muse_used,
-        muse_error=muse_error, max_picks=max_candidates)
+        muse_error=muse_error, max_picks=max_candidates,
+        unit_definitions=_owned_unit_definitions(owner, repository))
     result["provider"] = {"external": dict(EXTERNAL_PROVIDER_STATUS),
                           "muse": result.pop("muse_status")}
     if pool.get("shortage_note") and not result.get("shortage_note"):
