@@ -103,11 +103,29 @@ def prepare_mutation(recipe: Recipe, proposal: Proposal, *, user_confirmed: bool
             _fields(op, {"op", "material_id", "price_jpy", "price_quantity", "price_unit"})
             if not any(m.id == op["material_id"] for m in candidate.materials):
                 raise MutationError("Unknown material ID")
-            quote = PriceQuote(amount_jpy=_value(op["price_jpy"], user_confirmed),
-                               per_quantity=op["price_quantity"], per_unit=op["price_unit"],
-                               source="manual" if user_confirmed else "estimated")
+            try:
+                quote = PriceQuote(amount_jpy=_value(op["price_jpy"], user_confirmed),
+                                   per_quantity=op["price_quantity"], per_unit=op["price_unit"],
+                                   source="manual" if user_confirmed else "estimated")
+            except (ValueError, TypeError, KeyError) as exc:
+                raise MutationError("Invalid material price or price unit") from exc
             candidate = replace(candidate, materials=tuple(
                 replace(m, price_mode="override", price_override=quote)
+                if m.id == op["material_id"] else m for m in candidate.materials))
+        elif kind == "set_material_supplier":
+            _fields(op, {"op", "material_id", "supplier_id"})
+            if not any(m.id == op["material_id"] for m in candidate.materials):
+                raise MutationError("Unknown material ID")
+            supplier_id = op["supplier_id"] or None
+            if supplier_id is not None:
+                try:
+                    UUID(supplier_id)
+                except (ValueError, TypeError, AttributeError) as exc:
+                    raise MutationError("Invalid supplier ID") from exc
+            if supplier_id is not None:
+                supplier_id = str(UUID(supplier_id))
+            candidate = replace(candidate, materials=tuple(
+                replace(m, supplier_id=supplier_id)
                 if m.id == op["material_id"] else m for m in candidate.materials))
         elif kind == "set_material_quantity":
             _fields(op, {"op", "material_id", "value", "unit"})

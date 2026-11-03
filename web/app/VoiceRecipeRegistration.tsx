@@ -104,7 +104,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  useEffect(()=>{let cancelled=false;setUnitCatalog(null);
   request<{items:Array<{id:string;symbol:string;dimension:string;base_factor:string|null;aliases:string[]}>}>("/api/units").then(result=>{if(!cancelled)setUnitCatalog(result.items);}).catch(()=>{if(!cancelled)setUnitCatalog(null);});
   return ()=>{cancelled=true;};
- },[draft?.title,draft?.materials]);
+ },[]);
  const [phase,setPhase]=useState<"dictating"|"review"|"saving">("dictating");
  const [message,setMessage]=useState(ja?"料理名・食材・分量・仕入単価を話してください。":"Describe the recipe, quantities and purchase prices.");
  const [manual,setManual]=useState("");
@@ -445,7 +445,10 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    // clear preview/failure so neither survives into the next recipe (this
    // panel stays mounted while hidden). The saved draft itself is untouched.
    dishAbort.current?.abort();dishAbort.current=null;setDishGenerating(false);setDishFailed(false);dishPreviewRef.current=null;setDishImageUrl(null);setDishHint("");
-   say((mode==="confirmed"?(sharedVoice?"保存済みです。":"レシピを保存しました。"):"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。")+(imageRetained?"":" 料理画像はこのブラウザに保存できませんでした。"));onCreated(recipe,mode,suppliers);
+   // The workspace owns the visible success notification after switching to browse.
+   // Do not leave a second, hidden success message inside the registration panel.
+   if(!sharedVoice)say((mode==="confirmed"?"レシピを保存しました。":"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。")+(imageRetained?"":" 料理画像はこのブラウザに保存できませんでした。"));
+   onCreated(recipe,mode,suppliers);
   }catch{setStage("review");say("保存結果を確認できませんでした。再送時も同じ登録IDを使います。一覧を確認してから再試行してください。");}
   finally{if(alive.current&&!draining.current)setBusy(false);}
  }
@@ -488,7 +491,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   }
   const afterReview=!meta||meta.reviewEpoch===approvalEpoch.current;
   // A microphone turn captured before the current review predates the presented draft.
-  const staleVoice=Boolean(meta)&&phaseRef.current==="review"&&(meta?.reviewEpoch??approvalEpoch.current)!==approvalEpoch.current;
+  const staleVoice=Boolean(meta)&&meta?.source!=="manual"&&phaseRef.current==="review"&&(meta?.reviewEpoch??approvalEpoch.current)!==approvalEpoch.current;
   inbox.current.push({text,command,revision:revision.current,approval:afterReview&&phaseRef.current==="review"?reviewed.current:null,staleVoice,traceId:meta?.traceId??""});void drain();
  }
  function retry(){

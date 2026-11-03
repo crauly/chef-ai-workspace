@@ -3,7 +3,8 @@ export type Recipe = {
   id: string; title: Tracked; revision: number;
   materials: {id: string; material_name: Tracked; quantity: Tracked; unit: string | null;
     price_override?: {amount_jpy: Tracked; per_quantity: string; per_unit: string} | null;
-    price_mode: string}[];
+    price_mode: string; ingredient_id?: string | null; supplier_id?: string | null;
+    effective_price?: {amount_jpy: Tracked; per_quantity: string; per_unit: string} | null}[];
   selling_price_jpy: Tracked;
   display_names?: Record<string, {display: string; material: string}>;
 };

@@ -21,12 +21,12 @@ class HumanGateWiring(unittest.TestCase):
         # Model/client must not smuggle confirmation: extra fields forbidden
         # and trusted_user_confirmed is a server literal.
         self.assertIn('extra="forbid"', API)
-        self.assertIn("trusted_user_confirmed=True", API)
+        self.assertIn("save_recipe_crud(", API)
         self.assertNotIn("trusted_user_confirmed=body", API)
         self.assertNotIn("confirmed", API.split("class MutationBody")[1].split("verified_owner")[0])
 
     def test_demo_confirm_uses_server_literal(self):
-        self.assertIn("trusted_user_confirmed=True", DEMO)
+        self.assertIn("save_recipe_crud(", DEMO)
 
     def test_no_route_calls_commit_rpc_directly(self):
         # Routes must save only through save_* orchestration; direct

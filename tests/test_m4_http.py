@@ -49,11 +49,15 @@ class Repo:
                 for g in self.catalog.values() if query in g.name][:limit]
     def get_mutation_receipt(self, owner_id, request_id):
         return self.receipts.get(request_id)
-    def commit_recipe_with_ledger(self, **kw):
+    def find_owned_ingredients_exact(self, owner_id, name):
+        return [{"id": item.id, "name": item.name}
+                for item in self.catalog.values() if item.name.casefold() == name.casefold()]
+
+    def commit_recipe_crud(self, **kw):
         state = kw.get("state") or {}
         revised = state.get("revision", kw["base_revision"] + 1)
         self.receipts[kw["request_id"]] = (kw["payload_hash"], revised)
-        for item in kw["new_ingredients"]:
+        for item in kw["ingredient_entries"]:
             self.catalog[item["id"]] = Ingredient(item["id"], item["name"], None)
         current = self.recipes[kw["recipe_id"]]
         # Persist the canonical state the orchestration committed, the way

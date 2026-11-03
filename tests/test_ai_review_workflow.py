@@ -12,9 +12,10 @@ class ReviewWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.owner, self.rid, self.mid = (str(uuid4()) for _ in range(3))
         value = lambda v: TrackedValue(v, "confirmed", "user")
+        self.ingredient_id = str(uuid4())
         self.recipe = Recipe(self.rid, value("片栗粉"), materials=(
             MaterialLine(self.mid, value("片栗粉"), value("10"), "g",
-                         price_override=PriceQuote(value("1000"), "1", "kg", "manual")),),
+                         ingredient_id=self.ingredient_id, price_mode="inherit"),),
             selling_price_jpy=value("1000"))
         self.operations = [{"op": "set_material_quantity", "material_id": self.mid, "value": "15", "unit": "g"},
                            {"op": "set_selling_price", "value_jpy": "1800"}]
@@ -55,7 +56,20 @@ class ReviewWorkflowTests(unittest.TestCase):
     def get_mutation_receipt(self, owner, request_id):
         return self.receipts.get(request_id)
 
-    def commit_recipe_revision(self, **kwargs):
+    def load_owned_catalog(self, owner, recipe):
+        from chef_ai_workspace.models import Ingredient
+        value = lambda v: TrackedValue(v, "confirmed", "user")
+        return {self.ingredient_id: Ingredient(
+            self.ingredient_id, "片栗粉", PriceQuote(value("1000"), "1", "kg", "manual"))}
+
+    def find_owned_ingredients_exact(self, owner, name):
+        return [{"id": self.ingredient_id, "name": "片栗粉"}] if name == "片栗粉" else []
+
+    def load_owned_ingredients(self, owner, ids):
+        return {key: value for key, value in self.load_owned_catalog(owner, self.recipe).items()
+                if key in ids}
+
+    def commit_recipe_crud(self, **kwargs):
         self.writes.append(kwargs)
         self.recipe = decode_recipe(kwargs["state"])
         self.receipts[kwargs["request_id"]] = (kwargs["payload_hash"], self.recipe.revision)

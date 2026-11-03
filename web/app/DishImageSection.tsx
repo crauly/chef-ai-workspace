@@ -29,7 +29,7 @@ export default function DishImageSection({recipeId,title,names,locale,disabled}:
  const [selectedPlateId,setSelectedPlateId]=useState<string>("auto");
  const flight=useRef<AbortController|null>(null);
  const owner=useRef(recipeId);
- const plateSelectionInitialized=useRef(false);
+ const plateSelectionExplicit=useRef(false);
  const generationStarted=useRef(false);
  // Recipe switch: abort the in-flight request and drop its state. The
  // abort is a normal cancellation, never surfaced as an API failure.
@@ -45,7 +45,7 @@ export default function DishImageSection({recipeId,title,names,locale,disabled}:
  // section saves, deletes, or another tab changes the same key.
  useEffect(()=>{
   let active=true;
-  const sync=async()=>{try{const data=await loadPlates();if(!active)return;setPlates(data.plates);setDefaultId(data.defaultId);setSelectedPlateId(previous=>{if(!plateSelectionInitialized.current){plateSelectionInitialized.current=true;return data.defaultId??"auto";}return previous==="auto"||data.plates.some(p=>p.id===previous)?previous:data.defaultId??"auto";});}catch{/* local storage unavailable: generate without plate */}};
+  const sync=async()=>{try{const data=await loadPlates();if(!active)return;setPlates(data.plates);setDefaultId(data.defaultId);setSelectedPlateId(previous=>plateSelectionExplicit.current&&(previous==="auto"||data.plates.some(p=>p.id===previous))?previous:data.defaultId??"auto");}catch{/* local storage unavailable: generate without plate */}};
   void sync();
   window.addEventListener(PLATE_LIBRARY_CHANGED,sync);
   return()=>{active=false;window.removeEventListener(PLATE_LIBRARY_CHANGED,sync);};
@@ -90,7 +90,7 @@ export default function DishImageSection({recipeId,title,names,locale,disabled}:
  const ja=locale==="ja";
  return <section className="dish-image" aria-label={ja?"料理イメージ":"Dish illustration"}>
   <div className="dish-image-header"><div><h3>{ja?"料理イメージ":"Dish image"}</h3><p>{ja?"レシピから料理写真を生成":"Generate from this recipe"}</p></div>{image&&<span className="dish-image-label">{ja?"生成済み":"Generated"}</span>}</div>
-  <label className="dish-plate-picker">{ja?"使用する皿":"Plate for this image"}<select disabled={generating} value={selectedPlateId} onChange={e=>setSelectedPlateId(e.target.value)}><option value="auto">{ja?"皿を指定しない（AIに任せる）":"No plate (AI chooses)"}</option>{plates.map(p=><option value={p.id} key={p.id}>{p.name}{p.id===defaultId?" ★":""}</option>)}</select></label>
+  <label className="dish-plate-picker">{ja?"使用する皿":"Plate for this image"}<select disabled={generating} value={selectedPlateId} onChange={e=>{plateSelectionExplicit.current=true;setSelectedPlateId(e.target.value);}}><option value="auto">{ja?"皿を指定しない（AIに任せる）":"No plate (AI chooses)"}</option>{plates.map(p=><option value={p.id} key={p.id}>{p.name}{p.id===defaultId?" ★":""}</option>)}</select></label>
   {!image&&<div className="dish-image-empty" aria-hidden="true"><span className="dish-image-placeholder-symbol">◇</span><span>{ja?"料理画像はまだありません":"No dish image yet"}</span></div>}
   {image&&<button type="button" className="dish-image-open" disabled={generating}
     aria-label={ja?"料理イメージを拡大表示":"Enlarge dish illustration"}

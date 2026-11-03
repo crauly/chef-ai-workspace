@@ -18,13 +18,14 @@ function MicrophoneGlyph(){return <svg width="36" height="36" viewBox="0 0 24 24
 function ListeningWave({active}:{active:boolean}){return <div className={"listening-wave"+(active?" is-active":"")} aria-hidden="true">{[.32,.65,1,.55,.88,.42,.7,.96,.6,.35,.72,.4].map((v,i)=><span key={i} style={{"--bar-scale":v,"--bar-delay":`${i*65}ms`} as React.CSSProperties}/>)}</div>;}
 
 const voiceMessagesEn:Record<string,string> = {"参照モードです。表示中のレシピの変更内容を話すと編集へ進みます。":"Browse mode. Describe a change to edit the displayed recipe.","保存・変更処理中です。完了後に切り替えてください。":"Saving or editing is in progress. Switch modes after it finishes.","未保存の変更案があります。保存するか、「変更案を破棄」と話してから切り替えてください。":"You have unsaved proposed changes. Save or discard them before switching.","編集対象のレシピを検索しています。":"Searching for the recipe to edit.","編集対象を一つに絞れませんでした。検索結果から選んでください。":"Could not identify a unique recipe. Select one from the search results.","編集するレシピを先に呼び出してください。":"Open a recipe before editing.","登録モードです。保持していた下書きを続けます。":"Create mode. Continuing your saved draft.","登録モードです。料理名・食材・分量・仕入単価をどうぞ。":"Create mode. Tell me the dish, ingredients, quantities and purchase prices.","編集モードです。変更内容を話してください。保存には変更案の確認と明示承認が必要です。":"Edit mode. Describe the changes. Review and explicitly approve proposals before saving.","承認された下書きを保存中です。完了後に続きをお願いします。":"Saving the approved draft. Continue after it finishes.","切り替え前の承認は適用していません。現在のモードを確認して、もう一度お願いします。":"Approval from a previous mode was not applied. Check the current mode and try again.","処理待ちの発話が多すぎます。処理完了後に再度お願いします。":"Too many queued utterances. Try again when processing completes.","切り替え前の承認は適用していません。もう一度お願いします。":"An earlier approval was ignored. Please repeat the request.","保持していた下書きを確認します。":"Reviewing your preserved draft.","変更案を破棄しました。レシピ自体は変更していません。":"Proposed changes discarded. The recipe was not changed.","切り替えずに現在の内容を保持しています。希望する操作をもう一度教えてください。":"Kept the current mode and content. Please clarify your request.","切り替え先を確認できませんでした。登録・参照・編集のどれかを教えてください。":"Could not determine the requested mode. Choose create, browse or edit.","登録モードです。料理の内容を下書きにします。":"Create mode. Starting a recipe draft.","対象のレシピを呼び出してください。候補が複数なら画面で選んでください。":"Open the target recipe. If several match, select one on screen.","参照中です。変更内容を話すと編集へ進みます。保存はしません。":"Browsing. Describe a change to enter edit mode; nothing will be saved yet.","変更せず、参照モードのままです。":"No changes made. Staying in browse mode.","参照モードのままです。変更する場合は、対象と変更内容を教えてください。":"Still in browse mode. Specify the target and desired change to edit.","編集モードです。変更案を作成します。":"Edit mode. Preparing a proposed change.","操作を完了できませんでした。現在の内容を確認して、もう一度お願いします。":"Could not complete the operation. Check the current state and try again."};
-export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreated,reviewBoundary}:{
+export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreated,reviewBoundary,editRequest}:{
  locale:Locale;selected:Recipe|null;editor:RefObject<EditorHandle|null>;onBrowse:(target:string)=>Promise<Recipe|null>;
- onCreated:(recipe:Recipe)=>void;reviewBoundary:RefObject<(()=>number)|null>;
+ onCreated:(recipe:Recipe)=>void;reviewBoundary:RefObject<(()=>number)|null>;editRequest:number;
 }){
  const [mode,setMode]=useState<VoiceMode>("idle"),[volume,setVolume]=useState(.5),[manual,setManual]=useState("");
  const [message,setMessage]=useState(locale==="ja"?"登録・呼び出し・修正を一つのマイクで続けられます。":"Create, browse and edit with one microphone."),[heard,setHeard]=useState("");
  const [routing,setRouting]=useState(false);
+ const [supplierMemo,setSupplierMemo]=useState("");
  const [settingsOpen,setSettingsOpen]=useState(false);
  // The initial guidance is state, so changing locale must update it explicitly.
  useEffect(()=>{setMessage(previous=>previous==="登録・呼び出し・修正を一つのマイクで続けられます。"||previous==="Create, browse and edit with one microphone."?(locale==="ja"?"登録・呼び出し・修正を一つのマイクで続けられます。":"Create, browse and edit with one microphone."):previous);},[locale]);
@@ -88,10 +89,21 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  },[selected?.id]);
  function mark(){boundary.current=voice.markReview();return boundary.current;}
  reviewBoundary.current=mark;
+ // A detail-page edit request uses the same guarded transition as the mode button.
+ // The first render is not a request; later increments are user initiated.
+ const lastEditRequest=useRef(editRequest);
+ useEffect(()=>{
+  if(editRequest===lastEditRequest.current)return;
+  lastEditRequest.current=editRequest;
+  void navigate({mode:"edit",target:""}).then(()=>{
+   document.getElementById("voice-controls")?.scrollIntoView({behavior:"smooth",block:"start"});
+  });
+ },[editRequest]);
  const labels={idle:"待機",create:"登録",browse:"参照",edit:"編集"};
  function feedback(text:string,error=false){setMessage(locale==="ja"?text:(voiceMessagesEn[text]??text));if(error&&volume>0)playVoiceCue("error",volume);}
  function transition(next:VoiceMode,traceId=""){
   if(currentMode.current===next)return;
+  if(next==="create")setSupplierMemo("");
   logVoiceEvent("mode.transition",`${currentMode.current}->${next}`,traceId);
   registration.current?.suspend();editor.current?.invalidate();
   modeBoundary.current=mark();currentMode.current=next;setMode(next);
@@ -151,7 +163,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  function receive(text:string,meta?:VoiceCaptureMeta){
   if(!text.trim())return;
   if(registration.current?.isSaving()){feedback("承認された下書きを保存中です。完了後に続きをお願いします。",true);return;}
-  const captured:VoiceCaptureMeta={reviewEpoch:meta?.reviewEpoch??boundary.current,traceId:meta?.traceId??newTrace()};
+  const captured:VoiceCaptureMeta={reviewEpoch:meta?.reviewEpoch??boundary.current,traceId:meta?.traceId??newTrace(),source:meta?.source};
   // Approval/navigation from an earlier mode must never affect a new target.
   if(captured.reviewEpoch<modeBoundary.current&&voiceCommand(text)!=="data"){feedback("切り替え前の承認は適用していません。現在のモードを確認して、もう一度お願いします。",true);return;}
   if(currentMode.current==="edit"&&voiceCommand(text)==="data"&&!voiceNavigation(text))editor.current?.invalidate();
@@ -230,9 +242,10 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    <p role="status">{micRecording?(locale==="ja"?"音声受付中":"Listening"):micBusy?(locale==="ja"?"音声受付は一時停止・受信済みの音声を処理中":"Processing recorded audio; microphone paused"):(micError||micNotice)?(locale==="ja"?"音声受付は停止中・再開できます":"Microphone stopped; you can resume"):(locale==="ja"?"音声受付は停止中":"Microphone stopped")}</p>
    {micNotice&&<p role="status">{micNotice}</p>}
    {realtimeActive&&realtime.partial&&<p role="status">{locale==="ja"?"認識中：":"Recognizing: "}{realtime.partial}</p>}
+   {supplierMemo&&<p className="muted">{supplierMemo}</p>}
    <p aria-live="polite">{micRecording?(locale==="ja"?"聞き取り中… ":"Listening… "):""}{micBusy?(locale==="ja"?"音声を文字にしています… ":"Transcribing… "):""}{routing?(locale==="ja"?"操作を処理中… ":"Processing… "):""}{message}</p>
    {micError&&<p role="alert">{micError}</p>}
-   <form onSubmit={event=>{event.preventDefault();receive(manual);setManual("");}}>
+   <form onSubmit={event=>{event.preventDefault();receive(manual,{reviewEpoch:boundary.current,source:"manual"});setManual("");}}>
     <input aria-label={locale==="ja"?"音声認識できない場合の入力":"Manual input when voice recognition is unavailable"} value={manual} onChange={event=>setManual(event.target.value)} placeholder={locale==="ja"?"音声認識できないときの補助入力":"Type when voice recognition is unavailable"}/>
     <button type="submit" disabled={!manual.trim()}>{locale==="ja"?"反映":"Apply"}</button>
    </form>
@@ -260,8 +273,8 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    // The spoken purchase source survives as a memo in this always-visible
   // region (the registration panel hides in browse mode). Formal linkage
   // reuses the ledger path behind the Human Gate; nothing auto-registers.
-  const supplierNote=suppliers.length?`（仕入先メモ：${suppliers.join("／")} — 台帳の仕入先連携で登録できます）`:"";
-  setDraftPending(false);transition("browse");feedback((mode==="unconfirmed"?(locale==="ja"?"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"Saved with unconfirmed prices. Only partial food costs are shown."):(locale==="ja"?"レシピを保存しました。":"Recipe saved."))+(locale==="ja"?supplierNote:(suppliers.length?` (Supplier notes: ${suppliers.join(", ")})`:"")));onCreated(recipe);
+  setSupplierMemo(suppliers.length?(locale==="ja"?`仕入先メモ：${suppliers.join("／")} — 台帳の仕入先連携で登録できます`:`Supplier notes: ${suppliers.join(", ")}`):"");
+  setDraftPending(false);transition("browse");feedback(mode==="unconfirmed"?(locale==="ja"?"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"Saved with unconfirmed prices. Only partial food costs are shown."):(locale==="ja"?"レシピを保存しました。":"Recipe saved."));onCreated(recipe);
   }}/></div>
   <nav aria-label={locale==="ja"?"主要":"Primary"} className="bottom-nav">
    <a href="#top"><NavIcon name="home"/><span>{locale==="ja"?"ホーム":"Home"}</span></a>

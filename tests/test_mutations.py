@@ -23,6 +23,15 @@ class MutationTests(unittest.TestCase):
             with self.subTest(revision=bad_revision), self.assertRaises(MutationError):
                 prepare_mutation(r, Proposal("r1", bad_revision, "unique", ({"op":"set_title","value":"new"},)), user_confirmed=True)
 
+    def test_invalid_material_price_is_mutation_error(self):
+        r = fixture()
+        for price, quantity, unit in (("abc", "1", "尾"), ("150", "0", "尾"), ("150", "1", "")):
+            with self.subTest(price=price, quantity=quantity, unit=unit):
+                with self.assertRaises(MutationError):
+                    apply(r, {"op": "set_material_price", "material_id": "m1",
+                              "price_jpy": price, "price_quantity": quantity,
+                              "price_unit": unit})
+
     def test_add_material_and_price_recompute(self):
         from uuid import uuid4
         from chef_ai_workspace.costing import calculate_cost as _calculate_cost

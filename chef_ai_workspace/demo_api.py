@@ -163,6 +163,13 @@ def _displayed_recipe(owner, repository, found):
     else:
         catalog = {}
     out = asdict(found)
+    for line in out["materials"]:
+        ingredient = catalog.get(line.get("ingredient_id"))
+        line["effective_price"] = (
+            asdict(ingredient.current_price)
+            if ingredient is not None and ingredient.current_price is not None
+            else line.get("price_override")
+        )
     out["display_names"] = resolve_display_names(found, catalog)
     return out
 
@@ -590,32 +597,27 @@ def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
     proposal = Proposal(str(recipe_id), body.base_revision, str(body.request_id),
                         tuple(body.operations))
     try:
-        if body.ledger:
-            from .persistence_service import LedgerIngredient, save_recipe_with_ledger
-            if not callable(getattr(repository, "commit_recipe_with_ledger", None)):
-                raise HTTPException(409, "Ledger commit not supported by repository")
-            ledger = tuple(LedgerIngredient(
-                e.kind, id=str(e.id) if e.id is not None else None,
-                name=e.name, brand=e.brand, spec=e.spec) for e in body.ledger)
-            saved = save_recipe_with_ledger(
-                owner_id=owner, trusted_user_confirmed=True,
-                proposal=proposal, ledger=ledger, repository=repository,
-                save_version=body.save_version)
-            shown = _displayed_recipe(owner, repository, saved.recipe)
-            return {"recipe": shown, "revision": saved.resulting_revision,
-                    "replayed": saved.replayed,
-                    "saved_ingredient_ids": list(saved.saved_ingredient_ids)}
-        saved = save_validated_mutation(
-            owner_id=owner, trusted_user_confirmed=True,
-            proposal=proposal, repository=repository,
-            save_version=body.save_version)
+        from .persistence_service import LedgerIngredient
+        from .recipe_crud import save_recipe_crud
+        ledger = tuple(LedgerIngredient(
+            entry.kind, id=str(entry.id) if entry.id is not None else None,
+            name=entry.name, brand=entry.brand, spec=entry.spec)
+            for entry in body.ledger)
+        saved = save_recipe_crud(owner_id=owner, proposal=proposal,
+                                 repository=repository, save_version=body.save_version,
+                                 ledger=ledger)
     except MutationError as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(404, "Recipe not found or inaccessible") from exc
-    return {"recipe": _displayed_recipe(owner, repository, saved.recipe),
-            "revision": saved.resulting_revision,
-            "replayed": saved.replayed}
+    response = {"recipe": _displayed_recipe(owner, repository, saved.recipe),
+                "revision": saved.resulting_revision, "replayed": saved.replayed}
+    if body.ledger:
+        response["saved_ingredient_ids"] = [
+            str(entry.id) for entry in body.ledger
+            if entry.kind == "new" and entry.id is not None
+        ]
+    return response
 
 
 @router.get("/recipes/{recipe_id}/cost")

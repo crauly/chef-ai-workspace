@@ -17,7 +17,7 @@ export function yieldMicrophone(releaser: () => void): void {
 }
 export const VOICE_SILENCE_MS = 1000;
 // traceId is assigned at utterance intake and forwarded through submit/enqueue.
-export type VoiceCaptureMeta = {reviewEpoch: number; traceId?: string};
+export type VoiceCaptureMeta = {reviewEpoch: number; traceId?: string; source?: "manual"};
 
 export async function encodeWav(frames: Float32Array[], rate: number): Promise<ArrayBuffer> {
   const length = frames.reduce((n, frame) => n + frame.length, 0);

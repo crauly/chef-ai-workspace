@@ -77,6 +77,7 @@ class MaterialLine:
     price_override: PriceQuote | None = None
     price_mode: Literal["override", "inherit"] = "override"
     unit_id: str | None = None
+    supplier_id: str | None = None
 
     def __post_init__(self):
         if self.price_mode not in ("override", "inherit"):
