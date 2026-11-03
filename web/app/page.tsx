@@ -268,6 +268,8 @@ export default function Library(){
  </form></details>
  {cost?.estimated&&<p className="detail-estimate">{locale==="ja"?"原価に推定値が含まれます":"Cost includes estimates"}</p>}
  <details className="detail-action"><summary>{locale==="ja"?"✎ 料理名を変更":"✎ Rename recipe"}</summary><form onSubmit={change}><input aria-label={t("rename")} value={rename} onChange={e=>setRename(e.target.value)}/><button disabled={busy||!rename.trim()}>{t("save")}</button></form></details>
+ <button type="button" disabled={busy} className="detail-ai-button" onClick={()=>document.getElementById("voice-controls")?.scrollIntoView({behavior:"smooth",block:"start"})}>{locale==="ja"?"🎙 音声でレシピを修正":"🎙 Edit recipe by voice"}</button>
+ <p className="muted">{locale==="ja"?"音声操作の「編集」を選び、マイクをオンにして変更内容を話してください。変更案を確認・承認してから保存します。":"Select Edit in voice controls, enable the microphone and describe changes. Review and approve before saving."}</p>
  <button type="button" disabled={busy} aria-expanded={aiOpen} onClick={()=>setAiOpen(v=>!v)} className="detail-ai-button">{locale==="ja"?"◇ AIに変更相談":"◇ Ask AI to edit"}</button>
  <div hidden={!aiOpen}><AIEditor key={selected.id} recipe={selected} locale={locale} control={editor} markReview={()=>reviewBoundary.current?.()??-1} onBusy={b=>{setBusy(b);if(b)setAiOpen(true);}} onSaved={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");void reload();}} /></div>
  </section>}</main>;
