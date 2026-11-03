@@ -70,6 +70,8 @@ begin
     or p_cost_snapshot is null or jsonb_typeof(p_cost_snapshot) <> 'object'
     or p_unit_candidates is null or jsonb_typeof(p_unit_candidates) <> 'array'
  then raise exception 'Invalid initial recipe'; end if;
+ -- Serializes unit token admission and alias edits for this owner.
+ perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_owner_id::text,0));
  -- User-confirmed server-side proposal must supply canonical strings and
  -- dimensions. Canonical IDs are resolved under this transaction only.
  for v_item in select * from jsonb_array_elements(p_unit_candidates) loop
@@ -80,6 +82,13 @@ begin
       or exists(select 1 from public.units u where u.owner_id<>p_owner_id
                    and u.id::text=v_item->>'unit_id')
    then raise exception 'Invalid unit proposal'; end if;
+   if exists(
+     select 1 from public.units u where u.owner_id=p_owner_id
+       and (lower(u.symbol)=lower(v_symbol) or exists(
+         select 1 from unnest(u.aliases) a where lower(btrim(a))=lower(v_symbol)
+       ))
+       and (lower(u.symbol)<>lower(v_symbol) or u.dimension<>v_dim)
+   ) then raise exception 'Unit identity collision'; end if;
    insert into public.units(owner_id,symbol,dimension)
    values(p_owner_id,v_symbol,v_dim) on conflict do nothing;
  end loop;
