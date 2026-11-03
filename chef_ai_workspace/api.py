@@ -53,9 +53,9 @@ def confirm_recipe_mutation(recipe_id: UUID, body: MutationBody,
     proposal = Proposal(str(recipe_id), body.base_revision, str(body.request_id),
                         tuple(body.operations))
     try:
-        outcome = save_validated_mutation(
-            owner_id=owner_id, trusted_user_confirmed=True,
-            proposal=proposal, repository=factory(),
+        from .recipe_crud import save_recipe_crud
+        outcome = save_recipe_crud(
+            owner_id=owner_id, proposal=proposal, repository=factory(),
             save_version=body.save_version)
     except MutationError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
