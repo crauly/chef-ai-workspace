@@ -18,35 +18,79 @@ create policy units_owner_read on public.units for select to authenticated
 -- Writes use only the trusted server: no authenticated insert/update/delete policy.
 revoke insert, update, delete on public.units from anon, authenticated;
 
--- Atomic, owner-scoped reuse or creation. Only the trusted backend can call.
--- Case-insensitive symbol uniqueness matches the resolver casefold contract.
-create or replace function public.ensure_owned_unit(
- p_owner_id uuid, p_symbol text, p_dimension text, p_aliases text[] default '{}'
+-- A unit can be created only by the same transaction that creates an approved
+-- recipe. The old standalone create RPC is deliberately absent.
+-- In a private V1 test DB, this migration replaces the old recipe-create
+-- signature: no alternate initial-save route remains available.
+drop function if exists public.create_owned_recipe(uuid,uuid,text,jsonb,jsonb);
+create or replace function public.create_owned_recipe(
+ p_owner_id uuid, p_recipe_id uuid, p_title text,
+ p_initial_state jsonb, p_cost_snapshot jsonb, p_unit_candidates jsonb
 ) returns uuid
 language plpgsql security definer set search_path = ''
 as $$
-declare v_id uuid;
-declare v_symbol text := btrim(p_symbol);
+declare v_item jsonb;
+declare v_unit_id uuid;
+declare v_symbol text;
+declare v_dim text;
+declare v_material jsonb;
+declare v_materials jsonb := '[]'::jsonb;
+declare v_state jsonb := p_initial_state;
+declare v_unit_ids uuid[] := '{}';
 begin
- if p_owner_id is null or v_symbol is null or length(v_symbol) not between 1 and 32
-    or p_dimension not in ('mass','volume','count','other')
-    or array_length(p_aliases,1)>20
-    or exists(select 1 from unnest(p_aliases) a where length(btrim(a)) not between 1 and 32)
- then raise exception 'Invalid unit candidate'; end if;
- insert into public.units(owner_id,symbol,dimension,aliases)
- values (p_owner_id,v_symbol,p_dimension,coalesce(p_aliases,'{}'))
- on conflict do nothing
- returning id into v_id;
- if v_id is not null then return v_id; end if;
- select id into v_id from public.units
- where owner_id=p_owner_id and lower(symbol)=lower(v_symbol) and dimension=p_dimension;
- if v_id is null then
-   raise exception 'Unit symbol already exists with a different dimension';
- end if;
- return v_id;
+ if p_owner_id is null or p_recipe_id is null
+    or p_title is null or btrim(p_title) = ''
+    or v_state is null or jsonb_typeof(v_state) <> 'object'
+    or v_state->>'id' is distinct from p_recipe_id::text
+    or v_state->>'revision' is distinct from '0'
+    or p_cost_snapshot is null or jsonb_typeof(p_cost_snapshot) <> 'object'
+    or p_unit_candidates is null or jsonb_typeof(p_unit_candidates) <> 'array'
+ then raise exception 'Invalid initial recipe'; end if;
+ -- User-confirmed server-side proposal must supply canonical strings and
+ -- dimensions. Canonical IDs are resolved under this transaction only.
+ for v_item in select * from jsonb_array_elements(p_unit_candidates) loop
+   v_symbol := btrim(coalesce(v_item->>'symbol',''));
+   v_dim := v_item->>'dimension';
+   if length(v_symbol) not between 1 and 32
+      or v_dim not in ('mass','volume','count','other')
+      or exists(select 1 from public.units u where u.owner_id<>p_owner_id
+                   and u.id::text=v_item->>'unit_id')
+   then raise exception 'Invalid unit proposal'; end if;
+   insert into public.units(owner_id,symbol,dimension)
+   values(p_owner_id,v_symbol,v_dim) on conflict do nothing;
+ end loop;
+ -- No missing or foreign unit can enter the saved recipe.
+ if jsonb_typeof(v_state->'materials') <> 'array'
+ then raise exception 'Invalid material lines'; end if;
+ for v_material in select * from jsonb_array_elements(v_state->'materials') loop
+   if v_material->>'unit' is not null then
+     select u.id into v_unit_id from public.units u
+     where u.owner_id=p_owner_id and lower(u.symbol)=lower(btrim(v_material->>'unit'));
+     if v_unit_id is null then raise exception 'Unknown recipe unit'; end if;
+     v_material := jsonb_set(v_material,'{unit_id}',to_jsonb(v_unit_id::text),true);
+   end if;
+   if v_material->'price_override' is not null
+      and jsonb_typeof(v_material->'price_override')='object' then
+     select u.id into v_unit_id from public.units u
+     where u.owner_id=p_owner_id
+       and lower(u.symbol)=lower(btrim(v_material #>> '{price_override,per_unit}'));
+     if v_unit_id is null then raise exception 'Unknown price unit'; end if;
+     v_material := jsonb_set(v_material,
+        '{price_override,per_unit_id}',to_jsonb(v_unit_id::text),true);
+   end if;
+   v_materials := v_materials || jsonb_build_array(v_material);
+ end loop;
+ v_state := jsonb_set(v_state,'{materials}',v_materials);
+ insert into public.recipes(id,owner_id,title,revision,state)
+ values(p_recipe_id,p_owner_id,p_title,0,v_state);
+ insert into public.recipe_versions(recipe_id,owner_id,revision,snapshot,cost_snapshot)
+ values(p_recipe_id,p_owner_id,0,v_state,p_cost_snapshot);
+ return p_recipe_id;
 end; $$;
-revoke all on function public.ensure_owned_unit(uuid,text,text,text[]) from public, anon, authenticated;
-grant execute on function public.ensure_owned_unit(uuid,text,text,text[]) to service_role;
+revoke all on function public.create_owned_recipe(uuid,uuid,text,jsonb,jsonb,jsonb)
+ from public,anon,authenticated;
+grant execute on function public.create_owned_recipe(uuid,uuid,text,jsonb,jsonb,jsonb)
+ to service_role;
 
 -- Explicit management action only: change aliases without changing canonical ID
 -- or touching recipe history. No creation through this function.
