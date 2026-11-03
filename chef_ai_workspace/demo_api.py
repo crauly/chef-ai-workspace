@@ -422,7 +422,10 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
         repository.create_owned_recipe(owner, recipe, snapshot, unit_candidates=new_units)
     except ValueError as exc:
         raise HTTPException(409, "Recipe already exists") from exc
-    return _displayed_recipe(owner, repository, recipe)
+    # The transaction resolves canonical unit IDs in the stored state.
+    # Return the persisted representation, not the pre-commit proposal.
+    committed = repository.load_owned_recipe(owner, recipe_id)
+    return _displayed_recipe(owner, repository, committed)
 
 @router.post("/recipes/{recipe_id}/confirm")
 def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
