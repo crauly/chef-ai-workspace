@@ -128,9 +128,9 @@ class SupabasePersistence:
                 current_price=_quote(row.get("current_price")))
         return catalog
 
-    def create_owned_ingredient_master(self, owner_id, name):
+    def create_owned_ingredient_master(self, owner_id, name, spec=None):
         result=self.client.rpc("create_owned_ingredient_master",{
-            "p_owner_id":owner_id,"p_name":name}).execute()
+            "p_owner_id":owner_id,"p_name":name,"p_spec":spec}).execute()
         return result.data
 
     def delete_owned_ingredient_master(self, owner_id, ingredient_id):
@@ -182,7 +182,7 @@ class SupabasePersistence:
         rows=[]
         while True:
             response=(self.client.table("ingredients")
-                      .select("id,name,current_price")
+                      .select("id,name,spec,current_price")
                       .eq("owner_id",owner_id)
                       .order("id").range(len(rows),len(rows)+499).execute())
             batch=response.data or []
@@ -234,12 +234,13 @@ class SupabasePersistence:
             return existing[0]["id"]
         return self.create_owned_offer(owner_id, ingredient_id, supplier_id)
 
-    def update_owned_ingredient_master(self, owner_id, ingredient_id, name, quote):
+    def update_owned_ingredient_master(self, owner_id, ingredient_id, name, quote, spec=None):
         result=self.client.rpc("update_owned_ingredient",{
             "p_owner_id":owner_id,
             "p_ingredient_id":ingredient_id,
             "p_name":name,
             "p_price":quote,
+            "p_spec":spec,
         }).execute()
         return result.data is True
 
