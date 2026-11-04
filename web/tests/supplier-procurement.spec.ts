@@ -41,3 +41,43 @@ test("approved spoken Amazon purchase survives reload and appears in suppliers w
  await expect(page.locator(".supplier-manager-list")).toContainText("相場参考価格");
  await expect(page.locator(".supplier-manager-list li",{hasText:"相場参考価格"}).getByRole("button",{name:"削除"})).toBeDisabled();
 });
+
+test("supplier creation stays separate from inline supplier editing",async({page})=>{
+ const suppliers=[
+  {id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",name:"Amazon",note:null},
+  {id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",name:"みずほファーム",note:"有機野菜"},
+  {id:"cccccccc-cccc-4ccc-8ccc-cccccccccccc",name:"相場参考価格",note:null,is_market_reference:true}
+ ];
+ const writes:{method:string;url:string;body:any}[]=[];
+ await page.route("**/api/suppliers?*",route=>route.fulfill({json:{items:suppliers,page:1,page_size:50}}));
+ await page.route("**/api/suppliers",route=>{
+  const body=route.request().postDataJSON();writes.push({method:route.request().method(),url:route.request().url(),body});
+  suppliers.push({id:"dddddddd-dddd-4ddd-8ddd-dddddddddddd",name:body.name,note:body.note});
+  return route.fulfill({status:201,json:suppliers.at(-1)});
+ });
+ await page.route("**/api/suppliers/*",route=>{
+  const body=route.request().postDataJSON();writes.push({method:route.request().method(),url:route.request().url(),body});
+  const id=route.request().url().split("/").at(-1);
+  const target=suppliers.find(x=>x.id===id);
+  if(!target)return route.fulfill({status:404,json:{}});
+  target.name=body.name;target.note=body.note;
+  return route.fulfill({json:target});
+ });
+ await page.goto("/settings?section=supplier");
+ const section=page.getByRole("region",{name:"新規登録"});
+ await expect(section).toBeVisible();
+ await section.getByRole("textbox",{name:/仕入れ先名/}).fill("新しい仕入れ先");
+ await section.getByRole("button",{name:/登録する/}).click();
+ await expect(page.locator(".supplier-manager-list")).toContainText("新しい仕入れ先");
+ expect(writes[0]).toMatchObject({method:"POST",body:{name:"新しい仕入れ先",note:null}});
+ const amazon=page.locator(".supplier-manager-list li",{hasText:"Amazon"});
+ await amazon.getByRole("button",{name:"編集"}).click();
+ await expect(amazon.getByRole("form",{name:"Amazonを編集"})).toBeVisible();
+ await amazon.getByRole("textbox",{name:"仕入れ先名"}).fill("Amazon 変更");
+ await amazon.getByRole("button",{name:"変更を保存"}).click();
+ await expect(amazon).toContainText("Amazon 変更");
+ expect(writes[1]).toMatchObject({method:"PUT",body:{name:"Amazon 変更",note:null}});
+ await expect(section.getByRole("textbox",{name:/仕入れ先名/})).toHaveValue("");
+ const market=page.locator(".supplier-manager-list li",{hasText:"相場参考価格"});
+ await expect(market.getByRole("button",{name:"編集"})).toBeDisabled();
+});
