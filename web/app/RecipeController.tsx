@@ -30,6 +30,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  const [query,setQuery]=useState(""),[searchInput,setSearchInput]=useState("");
  const listRequest=useRef(0);
  const voiceTarget=useRef<string|null>(null);
+ const voiceSearchForEdit=useRef(false);
  const captureActive=useRef<boolean|null>(null);
  // Real routes unmount the voice capture: opening another recipe mid-speech
  // would silently discard in-flight audio, so refuse with a notice and keep
@@ -115,6 +116,13 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  const [editOffersLoading,setEditOffersLoading]=useState(false);
  const [aiOpen,setAiOpen]=useState(false);
  const [voiceEditRequest,setVoiceEditRequest]=useState(0);
+ // A one-time navigation hint carries the requested voice-edit mode across
+ // a full page load; the next render invokes the existing guarded transition.
+ useEffect(()=>{
+  if(pageKind!=="detail"||!selected||new URLSearchParams(window.location.search).get("voiceEdit")!=="1")return;
+  window.history.replaceState(null,"",window.location.pathname);
+  setVoiceEditRequest(value=>value+1);
+ },[pageKind,selected?.id]);
  const [sellingPriceEdit,setSellingPriceEdit]=useState("");
  const [confirmQty,setConfirmQty]=useState(false),[confirmPrice,setConfirmPrice]=useState(false);
  const detailRef=useRef<HTMLElement|null>(null);
@@ -130,7 +138,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
   void sync();window.addEventListener("popstate",sync);
   return()=>{active=false;window.removeEventListener("popstate",sync);};
  },[]);
- function showDetail(recipe:Recipe){window.location.assign(`/recipes/${encodeURIComponent(recipe.id)}`);}
+ function showDetail(recipe:Recipe,openVoiceEdit=false){window.location.assign(`/recipes/${encodeURIComponent(recipe.id)}${openVoiceEdit?"?voiceEdit=1":""}`);}
  function backToLibrary(){window.location.assign("/");}
 
  const [locale,setLocale]=useState<Locale>("ja");
@@ -145,22 +153,23 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
      if(current===listRequest.current){
        setItems(result.items);setError("");
        const fromVoice=voiceTarget.current===query;
-       if(fromVoice)voiceTarget.current=null;
+       if(fromVoice){voiceTarget.current=null;}
        if(fromVoice&&page===1&&result.items.length===1){
          const recipe=await request<Recipe>(`/api/recipes/${result.items[0].id}`);
-         if(current===listRequest.current){showDetail(recipe);}
+         if(current===listRequest.current){showDetail(recipe,voiceSearchForEdit.current);}
        }
-       if(fromVoice&&result.items.length!==1){browseWaiter.current?.(null);browseWaiter.current=null;if(pageKind==="detail")setSelected(searchFallback.current);}
+       if(fromVoice&&result.items.length!==1){voiceSearchForEdit.current=false;browseWaiter.current?.(null);browseWaiter.current=null;if(pageKind==="detail")setSelected(searchFallback.current);}
      }
-   }catch(e){if(current===listRequest.current){setError(String(e));const voiceFailed=voiceTarget.current===query;if(voiceFailed){voiceTarget.current=null;if(pageKind==="detail")setSelected(searchFallback.current);}browseWaiter.current?.(null);browseWaiter.current=null;}}
+   }catch(e){if(current===listRequest.current){setError(String(e));const voiceFailed=voiceTarget.current===query;if(voiceFailed){voiceTarget.current=null;voiceSearchForEdit.current=false;if(pageKind==="detail")setSelected(searchFallback.current);}browseWaiter.current?.(null);browseWaiter.current=null;}}
    finally{if(current===listRequest.current){setWaking(false);setLoadingList(false);}}
  },[page,query]);
  useEffect(()=>{const voiceOnly=pendingVoiceSearch.current;pendingVoiceSearch.current=false;if(pageKind==="home"||voiceOnly)void reload();return()=>{listRequest.current++;};},[reload,pageKind]);
- function search(name:string,fromVoice=false){
+ function search(name:string,fromVoice=false,openVoiceEdit=false){
    if(!fromVoice){browseWaiter.current?.(null);browseWaiter.current=null;}
    if(fromVoice)searchFallback.current=selected;
    pendingVoiceSearch.current=fromVoice;
    voiceTarget.current=fromVoice?name.trim():null;
+  voiceSearchForEdit.current=fromVoice&&openVoiceEdit;
    listRequest.current++;setPage(1);setLoadingList(true);
    // Detail pages resolve a voice search in the background: blanking the
    // displayed recipe here would unmount VoiceWorkspace mid-flow, so the
@@ -253,9 +262,9 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
    if(!operations.length){setEditingId(null);return;}
    if(await saveOperations(operations))setEditingId(null);
  }
- function browseByVoice(target:string):Promise<Recipe|null>{
+ function browseByVoice(target:string,openVoiceEdit=false):Promise<Recipe|null>{
   browseWaiter.current?.(null);
-  return new Promise(resolve=>{browseWaiter.current=resolve;search(target,true);});
+  return new Promise(resolve=>{browseWaiter.current=resolve;search(target,true,openVoiceEdit);});
  }
  return <main id="top" className={pageKind==="detail"?"recipe-detail-page":""}><div><header className="chef-header"><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><PriceBell locale={locale}/><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">Japanese</option><option value="en-US">English</option></select></label></div><div className="chef-brand"><img src="/chef-ai-mark.svg" alt="" width="58" height="58"/><h1>Chef AI</h1></div>{pageKind==="home"&&<p className="muted">{t("intro")}</p>}</header>
  </div>{(pageKind==="home"||selected)&&<div><VoiceWorkspace captureActiveRef={captureActive} detailOnly={pageKind==="detail"} locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} editRequest={voiceEditRequest} onCreated={recipe=>{showDetail(recipe);setError("");void reload();}}/></div>}
@@ -285,6 +294,10 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  </section>
 
  </div>}
+ {pageKind==="detail"&&!selected&&<section className="recipe-detail" aria-label={t("detail")}>
+  <div className="detail-topbar"><button type="button" className="detail-back" onClick={backToLibrary}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button></div>
+  {error?<p role="alert" className="error">{error}</p>:<p role="status">{locale==="ja"?"レシピを読み込んでいます…":"Loading recipe…"}</p>}
+ </section>}
  {pageKind==="detail"&&selected&&<section className="recipe-detail" ref={detailRef} aria-label={t("detail")}> 
  <div className="detail-topbar"><button type="button" className="detail-back" onClick={backToLibrary}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button><span className="detail-revision">REV {selected.revision}</span><button type="button" className="secondary recipe-delete-action" disabled={busy} onClick={()=>setDeleteTarget({id:selected.id,title:selected.title.value||""})}>{locale==="ja"?"レシピを削除":"Delete recipe"}</button></div>
  {error&&<p role="alert" className="error">{error}</p>}
@@ -304,7 +317,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  {cost?.partial&&<div className="detail-estimate" role="status">
   <p>{locale==="ja"?`未確定の材料 ${cost.unresolved_line_ids.length}件。合計原価と原価率は全材料の価格・単位換算が確定するまで表示されません。`:`${cost.unresolved_line_ids.length} unresolved lines. Total cost and cost rate require all prices and units to be resolved.`}</p>
   <ul>{selected.materials.filter(line=>cost.unresolved_line_ids.includes(line.id)).map(line=><li key={line.id}>
-   {line.material_name.value||line.id}：{!line.effective_price?.amount_jpy.value?(locale==="ja"?"採用価格が未設定":"No adopted price"):line.quantity.value==null?(locale==="ja"?"使用量が未設定":"No quantity"):(locale==="ja"?"単位換算を確認":"Verify unit conversion")}
+   {line.material_name.value||line.id}：{!(line.effective_price?.amount_jpy.value||line.price_override?.amount_jpy.value)?(locale==="ja"?"採用価格が未設定":"No adopted price"):line.quantity.value==null?(locale==="ja"?"使用量が未設定":"No quantity"):(locale==="ja"?"単位換算を確認":"Verify unit conversion")}
   </li>)}</ul>
  </div>}
 
