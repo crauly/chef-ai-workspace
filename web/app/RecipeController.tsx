@@ -302,11 +302,11 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
 
  </div>}
  {pageKind==="detail"&&!selected&&<section className="recipe-detail" aria-label={t("detail")}>
-  <div className="detail-topbar"><button type="button" className="detail-back" onClick={backToLibrary}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button></div>
+  <div className="detail-topbar"><button type="button" className="detail-back" onClick={backToLibrary}>{locale==="ja"?"← ホーム":"← Home"}</button></div>
   {error?<p role="alert" className="error">{error}</p>:<p role="status">{locale==="ja"?"レシピを読み込んでいます…":"Loading recipe…"}</p>}
  </section>}
  {pageKind==="detail"&&selected&&<section className="recipe-detail" ref={detailRef} aria-label={t("detail")}> 
- <div className="detail-topbar"><button type="button" className="detail-back" onClick={backToLibrary}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button><span className="detail-revision">REV {selected.revision}</span><button type="button" className="secondary recipe-delete-action" disabled={busy} onClick={()=>setDeleteTarget({id:selected.id,title:selected.title.value||""})}>{locale==="ja"?"レシピを削除":"Delete recipe"}</button></div>
+ <div className="detail-topbar"><button type="button" className="detail-back" onClick={backToLibrary}>{locale==="ja"?"← ホーム":"← Home"}</button><button type="button" className="secondary recipe-delete-action" disabled={busy} onClick={()=>setDeleteTarget({id:selected.id,title:selected.title.value||""})}>{locale==="ja"?"レシピを削除":"Delete recipe"}</button></div>
  {error&&<p role="alert" className="error">{error}</p>}
  <div className="detail-heading"><p className="detail-eyebrow">{locale==="ja"?"RECIPE DETAIL":"RECIPE DETAIL"}</p><h2>{selected.title.value||t("detail")}</h2></div>
  {recipeGaps(selected).length>0&&<details className="recipe-gap-disclosure">
