@@ -46,14 +46,10 @@ begin
            and i.id<>p_ingredient_id and lower(btrim(i.name))=lower(v_name)
            and lower(coalesce(nullif(btrim(i.spec),''),''))=lower(coalesce(v_spec,'')))
  then raise exception 'Ingredient identity collision'; end if;
- if jsonb_typeof(v_price)='object' then
-   v_unit_id:=public.resolve_owned_unit_id(p_owner_id,v_price->>'per_unit');
-   v_price:=jsonb_set(v_price,'{per_unit_id}',to_jsonb(v_unit_id::text),true);
+ if v_price is not null and jsonb_typeof(v_price)='object' then
+   raise exception 'Use explicit offer price adoption';
  end if;
- update public.ingredients
- set name=v_name,spec=v_spec,
-     current_price=case when v_price is null or jsonb_typeof(v_price)='null'
-                        then current_price else v_price end
+ update public.ingredients set name=v_name,spec=v_spec
  where owner_id=p_owner_id and id=p_ingredient_id;
  return true;
 end; $ingredient_manager$;
