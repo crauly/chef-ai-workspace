@@ -1597,8 +1597,8 @@ def save_demo_dish_image(recipe_id:UUID,body:DishImageBody,ctx=Depends(demo_cont
     if not image or len(image)>3145728:
         raise HTTPException(413,"Image too large")
     mime=match.group(1)
-    if not ((mime=="image/png" and image.startswith(b"\\x89PNG\\r\\n\\x1a\\n")) or
-            (mime=="image/jpeg" and image.startswith(b"\\xff\\xd8\\xff")) or
+    if not ((mime=="image/png" and image.startswith(b"\x89PNG\r\n\x1a\n")) or
+            (mime=="image/jpeg" and image.startswith(b"\xff\xd8\xff")) or
             (mime=="image/webp" and len(image)>=12 and image[:4]==b"RIFF" and image[8:12]==b"WEBP")):
         raise HTTPException(422,"Image type mismatch")
     saver=getattr(repo,"save_owned_dish_image",None)
