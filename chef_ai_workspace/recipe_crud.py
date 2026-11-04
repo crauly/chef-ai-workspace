@@ -88,6 +88,9 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
             (op.get("op") in ("set_material_price", "add_material")
              or (op.get("op") == "link_ingredient" and op.get("price_mode") == "override"))
             and op.get("material_id") == line.id for op in proposal.operations)
+        if price_edited and quote is not None and (line.supplier_id or line.offer_id):
+            raise MutationError(
+                "Supplier offer price must be adopted through the explicit offer-price approval route")
         if price_edited and quote is not None:
             effective[ingredient_id] = Ingredient(ingredient_id, ingredient.name, quote)
         metadata = ledger_by_id.get(ingredient_id, {})
@@ -117,14 +120,23 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
         raise MutationError(str(exc)) from exc
     snapshot = asdict(cost)
     if save_version:
-        snapshot["effective_quotes"] = {
-            line.id: {"price_mode": "inherit", "ingredient_id": line.ingredient_id,
-                      "effective_quote": asdict(supplier_prices.get((line.ingredient_id, line.supplier_id))
-                                                if line.supplier_id else effective[line.ingredient_id].current_price)
-                      if (supplier_prices.get((line.ingredient_id, line.supplier_id))
-                          if line.supplier_id else effective[line.ingredient_id].current_price) else None}
-            for line in candidate.materials
-        }
+        snapshots = {}
+        for line in candidate.materials:
+            if line.offer_id:
+                quote = supplier_prices.get((line.ingredient_id, line.offer_id))
+            elif line.supplier_id:
+                quote = supplier_prices.get((line.ingredient_id, line.supplier_id))
+            else:
+                ingredient = effective.get(line.ingredient_id or "")
+                quote = ingredient.current_price if ingredient else None
+            snapshots[line.id] = {
+                "price_mode": "inherit",
+                "ingredient_id": line.ingredient_id,
+                "supplier_id": line.supplier_id,
+                "offer_id": line.offer_id,
+                "effective_quote": asdict(quote) if quote is not None else None,
+            }
+        snapshot["effective_quotes"] = snapshots
     revision = repository.commit_recipe_crud(
         owner_id=owner_id, recipe_id=recipe.id, request_id=proposal.request_id,
         base_revision=proposal.base_revision, state=asdict(candidate),
