@@ -63,4 +63,7 @@ jobs:
         env:
           CHEF_TEST_PGHOST: localhost
           CHEF_TEST_PGPORT: '5432'
-        run: python -m unittest discover -s tests -p 'test_procurement_postgres.py' -v
+        run: |
+          python -m unittest discover -s tests -p 'test_procurement_postgres.py' -v
+          python -m unittest discover -s tests -p 'test_ingredient_edit_postgres.py' -v
+          python -m unittest discover -s tests -p 'test_scheduled_research_postgres.py' -v

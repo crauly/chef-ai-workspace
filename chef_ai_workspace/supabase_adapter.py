@@ -230,12 +230,20 @@ class SupabasePersistence:
         rows=[]
         while True:
             response=(self.client.table("ingredients")
-                      .select("id,name,spec,current_price,price_research_enabled,last_research_at,last_research_error")
+                      .select("id,name,spec,current_price,price_research_enabled,last_research_at,last_research_error,selected_offer_id")
                       .eq("owner_id",owner_id)
                       .order("id").range(len(rows),len(rows)+499).execute())
             batch=response.data or []
             if not batch:
                 return rows
+            selected=[row["selected_offer_id"] for row in batch if row.get("selected_offer_id")]
+            offers={}
+            for start in range(0,len(selected),200):
+                found=(self.client.table("offers").select("id,supplier_id").eq("owner_id",owner_id)
+                       .in_("id",selected[start:start+200]).execute()).data or []
+                offers.update({o["id"]:o for o in found})
+            for row in batch:
+                row["selected_supplier_id"]=offers.get(row.get("selected_offer_id"),{}).get("supplier_id")
             rows.extend(batch)
 
     def list_owned_ingredient_suppliers(self, owner_id):
@@ -281,6 +289,19 @@ class SupabasePersistence:
         if existing:
             return existing[0]["id"]
         return self.create_owned_offer(owner_id, ingredient_id, supplier_id)
+
+    def save_owned_ingredient_edit(self, owner_id, ingredient_id, request_id, payload):
+        """One explicit approved manager save, including identity/research/quote.
+
+        The RPC owns validation, adoption and the idempotency receipt in one
+        transaction; never replace it with sequential HTTP/RPC mutations.
+        """
+        result=self.client.rpc("save_owned_ingredient_edit",{
+            "p_owner_id":owner_id,"p_ingredient_id":ingredient_id,
+            "p_request_id":request_id,"p_payload":payload}).execute().data
+        if not isinstance(result,dict) or not result.get("updated"):
+            raise RuntimeError("Invalid ingredient transaction result")
+        return result
 
     def update_owned_ingredient_master(self, owner_id, ingredient_id, name, quote, spec=None):
         result=self.client.rpc("update_owned_ingredient",{
@@ -370,30 +391,35 @@ class SupabasePersistence:
                 raise ValueError("Supplier is used by recipe materials") from exc
             raise
 
-    def list_owned_approved_prices(self, owner_id, ingredient_id):
+    def list_owned_approved_prices(self, owner_id, ingredient_id=None):
         """Compare explicitly adopted quotes; observations not adopted are omitted."""
-        if ingredient_id not in self.load_owned_ingredients(owner_id, [ingredient_id]):
+        if ingredient_id is not None and ingredient_id not in self.load_owned_ingredients(owner_id, [ingredient_id]):
             raise ValueError("Ingredient not owned")
-        offers = (self.client.table("offers")
-                  .select("id,ingredient_id,supplier_id,package_quantity,"
-                          "package_unit,adopted_observation_id")
-                  .eq("owner_id", owner_id).eq("ingredient_id", ingredient_id)
-                  .order("id").execute()).data or []
+        offers=[]
+        while True:
+            query=(self.client.table("offers")
+                   .select("id,ingredient_id,supplier_id,package_quantity,package_unit,adopted_observation_id")
+                   .eq("owner_id",owner_id))
+            if ingredient_id is not None: query=query.eq("ingredient_id",ingredient_id)
+            batch=query.order("id").range(len(offers),len(offers)+499).execute().data or []
+            offers.extend(batch)
+            if len(batch)<500: break
         relevant = [o for o in offers if o.get("adopted_observation_id")]
         if not relevant:
             return []
         observation_ids = [o["adopted_observation_id"] for o in relevant]
-        observations = (self.client.table("price_observations")
-                        .select("id,offer_id,amount_jpy,currency,confirmed,"
-                                "source,observed_at")
-                        .eq("owner_id", owner_id).in_("id", observation_ids)
-                        .execute()).data or []
+        observations=[]
+        for start in range(0,len(observation_ids),200):
+            observations.extend((self.client.table("price_observations")
+                .select("id,offer_id,amount_jpy,currency,confirmed,source,observed_at")
+                .eq("owner_id",owner_id).in_("id",observation_ids[start:start+200]).execute()).data or [])
         obs_by_id = {o["id"]: o for o in observations}
         supplier_ids = sorted({o["supplier_id"] for o in relevant
                                if o.get("supplier_id")})
-        suppliers = (self.client.table("suppliers")
-                     .select("id,name").eq("owner_id", owner_id)
-                     .in_("id", supplier_ids).execute()).data or [] if supplier_ids else []
+        suppliers=[]
+        for start in range(0,len(supplier_ids),200):
+            suppliers.extend((self.client.table("suppliers").select("id,name").eq("owner_id",owner_id)
+                              .in_("id",supplier_ids[start:start+200]).execute()).data or [])
         names = {s["id"]: s["name"] for s in suppliers}
         output = []
         for offer in relevant:
@@ -401,7 +427,7 @@ class SupabasePersistence:
             if not obs or obs["offer_id"] != offer["id"] or not obs["confirmed"]:
                 continue
             output.append({
-                "offer_id": offer["id"], "supplier_id": offer.get("supplier_id"),
+                "ingredient_id":offer["ingredient_id"],"offer_id": offer["id"], "supplier_id": offer.get("supplier_id"),
                 "supplier_name": names.get(offer.get("supplier_id")),
                 "amount_jpy": str(obs["amount_jpy"]), "currency": obs["currency"],
                 "quantity": offer.get("package_quantity"),

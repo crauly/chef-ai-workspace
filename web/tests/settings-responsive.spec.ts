@@ -63,7 +63,7 @@ test("ingredient editor chooses a supplier only through an approved purchase pri
  }}));
  await page.route("**/api/suppliers?**",async route=>route.fulfill({json:{items:[{id:supplier,name:"新規取引先"}]}}));
  await page.route("**/api/ingredients/*/offer-prices",async route=>route.fulfill({json:{items:[]}}));
- await page.route("**/api/offer-prices",async route=>{
+ await page.route("**/api/ingredients/"+ingredient,async route=>{
   posted=route.request().postDataJSON();
   linked=true;
   await route.fulfill({status:201,json:{offer_id:"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"}});
@@ -74,14 +74,15 @@ test("ingredient editor chooses a supplier only through an approved purchase pri
  await page.getByRole("row",{name:/バター/}).getByRole("button",{name:"編集"}).click();
  await expect(page.getByRole("dialog",{name:"バターを編集"})).toBeVisible();
  const dialog=page.getByRole("dialog",{name:"バターを編集"});
- await expect(dialog.locator("select")).toHaveCount(1);
+ await expect(dialog.locator("select")).toHaveCount(2);
  await expect(dialog.getByRole("button",{name:"紐付ける"})).toHaveCount(0);
  await dialog.getByLabel("仕入れ先（採用価格）").selectOption(supplier);
  await dialog.getByLabel("仕入価格（円）").fill("350");
  await dialog.getByLabel("仕入数量").fill("500");
- await dialog.getByLabel("仕入単位").fill("g");
- await dialog.getByRole("button",{name:"価格を登録・採用"}).click();
- await expect.poll(()=>posted).toEqual({ingredient_id:ingredient,supplier_id:supplier,amount_jpy:"350",quantity:"500",unit:"g"});
+ await dialog.getByLabel("仕入単位").selectOption("g");
+ await dialog.getByRole("button",{name:"保存",exact:true}).click();
+ await page.getByRole("button",{name:"承認して保存"}).click();
+ await expect.poll(()=>posted).toMatchObject({supplier_id:supplier,purchase:{amount_jpy:"350",quantity:"500",unit:"g"},price_confirmed:true});
  await expect(page.getByRole("row",{name:/バター/})).toContainText("新規取引先");
 });
 

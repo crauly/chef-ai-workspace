@@ -77,3 +77,9 @@ from public.offers where supplier_id is null group by owner_id, ingredient_id;
 ブラウザテストは音声認識・HTTPをfixture化する。PostgreSQLテストはAPIと実SQLを結ぶ
 ローカルテスト用transportを使い、実Supabase REST、実機マイク、実モデル／Web検索を呼ばない。
 実Supabaseでの移行・承認保存・再読込・仕入先管理・原価の通し確認は未実施である。
+
+## 食材ライブラリからの更新
+
+編集モーダルは「保存」に統合。購入条件・価格を変える場合は確認・承認後に `save_owned_ingredient_edit` が既存採用RPCとメタデータ更新を原子的に実行する。価格を変えない保存は観測を増やさない。編集用選択参照はレシピ材料のOffer参照を置き換えないため、別仕入先の原価・保存版は維持される。
+
+[ADR-017](ADR_017_INGREDIENT_ATOMIC_EDIT.md) にAPI、冪等性、エラー、正規移行、実DBブラウザ検証手順を記載。

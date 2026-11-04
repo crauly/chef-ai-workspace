@@ -305,7 +305,11 @@ def list_demo_ingredient_master(ctx=Depends(demo_context)):
     if not callable(loader):
         raise HTTPException(503,"Ingredient master unavailable")
     suppliers=getattr(repository,"list_owned_ingredient_suppliers",None)
-    return {"items":loader(owner),
+    prices=getattr(repository,"list_owned_approved_prices",None)
+    quotes={}
+    if callable(prices):
+        for quote in prices(owner): quotes.setdefault(quote["ingredient_id"],[]).append(quote)
+    return {"items":loader(owner),"approved_prices_by_ingredient":quotes,
             "suppliers_by_ingredient":suppliers(owner) if callable(suppliers) else None}
 
 
@@ -355,8 +359,19 @@ def delete_demo_ingredient_master(ingredient_id:UUID,ctx=Depends(demo_context)):
     return {"deleted":True}
 
 
+class IngredientPurchaseBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    amount_jpy: str=Field(max_length=64)
+    quantity: str=Field(max_length=64)
+    unit: str=Field(min_length=1,max_length=32)
+
+
 class IngredientMasterEditBody(BaseModel):
     model_config=ConfigDict(extra="forbid")
+    request_id: UUID | None=None
+    supplier_id: UUID | None=None
+    purchase: IngredientPurchaseBody | None=None
+    price_confirmed: StrictBool=False
     price_research_enabled: StrictBool | None = None
     name: str=Field(min_length=1,max_length=200)
     spec: str | None=Field(default=None,max_length=200)
@@ -372,6 +387,28 @@ def edit_demo_ingredient_master(ingredient_id:UUID, body:IngredientMasterEditBod
     owner, repository=ctx
     if any(value is not None for value in (body.price_jpy,body.price_quantity,body.price_unit)):
         raise HTTPException(422,"Use explicit offer price adoption")
+    if body.request_id is not None:
+        from fastapi.responses import JSONResponse
+        from decimal import Decimal, InvalidOperation
+        try:
+            if body.purchase is not None:
+                amount=Decimal(body.purchase.amount_jpy); quantity=Decimal(body.purchase.quantity)
+                if not amount.is_finite() or amount<0 or not quantity.is_finite() or quantity<=0:
+                    raise ValueError("invalid_price")
+                if not body.price_confirmed: raise ValueError("price_confirmation_required")
+            payload=body.model_dump(mode="json",exclude={"request_id","price_jpy","price_quantity","price_unit"})
+            return repository.save_owned_ingredient_edit(owner,str(ingredient_id),str(body.request_id),payload)
+        except Exception as exc:
+            # Only controlled codes cross the HTTP boundary; SQL/provider text never does.
+            code=getattr(exc,"message",None) or str(exc)
+            code={"Ingredient identity collision":"ingredient_conflict","Ambiguous purchase offer":"ingredient_conflict"}.get(code,code)
+            statuses={"invalid_input":422,"invalid_price":422,"price_confirmation_required":422,
+                      "unit_unknown":422,"supplier_unavailable":422,"ingredient_unavailable":404,
+                      "ingredient_conflict":409,"request_conflict":409}
+            if isinstance(exc,InvalidOperation): code="invalid_price"
+            return JSONResponse({"error":code if code in statuses else "database_error"},status_code=statuses.get(code,503))
+    if body.purchase is not None or body.supplier_id is not None or body.price_confirmed:
+        raise HTTPException(422,"Registration request ID required")
     if body.price_research_enabled is not None:
         repository.save_research_ingredient(owner, str(ingredient_id), body.name.strip(), body.spec, body.price_research_enabled)
         return {"id": str(ingredient_id), "updated": True}
