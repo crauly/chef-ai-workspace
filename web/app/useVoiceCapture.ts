@@ -17,7 +17,7 @@ export function yieldMicrophone(releaser: () => void): void {
 }
 export const VOICE_SILENCE_MS = 1000;
 // traceId is assigned at utterance intake and forwarded through submit/enqueue.
-export type VoiceCaptureMeta = {reviewEpoch: number; traceId?: string; source?: "manual"};
+export type VoiceCaptureMeta = {reviewEpoch: number; traceId?: string; source?: "manual"; utteranceId?:string};
 
 export async function encodeWav(frames: Float32Array[], rate: number): Promise<ArrayBuffer> {
   const length = frames.reduce((n, frame) => n + frame.length, 0);
@@ -106,6 +106,7 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
     const runBatch = (batch: Float32Array[], rate: number, capturedReview: number) => {
       // Keep accepted audio. Capture never stops for a transcription failure:
       // the microphone stays open, the draft stays, and the failure is shown.
+      const utteranceId=crypto.randomUUID();
       requests++; setBusy(true);
       pending = pending.then(async () => {
         if (!valid()) return;
@@ -131,7 +132,7 @@ export function useVoiceCapture(locale: Locale, onTranscript: (text: string, met
         const text = result && typeof result === "object" ? (result as {transcript?: unknown}).transcript : null;
         if (typeof text !== "string" || !text.trim() || text.length > 1000) throw new Error("transcription:invalid");
         logVoiceEvent("transcribe.ok", "");
-        if (valid()) callback.current(text, {reviewEpoch:capturedReview});
+        if (valid()) callback.current(text, {reviewEpoch:capturedReview,utteranceId});
       }).catch((error: unknown) => {
         const code = error instanceof Error ? error.message : "";
         const timedOut = code.includes("provider_timeout") || code.includes("504");

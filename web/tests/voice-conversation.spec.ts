@@ -24,15 +24,10 @@ async function microphone(page:Page){
  });
 }
 
-test("natural review/save variants and combined requests are recognized; negation and recipe data never approve",()=>{
- for(const value of ["下書き。確認","下書きを確認してください","内容を確認","内容 を 確認"])
-  expect(voiceCommand(value)).toBe("review");
- for(const value of ["内容を登録","内容を保存してください","保存してください","内容を確定","登録を確定","登録を確定。確定。","内容を確認。登録を確定","内容を確認して保存してください","はい、保存してください。"])
-  expect(voiceCommand(value)).toBe("save");
- for(const value of ["保存しないでください","登録しません"])
-  expect(voiceCommand(value)).toBe("hold");
- for(const value of ["パスタを150gに変更して保存してください","パスタを150gに変更、まだ保存しないでください","保存しないで、パスタは150g","保存してくださいという名前の料理","保存していいですか","お願いします"])
-  expect(voiceCommand(value)).toBe("data");
+test("registration uses 保存 substrings only; review and edit consent remain separate",()=>{
+ for(const value of ["保存","保存して","レシピを保存します","承認して保存","保存しないでください","パスタを150gに変更して保存してください"])expect(voiceCommand(value)).toBe("save");
+ for(const value of ["登録","登録してください","登録を確定","確定","お願いします"])expect(voiceCommand(value)).not.toBe("save");
+ expect(voiceCommand("内容を確認")).toBe("review");
 });
 
 test("the recording thread tags pre-review buffers before any delayed main-thread delivery",()=>{
@@ -133,7 +128,7 @@ test("audio recorded before review cannot approve the draft even when transcript
  let started!:()=>void;const sending=new Promise<void>(resolve=>{started=resolve;});
  let saves=0;
  await page.route("**/api/voice-recipe",route=>route.fulfill({json:draft}));
- await page.route("**/api/voice/transcribe",async route=>{started();await blocked;await route.fulfill({json:{transcript:"登録してください"}});});
+ await page.route("**/api/voice/transcribe",async route=>{started();await blocked;await route.fulfill({json:{transcript:"保存してください"}});});
  await page.route("**/api/recipes/full",async route=>{
   saves++;const body=route.request().postDataJSON();
   await route.fulfill({status:201,json:{id:body.request_id,title:{value:body.title},revision:0,materials:[],selling_price_jpy:{value:null}}});

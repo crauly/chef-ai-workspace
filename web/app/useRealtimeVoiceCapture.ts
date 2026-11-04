@@ -244,8 +244,7 @@ export function useRealtimeVoiceCapture(
           // Approval uses the epoch from when the utterance started. A turn
           // whose start was never seen carries -1 (the established
           // no-approval sentinel), which never equals a live approval epoch.
-          callback.current(text, {reviewEpoch: startEpoch ?? -1, traceId: current.trace});
-          void turnId;
+          callback.current(text, {reviewEpoch: startEpoch ?? -1, traceId: current.trace,utteranceId:`${current.trace}:${turnId}`});
         },
       },
       turns.current, // shared across refresh/reconnect: no duplicate commits

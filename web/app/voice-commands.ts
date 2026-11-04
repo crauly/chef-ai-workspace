@@ -1,11 +1,11 @@
 export type VoiceCommand = "data" | "review" | "save" | "cancel" | "hold";
 
-// Only explicit, standalone human requests may reach the approval gate.
-// Model output never authorizes persistence; mixed recipe data is not approval.
-export function voiceCommand(utterance: string): VoiceCommand {
+// Standalone command parsing retained for edit consent and non-save controls.
+// Model output never authorizes persistence.
+function baseVoiceCommand(utterance: string): VoiceCommand {
   const clauses=utterance.split(/[。．.!！?？、,\n]+/).map(value=>value.trim()).filter(Boolean);
   if(clauses.length>1){
-    const commands=clauses.map(voiceCommand);
+    const commands=clauses.map(baseVoiceCommand);
     if(commands.every(command=>command!=="data")){
       if(commands.includes("hold"))return "hold";
       if(commands.includes("cancel"))return "cancel";
@@ -32,9 +32,16 @@ export function voiceCommand(utterance: string): VoiceCommand {
   return rest !== text && save(rest) ? "save" : "data";
 }
 
-// Edit-only consent: registration keeps its existing vocabulary and gate.
+// Registration consent follows the explicit product rule; review is a separate gate.
+export function voiceCommand(utterance:string):VoiceCommand{
+ if(utterance.includes("保存"))return "save";
+ const command=baseVoiceCommand(utterance);
+ return command==="save"?"review":command;
+}
+
+// Edit consent retains its separate vocabulary and confirmation gate.
 export function editVoiceCommand(utterance:string):VoiceCommand {
- const existing=voiceCommand(utterance);
+ const existing=baseVoiceCommand(utterance);
  if(existing!=="data")return existing;
  const text=utterance.normalize("NFKC").trim().replace(/[。.!！]+$/g,"");
  if(/^(?:承認|更新)(?:は)?(?:しない(?:で(?:ください)?)?|しません)$/.test(text))return "hold";

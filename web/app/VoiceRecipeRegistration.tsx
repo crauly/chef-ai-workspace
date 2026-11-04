@@ -35,7 +35,7 @@ function researchLabel(status:ResearchStatus,ja:boolean){
   misconfigured:["検索サービスの設定を確認してください","Search configuration unavailable"]};
  return messages[status.web][ja?0:1];
 }
-type Input={text:string;command:VoiceCommand;revision:number;approval:Draft|null;staleVoice:boolean;traceId:string};
+type Input={text:string;command:VoiceCommand;revision:number;approval:string|null;captureEpoch:number;manual:boolean;staleVoice:boolean;traceId:string};
 export type SaveMode="confirmed"|"unconfirmed";
 // Identity is required. Optional use quantities and purchase facts may remain
 // unresolved; completeness never substitutes for explicit human approval.
@@ -118,7 +118,11 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   return ()=>{cancelled=true;};
  },[]);
  type MasterReview={already_saved?:boolean;ingredients:(MasterMatch&{price_action?:string})[];units:{symbol:string;dimension:string}[];suppliers:{name:string;action:string}[]};
- const [masterReview,setMasterReview]=useState<MasterReview|null>(null);
+ const [masterReview,setMasterReviewState]=useState<MasterReview|null>(null);
+ const masterReviewRef=useRef<MasterReview|null>(null);
+ function setMasterReview(value:MasterReview|null){masterReviewRef.current=value;setMasterReviewState(value);}
+ const [reviewLoading,setReviewLoading]=useState(false);
+ const reviewToken=useRef<string|null>(null),seenSaves=useRef(new Set<string>());
  const reviewFlight=useRef(false);
  const [phase,setPhase]=useState<"dictating"|"review"|"saving">("dictating");
  const [message,setMessage]=useState(ja?"料理名・食材・分量・仕入単価を話してください。":"Describe the recipe, quantities and purchase prices.");
@@ -375,6 +379,15 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    if(alive.current&&epoch.current===current&&semanticAbort.current===aborter)setParsing(false);
   }
  }
+ function contentKey(d:Draft){return JSON.stringify({title:d.title.trim(),materials:toSaveMaterials(d),selling_price_jpy:draftNumber(d.selling_price_jpy,true),unitProposals:d.unitProposals??[]});}
+ function applyResearchDraft(next:Draft){
+  const before=draftRef.current;
+  const unchanged=before&&contentKey(before)===contentKey(next);
+  draftRef.current=next;parseBase.current=next;setDraft(next);
+  if(unchanged){if(reviewed.current===before)reviewed.current=next;return;}
+  reviewed.current=null;reviewMode.current=null;reviewToken.current=null;requestId.current=null;registrationPayload.current=null;
+  setStage("dictating");say(ja?"保存対象の価格が変更されました。再レビューしてから保存してください。":"Saved price facts changed. Review again before saving.");
+ }
  async function enrichPrices(base:Draft,version:number,requestEpoch:number,traceId:string){
   const entries=base.pending_research??[];
   if(!entries.length)return;
@@ -408,8 +421,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     if(alive.current&&epoch.current===requestEpoch&&priceEpoch.current===sequence&&
        !controller.signal.aborted&&phaseRef.current!=="saving"&&live&&rows.every((name,index)=>rowNamesOf(live)[index]===name)){
      const partial=applyFoundPrices({...live,...response,research_state:"deferred",pending_research:entries});
-     draftRef.current=partial;parseBase.current=partial;setDraft(partial);
-     reviewed.current=null;reviewMode.current=null;requestId.current=null;registrationPayload.current=null;setStage("dictating");
+     applyResearchDraft(partial);
     }
    }
    if(!alive.current||controller.signal.aborted||priceEpoch.current!==sequence||epoch.current!==requestEpoch)return;
@@ -436,9 +448,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     }
     const merged=applyFoundPrices({...current,...response,pending_research:[]});
     priceDone.current.set(key+"@"+currentRows.join("|"),response);
-    draftRef.current=merged;parseBase.current=merged;setDraft(merged);
-    reviewed.current=null;reviewMode.current=null;requestId.current=null;registrationPayload.current=null;
-    setStage("dictating");logVoiceEvent("price.ok","research returned",traceId);
+    applyResearchDraft(merged);logVoiceEvent("price.ok","research returned",traceId);
    }
   }catch{
    if(alive.current&&!controller.signal.aborted&&priceEpoch.current===sequence&&
@@ -455,12 +465,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     if(researchKey(current.pending_research??[])!==key)return;
     const fallback={...current,research_state:"complete" as const,pending_research:[],
       research_status:entries.map(e=>({...e,ledger:"unavailable",web:"provider_error" as const,provisional:false}))};
-    draftRef.current=fallback;parseBase.current=fallback;setDraft(fallback);
-    // The approved content changed, so the old approval must not survive:
-    // same invalidation as the success path, otherwise save() would
-    // silently no-op with the approval button still enabled.
-    reviewed.current=null;reviewMode.current=null;requestId.current=null;registrationPayload.current=null;
-    setStage("dictating");setPriceFailed(true);
+    applyResearchDraft(fallback);setPriceFailed(true);
     logVoiceEvent("price.fail","price research failed; draft retained",traceId);
    }
   }finally{
@@ -493,38 +498,45 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   if(!mode){
    say((ja?"まだ登録できません：":"Cannot save yet: ")+[...(!d.title.trim()?[ja?"料理名":"Recipe name"]:[]),...d.missing,...d.notes].join(ja?"、":", "));return;
   }
-  if(reviewFlight.current)return;
-  const reviewEpoch=epoch.current,reviewRevision=revision.current;
-  reviewFlight.current=true;setMasterReview(null);
+  if(reviewFlight.current){say(ja?"レビューを照合中です。完了後に保存してください。":"Review is in progress. Save after it completes.");return;}
+  const reviewEpoch=epoch.current,reviewRevision=revision.current,key=contentKey(d);
+  reviewFlight.current=true;setReviewLoading(true);setMasterReview(null);
   say(ja?"保存内容と食材・単位・仕入先マスターを照合しています…":"Checking recipe and master records…");
   try{
    const payload=savePayload(d);
    const result=await request<MasterReview>("/api/recipes/full/review",{method:"POST",body:JSON.stringify(payload)});
-   if(!alive.current||epoch.current!==reviewEpoch||revision.current!==reviewRevision||draftRef.current!==d||requestId.current!==payload.request_id)return;
+   if(!alive.current)return;
+   if(epoch.current!==reviewEpoch||revision.current!==reviewRevision||!draftRef.current||contentKey(draftRef.current)!==key||requestId.current!==payload.request_id){say(ja?"照合中に下書きが変更されました。最新の内容を再レビューしてください。":"Draft changed during review. Review the latest content.");return;}
    setMasterReview(result);
   }catch(error){say(registrationError(error,ja));return;}
-  finally{reviewFlight.current=false;}
-  reviewed.current=d;reviewMode.current=mode;approvalEpoch.current=voice.markReview();setStage("review");
+  finally{reviewFlight.current=false;setReviewLoading(false);}
+  reviewed.current=draftRef.current;reviewMode.current=mode;reviewToken.current=crypto.randomUUID();approvalEpoch.current=voice.markReview();setStage("review");
+  if(masterReviewRef.current?.ingredients.some(m=>m.action==="choose")){say(ja?"食材マスターを選択し「選択して再照合」を押してください。完了するまで保存できません。":"Choose each ingredient master and apply the selection before saving.");return;}
   if(mode==="confirmed")
    say("確認用の下書きを表示しました。料理名・食材・数量・価格を確認し、正しければもう一度「保存してください」と話すか、承認して保存を押してください。");
   else
    say((registrationIssues(d).map(i=>`${i.path}: ${i.reason}`).join(" / "))+" "+(ja?"仕入単価が不明の項目があります（"+priceMissingNames(d).join("、")+"）。未確定の数量・価格は未確定のまま保存できます。価格を推測やゼロ埋めで補いません。よければもう一度「保存してください」と話すか、価格未確定として保存を押してください。":"Missing purchase prices: "+priceMissingNames(d).join(", ")+". You may explicitly approve saving with unresolved quantities or prices; no price will be guessed or set to zero."));
  }
  // First registration request presents the checked plan; the next approves it.
- async function register(){
+ async function register(approval?:string|null){
   const d=draftRef.current;
-  if(phaseRef.current==="saving")return;
+  if(phaseRef.current==="saving"){say(ja?"保存処理中です。完了をお待ちください。":"Saving. Please wait.");return;}
   if(!d){say("先にレシピの内容を入力してください。");return;}
   const mode=saveModeFor(d);
   if(!mode){say("レシピ名と食材名を確認してください。入力できている内容は下書きに保持しています。");return;}
-  if(phaseRef.current==="review"&&reviewed.current===d&&masterReview)await save();
+  if(phaseRef.current==="review"&&reviewed.current===d&&masterReviewRef.current){
+   if(approval!==undefined&&approval!==reviewToken.current){say(ja?"レビュー成立前または別の内容への保存指示は承認に使えません。表示内容を確認し、新しく「保存」と指示してください。":"This request predates this review. Review the content and say save again.");return;}
+   await save();
+  }
   else await showReview();
  }
  async function save(){
   const d=draftRef.current;
   const mode=reviewMode.current;
-  if(phaseRef.current!=="review"||!d||!mode||reviewed.current!==d||saveModeFor(d)!==mode||!unitCatalog||parsedTurns.current<dataTurns.current.length)return;
-  if(masterReview?.ingredients.some(m=>m.action==="choose")){say(ja?"食材マスターの候補を選択して再照合してください。":"Select the ingredient masters before approval.");return;}
+  if(phaseRef.current!=="review"||!d||!mode||reviewed.current!==d||!saveModeFor(d)){say(ja?"承認できるレビューがありません。最新の下書きを再レビューしてください。":"Review the latest draft before approval.");return;}
+  if(!unitCatalog){say(ja?"単位マスターを再取得して再レビューしてください。":"Reload units and review again.");return;}
+  if(parsedTurns.current!==dataTurns.current.length||inbox.current.some(i=>i.command==="data")){say(ja?"未解析の発話があります。解析完了後に再レビューしてください。":"Unparsed speech remains. Review after parsing completes.");return;}
+  if(masterReviewRef.current?.ingredients.some(m=>m.action==="choose")){say(ja?"食材マスターの候補を選択して再照合してください。":"Select the ingredient masters before approval.");return;}
   let payload:ReturnType<typeof savePayload>;
   try{payload=savePayload(d);}catch{
    say(ja?"新規単位の分類を確認してください。":"Review the dimension of every proposed new unit.");return;
@@ -532,9 +544,9 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   voice.cancel();setStage("saving");if(!draining.current)setBusy(true);say("承認された内容を保存しています…");
   if(!requestId.current)requestId.current=crypto.randomUUID();
   // Persist the stable idempotency key before invoking the remote mutation.
-  try{await saveWorkingDraft({draft:d,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current,registrationPayload:registrationPayload.current});}
-  catch{setStage("dictating");say("保存IDを端末に保持できません。安全のため登録を中止しました。");return;}
   try{
+   try{await saveWorkingDraft({draft:d,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current,registrationPayload:registrationPayload.current});}
+   catch{setStage("review");say("保存IDを端末に保持できません。下書きと同じ保存IDを保持しています。再試行してください。");return;}
    const recipe=await request<Recipe>("/api/recipes/full",{method:"POST",body:JSON.stringify(payload)});
    if(!alive.current)return;
    // Associate the optional preview only after the formal save succeeded.
@@ -582,21 +594,23 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
      if(!alive.current||epoch.current!==sourceEpoch)continue;
      await parse(sourceTurns,batch[batch.length-1].revision,batch[batch.length-1].traceId);
     }else if(input.revision===revision.current){
-     if(input.command==="review")showReview(input.traceId);
+     if(input.command==="review")await showReview(input.traceId);
      else if(input.command==="save"){
       // Stale microphone audio presents the draft but never commits it.
       // Manual input and button taps use the same review/approval gate.
-      if(input.staleVoice){say(ja?"確認前に発話された保存指示は実行しません。最新の内容を確認してから、もう一度保存を指示してください。":"Ignored an earlier save request. Review the current draft and request saving again.");}else await register();
+      if(input.staleVoice||(!input.manual&&input.captureEpoch!==approvalEpoch.current)){if(phaseRef.current!=="review")await showReview(input.traceId);say(ja?"確認前に発話された保存指示は実行しません。最新の内容を確認してから、もう一度保存を指示してください。":"Ignored an earlier save request. Review the current draft and request saving again.");}else await register(input.approval);
      }else if(input.command==="hold"){
       reviewed.current=null;setStage("dictating");say("保存せず、下書きを保持します。");
      }
-    }
+    }else{say(ja?"別の下書きへの指示は実行しません。最新の内容を確認してください。":"Ignored a request for another draft. Review the latest content.");}
    }
   }finally{draining.current=false;if(alive.current)setBusy(false);}
  }
  function enqueue(text:string,meta?:VoiceCaptureMeta){
-  if(!text.trim()||phaseRef.current==="saving")return;
+  if(!text.trim())return;
+  if(phaseRef.current==="saving"){say(ja?"保存処理中です。同じ指示を重ねず完了をお待ちください。":"Saving. Please wait without repeating the request.");return;}
   const command=voiceCommand(text);
+  if(command==="save"&&meta?.utteranceId){if(seenSaves.current.has(meta.utteranceId)){say(ja?"同じ保存指示は受付済みです。":"This save request was already received.");return;}seenSaves.current.add(meta.utteranceId);}
   if(command==="cancel"){clearTrace.current=meta?.traceId??"";clear();return;}
   setTurns(previous=>[...previous,text].slice(-30));
   if(command==="data"){
@@ -606,11 +620,10 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    // condition changed. Never abort here (avoids cancelling unchanged rows).
    revision.current++;reviewed.current=null;reviewMode.current=null;draftRef.current=null;requestId.current=null;registrationPayload.current=null;setStage("dictating");
   }
-  const afterReview=!meta||meta.reviewEpoch===approvalEpoch.current;
-  // A microphone turn captured before the current review predates the presented draft.
-  const staleVoice=Boolean(meta)&&meta?.source!=="manual"&&
-   (draftRef.current===null||(meta?.reviewEpoch??approvalEpoch.current)!==approvalEpoch.current);
-  inbox.current.push({text,command,revision:revision.current,approval:afterReview&&phaseRef.current==="review"?reviewed.current:null,staleVoice,traceId:meta?.traceId??""});
+  const manual=!meta||meta.source==="manual";
+  const captureEpoch=manual?approvalEpoch.current:meta.reviewEpoch;
+  const staleVoice=!manual&&(draftRef.current===null||captureEpoch!==approvalEpoch.current);
+  inbox.current.push({text,command,revision:revision.current,approval:!staleVoice&&phaseRef.current==="review"&&reviewed.current?reviewToken.current:null,captureEpoch,manual,staleVoice,traceId:meta?.traceId??""});
   if(command==="data")void saveWorkingDraft({draft:parseBase.current,parsedTurnCount:parsedTurns.current,
    turns:[...dataTurns.current,...inbox.current.filter(item=>item.command==="data").map(item=>item.text)],
    image:dishPreviewRef.current,requestId:requestId.current,registrationPayload:registrationPayload.current}).catch(()=>say(ja?"発話を端末に保持できません。画面の入力内容を確認してください。":"Could not retain speech on this device. Check the transcript."));
@@ -758,6 +771,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   say(ja?"参考価格を下書きに採用しました。内容を確認してから保存してください。":"Reference price applied to the draft. Review before saving.");
  }
  const eligible=draftRef.current&&parsedTurns.current===dataTurns.current.length?saveModeFor(draftRef.current):null;
+ const blocked=busy?(ja?"受信済みの指示を処理中です。":"Processing received instructions."):reviewLoading?(ja?"レビューを照合中です。":"Checking review."):!eligible?(ja?"最新の下書きの解析完了と料理名・食材名を確認してください。":"Wait for parsing and check recipe and ingredient names."):phase==="review"&&masterReview?.ingredients.some(m=>m.action==="choose")?(ja?"食材マスターを選択し「選択して再照合」を押してください。":"Choose ingredient masters and apply the selections."):"";
  const statusRows:VoiceStatusRow[]=[];
  if(!sharedVoice){if(capture.recording)statusRows.push({key:"listen"});if(capture.busy||capture.queued>0)statusRows.push({key:"transcribe"});}
  if(parsing||parseFailed)statusRows.push({key:"parse",error:!parsing&&parseFailed});
@@ -771,7 +785,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   <h2>{ja?"音声でレシピを一括登録":"Full recipe by voice"}</h2>
   <details className="voice-help"><summary>{ja?"登録の使い方":"How to register"}</summary>
   <p>{ja?"料理名、食材、分量、仕入単価、売価を自然な言葉で伝えてください。料理の文脈を解釈し、変更案を下書きで確認できます。":"Describe the dish, ingredients, quantities, purchase prices and selling price naturally. Review the interpreted recipe as a draft."}</p>
-  <p>{ja?"下書きは自動保存されます。入力内容を見ながら編集し、「登録」「保存」で正式登録します。「破棄」で下書きを削除します。":"Ask to review the draft before saving. An explicit approval is required to save; discarding removes the draft."}</p>
+  <p>{ja?"下書きは自動保存されます。入力内容を見ながら編集し、「保存」で確認し、確認後にもう一度「保存」で正式登録します。「破棄」で下書きを削除します。":"Ask to review the draft before saving. An explicit approval is required to save; discarding removes the draft."}</p>
   <p>{ja?"仕入単価だけが不明でも、価格を推測・ゼロ埋めせず、価格未確定のレシピとして登録できます。":"If only purchase prices are missing, you can register with unconfirmed costs. Missing prices are never guessed or set to zero."}</p>
   <p>{ja?"音声はMetaへ送信して文字起こしします。録音は保存しません。発話の間を約1秒空けると解釈します。":"Audio is sent to Meta and not stored. Pause for about one second between turns."}</p>
   </details>
@@ -779,7 +793,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   <p aria-live="polite">{voice.recording?"聞き取り中… ":""}{voice.busy?"音声を文字にしています…":""}</p>
   {voice.error&&<p role="alert">{voice.error}</p>}
   {voice.supported===false&&<p>{ja?"音声入力を利用できません。補助入力を使用してください。":"Voice input is unavailable. Use manual input."}</p>}</>}
-  <details className="voice-detail-message"><summary>{ja?"処理メッセージ":"Processing details"}</summary><p aria-live="polite" role="status">{busy?(ja?"処理中 ⏳ ":"Working ⏳ "):""}{message}</p></details>
+  <details open className="voice-detail-message"><summary>{ja?"処理メッセージ":"Processing details"}</summary><p aria-live="polite" role="status">{busy?(ja?"処理中 ⏳ ":"Working ⏳ "):""}{message}</p></details>
   {!sharedVoice&&<form onSubmit={event=>{event.preventDefault();if(manual.trim()){enqueue(manual);setManual("");}}}>
    <input aria-label={ja?"音声認識できない場合の入力":"Manual input when voice recognition is unavailable"} value={manual} onChange={event=>setManual(event.target.value)} placeholder={ja?"音声認識できないときの補助入力":"Type when voice recognition is unavailable"} disabled={phase==="saving"}/>
    <button type="submit" disabled={!manual.trim()||phase==="saving"}>{ja?"反映":"Apply"}</button>
@@ -927,7 +941,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    </div>}
    {draft.missing.length>0&&<p role="alert">不足情報：{draft.missing.join("、")}</p>}
    {draft.notes.length>0&&<p role="alert">要確認：{draft.notes.join("、")}</p>}
-   <p>{ja?"下書きは自動保存されています。正式登録は「登録」または「保存」で行います。":"Draft is auto-saved. Say register or save to publish it as a recipe."}</p>
+   <p>{ja?"下書きは自動保存されています。「保存」でレビューし、確認後にもう一度「保存」で正式登録します。":"Draft is auto-saved. Say save to review it, then say save again to approve."}</p>
    {sharedVoice&&<><p role="status">{sharedVoice.captureMessage}</p><a href="#voice-controls">音声操作・再開へ戻る</a></>}
    {phase==="review"&&masterReview&&<div aria-label={ja?"正式登録の確認":"Registration review"}>
     {masterReview.already_saved&&<p>{ja?"この登録は保存済みです。承認後に同じ登録IDで保存結果を再取得します。":"This registration is already saved. Approval retrieves its result with the same request ID."}</p>}
@@ -941,7 +955,8 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     <ul>{masterReview.suppliers.map((m,i)=><li key={i}>{m.name}：{m.action==="reuse"?(ja?"既存仕入先を使用":"Use existing supplier"):(ja?"仕入先を新規登録":"Create supplier")}</li>)}</ul>
     <ul>{masterReview.units.map((u,i)=><li key={i}>{ja?"単位を新規登録：":"Create unit: "}{u.symbol}（{u.dimension}）</li>)}</ul>
    </div>}
-   <button type="button" disabled={busy||!eligible||phase==="saving"||(phase==="review"&&masterReview?.ingredients.some(m=>m.action==="choose"))} onClick={()=>void register()}>{phase==="review"?(ja?"承認して保存":"Approve and save"):(ja?"レシピを登録":"Register recipe")}</button>
+   {blocked&&<p role="status">{blocked}</p>}
+   <button type="button" disabled={busy||reviewLoading||!eligible||phase==="saving"||(phase==="review"&&masterReview?.ingredients.some(m=>m.action==="choose"))} onClick={()=>void register()}>{phase==="review"?(ja?"承認して保存":"Approve and save"):(ja?"レシピを登録":"Register recipe")}</button>
    <button type="button" disabled={phase==="saving"} onClick={clear}>{ja?"下書きを破棄":"Discard draft"}</button>
   </div>}
   <details className="voice-transcript"><summary>{ja?"認識した発話":"Recognized utterances"}（{turns.length}{ja?"件":" turns"}）</summary>{turns.length>0?<ol aria-label={ja?"認識した発話の一覧":"Recognized utterances"}>{[...turns].reverse().map((turn,index)=><li key={`${turns.length-index}`}>{turn}</li>)}</ol>:<p>{ja?"まだ発話はありません。":"No utterances yet."}</p>}</details>
