@@ -624,3 +624,40 @@ main.recipe-detail-page #voice-controls[hidden]{display:none!important}
 
 .recipe-voice-capture-status{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;margin:0 0 12px;border:1px solid rgba(83,160,255,.5);background:rgba(83,160,255,.12);border-radius:12px;font-weight:650;font-size:.9rem}
 .recipe-voice-capture-status button{padding:8px 12px;background:#17573f;border:1px solid #4eae81;white-space:nowrap}
+
+/* Supplier management: distinct creation panel and in-place card editing. */
+.settings-main-panel .supplier-manager{gap:20px}
+.supplier-create-section{border:1px solid #7bc4a3;border-radius:14px;overflow:hidden;background:rgba(30,61,49,.23);min-width:0}
+.supplier-create-toggle{display:flex;align-items:center;gap:12px;width:100%;min-height:58px;text-align:left;border:0;border-radius:0;background:#a1ebc7;color:#102720;font-size:1.12rem;font-weight:750;padding:12px 18px}
+.supplier-create-toggle>span:first-child{font-size:1.35em;line-height:1}
+.supplier-create-chevron{margin-left:auto}
+.settings-main-panel .supplier-manager form.supplier-create-form{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:14px;padding:20px;margin:0}
+.supplier-create-form>label{min-width:0}
+.supplier-create-form>label:first-child{grid-column:1}
+.supplier-create-form>label:first-child span{color:#f8b4ab}
+.supplier-create-form>label:nth-of-type(2){grid-column:1/-1}
+.supplier-create-form textarea,.supplier-inline-edit textarea{display:block;resize:vertical;width:100%;min-height:80px;background:#fff;color:#1e2522;border:1px solid #b9c8bd;padding:10px;border-radius:9px;font:inherit}
+.settings-main-panel .supplier-manager form.supplier-create-form>.supplier-create-actions{grid-column:1/-1;justify-content:flex-end}
+.supplier-create-actions button:last-child,.supplier-inline-edit .toolbar button:last-child{background:#a1ebc7;color:#102720;border-color:#a1ebc7;font-weight:700}
+.supplier-list-head{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-top:8px;padding-top:18px;border-top:1px solid rgba(163,186,174,.26)}
+.supplier-list-head h3{margin:0;font-size:1.12rem}
+.settings-main-panel .supplier-manager .supplier-list-head input{width:min(100%,270px)}
+.settings-main-panel .supplier-manager-list{gap:12px}
+.settings-main-panel .supplier-manager-list li{padding:15px;border-radius:13px;min-width:0}
+.supplier-list-info{min-width:0;flex:1}
+.supplier-list-info strong{font-size:1.05rem}
+.settings-main-panel .supplier-manager-list li.supplier-inline-active{display:block;border-color:#7bc4a3;background:rgba(78,136,107,.14)}
+.settings-main-panel .supplier-manager form.supplier-inline-edit{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0;width:100%}
+.supplier-inline-title{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.supplier-inline-title button{min-width:38px}
+.settings-main-panel .supplier-manager form.supplier-inline-edit>.toolbar{grid-column:1/-1;justify-content:flex-end}
+.supplier-pagination{justify-content:flex-end}
+@media(max-width:650px){
+ .settings-main-panel .supplier-manager form.supplier-create-form{grid-template-columns:minmax(0,1fr);padding:14px}
+ .supplier-create-form>*{grid-column:1!important}
+ .settings-main-panel .supplier-manager form.supplier-inline-edit{grid-template-columns:minmax(0,1fr)}
+ .supplier-inline-edit>*{grid-column:1!important}
+ .settings-main-panel .supplier-manager-list li .toolbar{width:auto;justify-content:flex-start}
+ .supplier-list-head input{width:100%!important}
+ .supplier-create-actions{justify-content:flex-end!important}
+}
