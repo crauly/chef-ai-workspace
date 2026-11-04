@@ -193,6 +193,9 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   setRecoveredPending(false);
   epoch.current++;revision.current++;semanticAbort.current?.abort();priceAbort.current?.abort();photoAbort.current?.abort();priceEpoch.current++;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);setParsing(false);setParseFailed(false);setPriceFailed(false);setPhotoAnalyzing(false);setPhotoFailed(false);dishAbort.current?.abort();setDishGenerating(false);setDishFailed(false);dishPreviewRef.current=null;setDishImageUrl(null);voice.cancel();inbox.current=[];
   setCorrectionIndex(null);setPriceDetailIndex(null);setUnmatchedDetailIndex(null);dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);setPrefixPreview(false);requestId.current=null;
+  // Speech-only snapshots do not change the persistence effect's dependencies.
+  // Queue deletion after outstanding writes, even when draft/image were null.
+  void saveWorkingDraft(null).catch(()=>{if(alive.current)say(ja?"端末の下書きを削除できませんでした。もう一度「破棄」と指示してください。":"Could not delete the device draft. Request discarding again.");});
   setStage("dictating");logVoiceEvent("draft.discarded.explicit","explicit cancel",clearTrace.current);clearTrace.current="";onDiscarded?.();say("下書きを破棄しました。新しいレシピを話してください。");
  }
  const parsedTurns=useRef(0);

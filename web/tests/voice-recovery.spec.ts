@@ -1,4 +1,29 @@
 import {test,expect} from '@playwright/test';
+test('discarded unparsed speech is deleted from the device cache and stays absent after reload',async({page,request})=>{
+ await request.post('http://127.0.0.1:8100/test/reset');
+ let parses=0,saves=0;
+ await page.route('**/api/voice-recipe',route=>{parses++;return route.fulfill({status:503,json:{error:'temporary'}});});
+ await page.route('**/api/recipes/full',route=>{saves++;return route.abort();});
+ const cached=()=>page.evaluate(()=>new Promise<unknown>((resolve,reject)=>{
+  const open=indexedDB.open('chef-ai-working-draft',1);
+  open.onerror=()=>reject(open.error);
+  open.onsuccess=()=>{const db=open.result,r=db.transaction('draft','readonly').objectStore('draft').get('current');
+   r.onsuccess=()=>{resolve(r.result??null);db.close();};r.onerror=()=>{reject(r.error);db.close();};};
+ }));
+ await page.goto('/');
+ const input=page.getByLabel('音声認識できない場合の入力');
+ await input.fill('パスタ100g');await page.getByRole('button',{name:'反映',exact:true}).click();
+ await expect(page.getByRole('button',{name:'解析を再試行'})).toBeVisible();
+ await expect.poll(cached).toMatchObject({draft:null,turns:['パスタ100g'],parsedTurnCount:0});
+ await input.fill('破棄');await page.getByRole('button',{name:'反映',exact:true}).click();
+ await expect(page.getByRole('button',{name:'解析を再試行'})).toHaveCount(0);
+ await expect.poll(cached).toBeNull();
+ await page.reload();await page.getByRole('group',{name:'操作モード'}).getByRole('button',{name:'登録',exact:true}).click();
+ await expect(page.getByRole('button',{name:'解析を再試行'})).toHaveCount(0);
+ await page.getByText('認識した発話', {exact:false}).click();
+ await expect(page.getByLabel('認識した発話の一覧')).toHaveCount(0);
+ expect(parses).toBe(1);expect(saves).toBe(0);
+});
 test('failed speech survives reload, unit recovery is required before explicit save',async({page,request})=>{
  await request.post('http://127.0.0.1:8100/test/reset');
  let fail=true,units=false,saves=0;const bodies:unknown[]=[];
