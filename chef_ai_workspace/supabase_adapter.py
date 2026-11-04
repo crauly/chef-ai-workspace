@@ -436,7 +436,7 @@ class SupabasePersistence:
                     per_unit_id=offer.get("package_unit_id"))
             except (ValueError, TypeError):
                 continue
-            by_offer[(offer["ingredient_id"], offer["id"])] = quote
+            by_offer[(offer["ingredient_id"], f"offer:{offer['id']}")] = quote
             key = (offer["ingredient_id"], offer.get("supplier_id"))
             if key in by_supplier:
                 ambiguous.add(key)
@@ -444,8 +444,8 @@ class SupabasePersistence:
                 by_supplier[key] = quote
         for key in ambiguous:
             by_supplier.pop(key, None)
-        # Offer IDs and supplier IDs occupy disjoint UUID namespaces by contract;
-        # when explicitly selected, use only a validated matching offer quote.
+        # Prefix offer keys so UUID equality across different entity types
+        # cannot accidentally select a supplier-level quote.
         return {**by_supplier, **by_offer}
 
     def create_owned_offer(self, owner_id, ingredient_id, supplier_id=None,
