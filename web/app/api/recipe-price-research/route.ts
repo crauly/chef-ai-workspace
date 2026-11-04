@@ -4,7 +4,7 @@ import {enrichEntries} from "../../../price-enrichment";
 
 export const runtime="nodejs";
 const fail=(status:number,message:string)=>NextResponse.json({error:message},{status,headers:{"Cache-Control":"no-store"}});
-type Row={id:string;name:string};
+type Row={id:string;name:string;supplier_id:string|null;offer_id:string|null};
 const selectionSchema={type:"object",properties:{indices:{type:"array",items:{type:"integer"}}},required:["indices"],additionalProperties:false};
 
 // Research is a read-only candidate builder. Only AIEditor -> /recipes/[id]/confirm
@@ -27,7 +27,7 @@ export async function POST(req:NextRequest){
    const r=row as Record<string,unknown>;
    if(typeof r.id!=="string"||!r.id||r.id.length>100||
       typeof r.name!=="string"||!r.name.trim()||r.name.length>200)return fail(400,"Invalid material");
-   materials.push({id:r.id,name:r.name.trim()});
+   materials.push({id:r.id,name:r.name.trim(),supplier_id:typeof r.supplier_id==="string"?r.supplier_id:null,offer_id:typeof r.offer_id==="string"?r.offer_id:null});
   }
   const system=`You identify EXACTLY which material rows a chef wants to research for provisional market purchase prices. The instruction can be Japanese or English. Select all rows for "全部", "すべて", "全材料", "all", and equivalents. Support named subsets, multiple names, ranges such as "AからBまで" (inclusive, by the order supplied), and contextual pronouns. Do not assume only one row is meant. Use only valid zero-based indices from the provided materials list. If the scope cannot be determined confidently, return an empty indices array. This is selection ONLY, never a price estimate or authorization.`;
   const response=await fetch("https://api.meta.ai/v1/chat/completions",{
@@ -61,9 +61,9 @@ export async function POST(req:NextRequest){
     const row=materials[batch[j].material_index];
     const usable=ref.status==="available"&&ref.currency==="JPY"&&
      typeof ref.average_unit_price==="string"&&/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/.test(ref.average_unit_price)&&Number(ref.average_unit_price)>0&&
-     (ref.unit_basis==="g"||ref.unit_basis==="ml");
+     typeof ref.unit_basis==="string"&&/^[\\p{L}\\p{N}µμ%°]{1,24}$/u.test(ref.unit_basis)&&\n     !row.supplier_id&&!row.offer_id;
     results.push({index:batch[j].material_index,name:row.name,
-     status:usable?"candidate":ref.status==="available"?"unsupported_unit":ref.status,description:ref.text});
+     status:usable?"candidate":row.supplier_id||row.offer_id?"linked_supplier":ref.status==="available"?"unsupported_unit":ref.status,\n     description:row.supplier_id||row.offer_id?`${row.name}：仕入先または購入条件が紐づいているため、単価の上書き候補は生成しません。仕入条件を確認してください。`:ref.text});
     if(usable)operations.push({op:"set_material_price",material_id:row.id,
      price_jpy:ref.average_unit_price!,price_quantity:"1",price_unit:ref.unit_basis!});
    });
