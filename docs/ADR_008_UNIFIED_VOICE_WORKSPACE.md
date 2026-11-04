@@ -74,9 +74,11 @@ Two reproducible paths were corrected:
 - In an active create/edit task, an explicit human review/save/hold/cancel is
   routed to that task before navigation matching. In particular,
   “レシピを登録してください” previously matched create navigation and could
-  never reach the reviewed draft's save. “登録” and “登録してください” remain
-  valid save requests. Confirmation of the unchanged current draft is required;
-  a request before review opens review, never silently approves future content.
+  never reach the review. Registration now treats any transcript containing
+  “保存” as a save request (literal substring, including negations); “登録” alone
+  opens review and never authorizes saving. Only a fresh request tied to the
+  displayed review can approve it; a request before review cannot approve
+  future content. Edit consent keeps its separate command rules.
 - Previously the fourth short speech batch aborted all outstanding ASR work.
   When two requests are pending, capture now coalesces short fragments until
   capacity returns or the 29-second WAV bound is reached. A third accepted full
