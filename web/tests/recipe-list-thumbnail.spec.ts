@@ -8,6 +8,11 @@ test.beforeEach(async ({request}) => {
 
 test("generated image appears in recipe list on the same origin, survives reload, and other recipes retain placeholder", async ({page}) => {
  await page.route("**/api/dish-image",route=>route.fulfill({json:{image:IMG,mode:"generate"}}));
+ let stored=false;
+ await page.route("**/api/recipe-images/*",async route=>{
+  if(route.request().method()==="POST"){stored=true;return route.fulfill({json:{saved:true}});}
+  return stored?route.fulfill({json:{image:IMG}}):route.fulfill({status:404,json:{error:"Not found"}});
+ });
  await page.goto("/");
  const named="片栗粉のレシピ";
  const recipe=page.getByRole("button",{name:`${named}の詳細を開く`});
@@ -17,7 +22,7 @@ test("generated image appears in recipe list on the same origin, survives reload
  await recipe.click();
  const detail=page.getByRole("region",{name:"料理イメージ"});
  await detail.getByRole("button",{name:"✦ 料理画像を生成"}).click();
- await expect(detail.getByText("このブラウザに自動保存済み")).toBeVisible();
+ await expect(detail.getByText("クラウドに保存済み · 他端末でも表示できます")).toBeVisible();
  await page.getByRole("button",{name:"← ホーム"}).click();
  await expect(page.getByRole("button",{name:`${named}の詳細を開く`}).locator(".recipe-list-thumbnail img")).toHaveAttribute("src",IMG);
  await expect(page.getByRole("button",{name:"ミートソースパスタの詳細を開く"}).locator(".recipe-list-thumbnail img")).toHaveCount(0);
