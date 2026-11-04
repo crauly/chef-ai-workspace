@@ -30,6 +30,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
  const [quantity,setQuantity]=useState("");
  const [unit,setUnit]=useState("");
  const [priceSupplier,setPriceSupplier]=useState("");
+ const [approvedPrices,setApprovedPrices]=useState<Array<{offer_id:string;supplier_id:string|null;supplier_name:string|null;amount_jpy:string;quantity:string|null;unit:string|null}>>([]);
  useEffect(()=>{
   if(!editing)return;
   const onKey=(event:KeyboardEvent)=>{if(event.key==="Escape"&&!busy)setEditing(null);};
@@ -53,7 +54,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
   setPrice(item.current_price?.amount_jpy?.value??"");
   setQuantity(item.current_price?.per_quantity??"");
   setUnit(item.current_price?.per_unit??"");
-  setError("");setLinkSupplier("");setSupplierLoading(true);
+  setError("");setLinkSupplier("");setSupplierLoading(true);setApprovedPrices([]);
   try{
    const collected:{id:string;name:string}[]=[];
    for(let page=1;page<=100;page++){
@@ -65,6 +66,11 @@ export default function IngredientManager({locale}:{locale:Locale}){
     if(data.items.length<100)break;
    }
    setAvailableSuppliers(collected);
+   const pricesResponse=await fetch(`/api/ingredients/${item.id}/offer-prices`,{cache:"no-store"});
+   if(!pricesResponse.ok)throw new Error("approved prices");
+   const pricing=await pricesResponse.json() as {items?:typeof approvedPrices};
+   if(!Array.isArray(pricing.items))throw new Error("approved prices shape");
+   setApprovedPrices(pricing.items);
   }catch{setError(ja?"仕入れ先一覧を取得できません。":"Could not load suppliers.");}
   finally{setSupplierLoading(false);}
  }
@@ -179,6 +185,11 @@ export default function IngredientManager({locale}:{locale:Locale}){
     {availableSuppliers.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}
    </select></label>
    <button type="button" className="secondary" disabled={busy||!linkSupplier||supplierLoading} onClick={()=>void linkSupplierTo(item)}>{ja?"紐付ける":"Link supplier"}</button>
+  </div>
+  <div className="ingredient-supplier-prices"><strong>{ja?"採用価格の比較":"Approved price comparison"}</strong>
+   {approvedPrices.length===0?<p className="ingredient-muted">{ja?"採用価格はありません。":"No approved prices."}</p>:
+   <ul>{approvedPrices.map(quote=><li key={quote.offer_id}>{quote.supplier_name??(ja?"相場参考価格（仕入れ先なし）":"Market reference (no supplier)")}：¥{formatAmount(quote.amount_jpy)} / {quote.quantity} {quote.unit}</li>)}</ul>}
+   <p className="ingredient-muted">{ja?"購入数量・単位が異なる価格は、そのまま高安比較しません。":"Different package quantities or units are not directly comparable."}</p>
   </div>
   <p className="ingredient-muted">{ja?"「保存」は食材名・規格のみを更新します。価格は「価格を登録・採用」で履歴に記録して反映します。規格による自動単位換算はしません。":"Save updates identity only. Adopt price explicitly to record an observation. Specifications do not convert units."}</p>
   <div className="ingredient-actions"><button type="button" disabled={busy||supplierLoading} onClick={()=>void approvePrice(item.id)}>{ja?"価格を登録・採用":"Record and adopt price"}</button></div>
