@@ -116,7 +116,9 @@ begin
      exception when invalid_text_representation then
        raise exception 'Invalid recipe offer ID';
      end;
-     if nullif(v_line->>'ingredient_id','') is null
+     if v_line->>'price_mode' is distinct from 'inherit'
+        or v_line->'price_override' <> 'null'::jsonb
+        or nullif(v_line->>'ingredient_id','') is null
         or nullif(v_line->>'supplier_id','') is null
         or not exists(
          select 1 from public.offers o
@@ -149,3 +151,8 @@ drop trigger if exists protect_recipe_offer_reference on public.offers;
 create trigger protect_recipe_offer_reference
  before delete on public.offers
  for each row execute function public.protect_recipe_offer_reference();
+
+-- Trigger functions are internal database code, not public RPC endpoints.
+revoke all on function public.guard_owned_offer_adoption() from public,anon,authenticated;
+revoke all on function public.enforce_recipe_offer_owner() from public,anon,authenticated;
+revoke all on function public.protect_recipe_offer_reference() from public,anon,authenticated;
