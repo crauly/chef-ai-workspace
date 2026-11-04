@@ -36,6 +36,40 @@ class DemoLibraryTests(unittest.TestCase):
         del app.state.demo_access_token
         del app.state.repository_factory
         self.client.close()
+    def test_edit_model_receives_only_owned_supplier_ids_and_can_propose_unpriced_material(self):
+        import io,json
+        from unittest.mock import patch
+        from chef_ai_workspace.meta_responses import MetaResponsesProvider
+        from chef_ai_workspace.mutations import prepare_mutation
+        from chef_ai_workspace.mutations import Proposal
+        rid,mid,sid=str(uuid4()),str(uuid4()),str(uuid4())
+        calls=[]
+        def suppliers(owner,*,limit,offset):
+            calls.append((owner,offset))
+            return [{"id":sid,"name":"東京市場","private_note":"do not send"}]
+        self.repo.list_owned_suppliers=suppliers
+        operations=[{"op":"add_unpriced_material","material_id":mid,"name":"卵"},
+                    {"op":"set_material_supplier","material_id":mid,"supplier_id":sid}]
+        raw={"status":"completed","output":[{"type":"message","role":"assistant","status":"completed",
+             "content":[{"type":"output_text","text":json.dumps({"operations":operations})}]}]}
+        previous=getattr(app.state,"ai_provider",None)
+        app.state.ai_provider=MetaResponsesProvider("test-key")
+        try:
+            with patch("urllib.request.OpenerDirector.open",return_value=io.BytesIO(json.dumps(raw).encode())) as call:
+                result=self.client.post(f"/demo/recipes/{rid}/propose",json={"instruction":"東京市場の卵を追加。数量と価格は未定"},headers={"X-Demo-Access":"a-secret-known-only-to-presenter"})
+            self.assertEqual(result.status_code,200,result.text)
+            sent=json.loads(json.loads(call.call_args.args[0].data)["input"])["recipe"]
+            self.assertEqual(sent["supplier_candidates"],[{"id":sid,"name":"東京市場"}])
+            self.assertEqual(calls,[(self.owner,0)])
+            self.assertEqual(result.json()["supplier_names"],{sid:"東京市場"})
+            proposed=prepare_mutation(self.repo.load_owned_recipe(self.owner,rid),Proposal(rid,0,str(uuid4()),tuple(result.json()["operations"])),user_confirmed=False)
+            self.assertIsNone(proposed.materials[0].quantity.value)
+            self.assertIsNone(proposed.materials[0].price_override)
+            self.assertEqual(proposed.materials[0].supplier_id,sid)
+        finally:
+            if previous is None:del app.state.ai_provider
+            else:app.state.ai_provider=previous
+
     def test_recipe_deletion_requires_demo_auth_and_scopes_to_owner(self):
         rid=str(uuid4())
         denied=self.client.delete(f"/demo/recipes/{rid}")

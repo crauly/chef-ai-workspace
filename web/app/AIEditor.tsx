@@ -9,10 +9,11 @@ import ResearchEvidence from "./ResearchEvidence";
 import {isPriceResearchRequest,combineResearch,type RecipeResearch,type ResearchResult} from "../recipe-price-research";
 import {request, type AIProposal, type Operation, type Recipe} from "./types";
 import {editVoiceCommand} from "./voice-commands";
+import {ingredientSaveMessage,safeIngredientSaveCode} from "../ingredient-save-contract";
 import type {VoiceCaptureMeta} from "./useVoiceCapture";
 
 type Review = {proposal: AIProposal; instruction: string; requestId: string;modal:boolean;masters?:{ingredients:MasterMatch[];requires_selection:boolean};ledger?:EditRequest["ledger"]};
-export function describe(recipe: Recipe, operations: Operation[], locale: Locale) {
+export function describe(recipe: Recipe, operations: Operation[], locale: Locale,supplierNames:Record<string,string>={}) {
   const ja = locale === "ja";
   const lines = new Map(recipe.materials.map(line => [line.id, {...line}]));
   let title = recipe.title.value, selling = recipe.selling_price_jpy.value;
@@ -47,9 +48,13 @@ export function describe(recipe: Recipe, operations: Operation[], locale: Locale
       case "link_ingredient":
         if(!line)return null;
         changes.push(`${line.material_name.value} · ${ja?"食材マスターを選択":"Select ingredient master"}`);break;
-      case "set_material_supplier":
+      case "set_material_supplier": {
         if(!line)return null;
-        changes.push(`${line.material_name.value} · ${ja?"仕入条件を変更":"Change supplier terms"}`);break;
+        const name=op.supplier_id?(supplierNames[op.supplier_id]||(op.supplier_id===line.supplier_id?line.supplier_name:null)):(ja?"相場参考価格":"Market reference");
+        if(!name)return null;
+        changes.push(`${line.material_name.value} · ${ja?"仕入先":"Supplier"}: ${line.supplier_name??"—"} → ${name}`);
+        lines.set(line.id,{...line,supplier_id:op.supplier_id||null,supplier_name:name,offer_id:op.offer_id||null});break;
+      }
       case "add_unpriced_material":
         if(lines.has(op.material_id))return null;
         addedIds.add(op.material_id);changes.push(`${ja?"食材を追加":"Add ingredient"}: ${op.name} ${op.quantity??"—"} ${op.unit??""} (${ja?"価格未確定":"unpriced"})`);
@@ -90,7 +95,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
   function invalidate(){setReviewOpen(false);reviewEpoch.current=-1;generation.current++;reviewRef.current=null;setReview(null);setApproved(false);setResearchResults([]);}
   useEffect(()=>{invalidate();voiceHistory.current=[];},[recipe.id,recipe.revision]);
   useImperativeHandle(control,()=>({submit:voiceSubmit,hasPending:()=>Boolean(reviewRef.current||voiceHistory.current.length||instruction.trim()),invalidate,isBusy:()=>lock.current}));
-  const preview = review ? describe(recipe, review.proposal.operations, locale) : null;
+  const preview = review ? describe(recipe, review.proposal.operations, locale,review.proposal.supplier_names) : null;
   const changes=preview?.changes;
   const valid = review && review.proposal.recipe_id === recipe.id && review.proposal.base_revision === recipe.revision && preview !== null;
   async function refreshAfterConflict() {
@@ -104,7 +109,11 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
     const status = e instanceof Error ? e.message : "";
     if(status==="Too many operations; split the edits"){setError(locale==="ja"?"1回の承認は40操作までです。調査対象と他の変更を分けてください。":"Approval supports 40 operations. Split the research and other edits.");return;}
     if(status==="unsupported combined edit"){setError(locale==="ja"?"食材の追加などは価格調査と分けて指示してください。保存していません。":"Request ingredient additions separately from price research. Nothing was saved.");return;}
-    setError(t(status === "409" ? "staleProposal" : !uncertainSave && (status === "502" || status === "503") ? "aiUnavailable" : "failure"));
+    const code=safeIngredientSaveCode((e as {code?:unknown})?.code);
+    if(code){setError(ingredientSaveMessage(code,locale==="ja"));return;}
+    if(status==="422"){setError(locale==="ja"?"変更内容の数量・単位・価格を確認してください。入力は保持しています。":"Check quantities, units and prices. Inputs are retained.");return;}
+    if(uncertainSave&&status!=="409"&&status!=="404"){setError(locale==="ja"?"保存結果を確認できません。同じ保存IDで再試行できます。入力は保持しています。":"Save result is unconfirmed. Retry uses the same save ID; inputs are retained.");return;}
+    setError(t(status === "409" ? "staleProposal" : status === "502" || status === "503" ? "aiUnavailable" : "failure"));
   }
   async function propose(e: React.FormEvent) {
     e.preventDefault();voiceHistory.current=[];await proposeText(instruction);
@@ -149,8 +158,9 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
       if(!alive.current||token!==generation.current||latestRecipe.current.id!==base.id||latestRecipe.current.revision!==base.revision)return;
       if (proposal.requires_confirmation !== true || !Array.isArray(proposal.operations) || proposal.operations.length > 40) throw new Error("invalid");
       if (proposal.recipe_id !== base.id) throw new Error("invalid");
+      if(!proposal.operations.length){setNotice(locale==="ja"?"変更できる項目を特定できませんでした。対象の食材と変更内容を教えてください。入力は保持しています。":"No changes could be identified. Specify the ingredient and desired change; your input is retained.");return;}
       if (proposal.base_revision !== base.revision) {await refreshAfterConflict(); return;}
-      if (describe(base, proposal.operations, locale) === null) throw new Error("invalid");
+      if (describe(base, proposal.operations, locale,proposal.supplier_names) === null) throw new Error("invalid");
       const requestId=crypto.randomUUID();
       const masters=await request<NonNullable<Review['masters']>>(`/api/recipes/${base.id}/confirm/review`,{method:'POST',body:JSON.stringify({base_revision:proposal.base_revision,request_id:requestId,operations:proposal.operations,save_version:true})});
       if(!alive.current||token!==generation.current||latestRecipe.current.revision!==base.revision)return;
@@ -159,7 +169,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
       setNotice(researchNotice+" "+(locale==="ja"?"変更案を表示しました。差分を確認後、もう一度「保存してください」と明示するか、確認チェックと保存ボタンを操作してください。":"Review the proposal, then explicitly request saving or use the approval controls."));
     } catch (e) {
       report(e);
-      if(e instanceof Error&&e.message==="409"&&alive.current&&token===generation.current&&latestRecipe.current.id===base.id){
+      if(e instanceof Error&&e.message==="409"&&!safeIngredientSaveCode((e as {code?:unknown}).code)&&alive.current&&token===generation.current&&latestRecipe.current.id===base.id){
         try{await refreshAfterConflict();}catch{setError(t("failure"));}
       }
     } finally {setProcessing(null);working(false);}
@@ -177,15 +187,18 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
   }
   async function confirm(voiceApproval?:Review) {
     const current=voiceApproval??review;
-    if (lock.current || !current || current.masters?.requires_selection || current!==reviewRef.current || (!voiceApproval&&!approved) ||
-      current.proposal.recipe_id!==recipe.id||current.proposal.base_revision!==recipe.revision||!describe(recipe,current.proposal.operations,locale)?.changes.length) return;
+    if(lock.current){setNotice(locale==="ja"?"処理中です。完了後に保存してください。":"Processing. Save after it completes.");return;}
+    if(!current||current!==reviewRef.current||current.proposal.recipe_id!==recipe.id||current.proposal.base_revision!==recipe.revision){setError(locale==="ja"?"現在のレシピに有効な変更案がありません。変更内容を再度指示してください。":"No current proposal matches this recipe. Request the changes again.");return;}
+    if(current.masters?.requires_selection){setNotice(locale==="ja"?"食材マスターの候補を選択して再照合してください。":"Choose the ingredient masters and apply the selections.");return;}
+    if(!voiceApproval&&!approved){setNotice(locale==="ja"?"変更内容の確認チェックを入れて保存してください。":"Check approval before saving.");return;}
+    if(!describe(recipe,current.proposal.operations,locale,current.proposal.supplier_names)?.changes.length){setNotice(locale==="ja"?"保存する変更点がありません。":"There are no changes to save.");return;}
     working(true); setError("");setProcessing("save");
     try {
       const result = await request<{recipe: Recipe}>(`/api/recipes/${recipe.id}/confirm`, {method: "POST", body: JSON.stringify({base_revision: current.proposal.base_revision, request_id: current.requestId, operations: current.proposal.operations, save_version: true,ledger:current.ledger??[]})});
       latestRecipe.current=result.recipe;invalidate();voiceHistory.current=[];setInstruction("");setNotice(t("savedRecalculated")); onSaved(result.recipe);
     } catch (e) {
       report(e, true);
-      if (e instanceof Error && e.message === "409") {
+      if (e instanceof Error && e.message === "409" && !safeIngredientSaveCode((e as {code?:unknown}).code)) {
         try {await refreshAfterConflict();} catch {setError(t("failure"));}
       }
       // Keep the same request ID on uncertain network outcomes: retry cannot apply twice.
@@ -200,8 +213,8 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
     if(command==="review"||command==="save"){
       const current=reviewRef.current;
       if(!current){setNotice(locale==="ja"?"保存できる変更案がありません。変更内容を話してください。":"No proposal to save. Describe the desired changes.");return;}
-      if((reviewOpen||!current.modal)&&command==="save"&&(!meta||meta.reviewEpoch===reviewEpoch.current))await confirm(current);
-      else {setReviewOpen(true);reviewEpoch.current=markReview?.()??-1;setNotice(locale==="ja"?"差分を確認してください。その後、もう一度「保存してください」と明示してください。":"Review the changes, then explicitly request saving again.");}
+      if(command==="save"&&reviewEpoch.current>=0&&(!meta||meta.reviewEpoch===reviewEpoch.current))await confirm(current);
+      else {setReviewOpen(true);setNotice(locale==="ja"?(command==="save"?"変更案の表示前に収録された保存指示は承認に使えません。現在の差分を確認し、新しく「保存」と指示してください。":"差分を確認し、「保存」と指示してください。"):(command==="save"?"This save predates the displayed proposal. Review the changes and say save again.":"Review the changes, then say save."));}
       return;
     }
     const next=[...voiceHistory.current,text];

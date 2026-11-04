@@ -98,3 +98,16 @@ IndexedDBで保存IDを保持できなければ正式POSTを行わず、busyを�
 回帰確認は `voice-save-gate.spec.ts` の一回の音声／ボタン保存、未確定情報の再表示、
 端末保存失敗と通信結果不明後の同一payload再送、解析中の保存、旧下書き音声拒否、価格調査非待機を対象とする。
 外部AI・本番DBは使用しない。
+
+## 参照・編集の接続と契約
+
+- capture → WorkspaceのFIFO → navigation/intent → owner付き検索・詳細取得 → selected/editor refのcommit後に編集へ進む。
+- 同じcontroller内でURLと表示を更新し、参照・保存によるcaptureのunmountを避ける。直接ロード・再読込は同じ詳細APIを使う。
+- 編集はpropose → 非空operationsの検証 → confirm/review → 差分表示epoch → 新しい明示保存 → confirm。
+- 空operationsは表示案内で終了し、1件以上を要求するconfirm/reviewへ送らない。保存を妨げるguardには理由を表示する。
+- supplier_candidatesは既存owner付き一覧からname/idだけを渡す。supplier_namesで承認対象の仕入先を表示し、既存の価格採用・保存経路へ渡す。
+- 意図判定などの失敗は1件単位で扱い、FIFOの残りを止めない。受信・表示・承認・正式保存は別イベントであり、JSON生成だけを成功としない。
+
+`unified-voice.spec.ts` は同一document・1回のstream取得・track停止0回のまま、保存済みの実IDを参照し、
+編集保存・再取得・別レシピ参照・戻るまで確認する。fixtureの提案も対象recipe/material IDを使用し、
+固定された別レシピを返して成功させない。実機音声・外部モデル・本番DBへの保存はこのfixtureでは検証しない。

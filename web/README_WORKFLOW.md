@@ -143,8 +143,8 @@ microphone need not be restarted when switching modes.
 
 - **Create / 登録**: select 登録 or say “レシピを登録します”; verify the
   displayed mode is 登録, then dictate the dish name, ingredients, quantities
-  and prices. Read the unsaved draft, request review and explicitly approve
-  the unchanged draft before saving. The auxiliary typed field passes text
+  and prices. Say “保存” once to save the current recipe, keeping unknown
+  optional facts unresolved; read-only review is optional. The auxiliary typed field passes text
   through the same Muse draft parser; it is not a structured manual form.
 - **Browse / 参照**: select 参照 or ask for a recipe by name; verify the
   browse state and choose a unique recipe result. Browse does not change the
@@ -241,3 +241,17 @@ production limitations: [ADR-016](../docs/ADR_016_SCHEDULED_PRICE_RESEARCH.md).
 「食材を追加」は価格未確定でも利用できる。価格を入力するときは購入数量・単位も指定する。単位マスターを取得できない場合は理由が表示される。設定の「食材マスター」で新規登録した食材も検索できる。見つからないときは「絞り込みを解除」で仕入先フィルターと検索を戻して確認する。
 
 現行スキーマを必須とし、先行移行と [ADR-018](../docs/ADR_018_RECIPE_MASTER_PROCUREMENT.md) の移行が必要。本番適用と公開環境での動作確認は別途行う。
+
+## 継続音声での参照・編集（2026-11-05）
+
+ホームでマイクを一度開始し、登録→「保存」→「〇〇のレシピを開いて」→変更指示→
+差分確認→「承認して保存」を続けられる。レシピ間の移動ではURLを更新し、マイクを再起動しない。
+詳細から別レシピを呼び出す場合も検索対象を保持する。詳細URLの直接表示・再読込・戻るも利用できる。
+未承認の編集案は切り替え前に保存または明示破棄する。提示前に収録された承認音声は保存しない。
+
+価格未定の食材追加はunpriced操作として提案する。仕入先の変更は自身の登録済み仕入先から照合し、
+確認画面に名称と購入価格を表示する。未登録仕入先は推測で作らず、既存の仕入先管理から登録する。
+変更案が空なら対象・変更内容を確認する案内を表示し、空の確認要求は送らない。
+意図判定の1件が失敗しても、受け付け済みの次の発話は継続処理する。
+
+ブラウザfixtureでの通し確認と、実ASR・実モデル・本番DBでの検証は区別する。
