@@ -80,7 +80,7 @@ test("incremental parsing stays active past thirty turns without losing context"
   await reflect.click();
  }
  await page.locator(".voice-transcript summary").click();
- await expect(page.getByText("具材33を10グラム", {exact: true})).toBeVisible();
+ await expect(page.getByRole("list",{name:"認識した発話の一覧"}).getByText("具材33を10グラム", {exact: true})).toBeVisible();
  // Past turn 30 the newest turn must still arrive with the accumulated draft
  // as context (absolute cursor), never a history-only resend without it.
  await expect.poll(() => {

@@ -228,8 +228,6 @@ a,.link{color:#b3d5ff}
 .name-choice-options small{display:block;margin-top:5px;opacity:.75}
 
 /* Voice pipeline status list: one row per live stage, spinner only while running. */
-.voice-status-list{list-style:none;margin:12px 0;padding:0;display:grid;gap:6px}
-.voice-status-list li{display:flex;align-items:center;gap:8px;color:#4bde8d;font-weight:600}
 .voice-spin{display:inline-block;width:.9em;height:.9em;flex:none;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:voice-spin .8s linear infinite}
 @keyframes voice-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.voice-spin{animation:none}}
@@ -391,18 +389,6 @@ main.recipe-detail-page>div[hidden]{display:none!important}
 .draft-image-modal-actions button{padding:10px 16px;border-radius:999px;border:1px solid #767a82}
 .draft-image-modal-actions button:last-child{background:#e5bd64;color:#221a0c;border-color:#e5bd64;font-weight:700}
 .draft-image-modal-actions button:disabled{opacity:.6}
-.voice-status-list{position:fixed;right:14px;bottom:calc(86px + env(safe-area-inset-bottom,0px));z-index:90;width:min(240px,calc(100vw - 34px));list-style:none;margin:0;padding:9px 11px;background:rgba(33,41,44,.86);border:1px solid rgba(182,201,195,.35);border-radius:19px;box-shadow:0 8px 28px rgba(0,0,0,.25);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);pointer-events:none;display:grid;gap:8px}
-.voice-status-list li{display:flex;align-items:center;gap:9px;color:#ecf3ef;min-width:0;padding:0}
-.voice-status-list .status-symbol{flex:0 0 27px;width:27px;height:27px;border-radius:50%;display:grid;place-items:center;background:rgba(35,136,212,.2);color:#63b8f7;font-size:1.15rem;font-weight:700}
-.voice-status-list .status-price .status-symbol{color:#65d69c;background:rgba(38,151,101,.2)}
-.voice-status-list .status-error .status-symbol{color:#ffb193;background:rgba(186,64,58,.2)}
-.voice-status-list .status-detail{display:grid;gap:5px;min-width:0;flex:1}
-.voice-status-list .status-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.76rem;font-weight:600;line-height:1.25}
-.voice-status-list .status-track{display:block;height:3px;border-radius:5px;background:rgba(226,239,238,.22);overflow:hidden;position:relative}
-.voice-status-list .status-track span{display:block;width:36%;height:100%;border-radius:5px;background:#58b6ef;animation:status-activity 1.6s ease-in-out infinite alternate}
-.voice-status-list .status-price .status-track span{background:#60ca98}
-@keyframes status-activity{from{transform:translateX(0)}to{transform:translateX(175%)}}
-@media(prefers-reduced-motion:reduce){.voice-status-list .status-track span{animation:none;width:100%;opacity:.55}}
 
 /* Saved recipe: discreet, keyboard/touch accessible incomplete-field disclosure. */
 .recipe-gap-disclosure{margin:10px 0 16px;border:1px solid rgba(195,166,103,.35);border-radius:11px;padding:9px 12px;background:rgba(169,129,63,.07)}

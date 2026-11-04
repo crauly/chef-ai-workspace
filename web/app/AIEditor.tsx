@@ -1,6 +1,7 @@
 "use client";
 import {useEffect,useImperativeHandle,useRef,useState,type Ref} from "react";
 import {label, type Locale} from "./i18n";
+import {useVoiceProcessingStatus,type VoiceStatusKey} from "./VoiceProcessingStatus";
 import VoiceInput from "./VoiceInput";
 import ResearchEvidence from "./ResearchEvidence";
 import {isPriceResearchRequest,combineResearch,type RecipeResearch,type ResearchResult} from "../recipe-price-research";
@@ -51,6 +52,8 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
   const [review, setReview] = useState<Review | null>(null);
   const [approved, setApproved] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [processing,setProcessing]=useState<VoiceStatusKey|null>(null);
+  useVoiceProcessingStatus(locale,processing?[{key:processing}]:[]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [researchResults,setResearchResults]=useState<ResearchResult[]>([]);
@@ -92,9 +95,11 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
       let researchNotice="";
       let proposal:AIProposal;
       if(researchRequested){
+        setProcessing("price");
         const result=await request<RecipeResearch>("/api/recipe-price-research",{
           method:"POST",body:JSON.stringify({instruction:text,recipe_id:base.id,base_revision:base.revision})});
         if(!alive.current||token!==generation.current||latestRecipe.current.id!==base.id||latestRecipe.current.revision!==base.revision)return;
+        setProcessing(null);
         setResearchResults(result.results);
         if((result.ambiguous||!result.indices.length)&&!result.edit_instruction){
           setNotice(locale==="ja"?"調査対象を特定できませんでした。食材名・範囲、または「すべて」を指定してください。":"Could not determine the target rows. Name ingredients, a range, or all.");
@@ -103,11 +108,16 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
         const skipped=result.results.filter(item=>item.status!=="candidate");
         researchNotice=(locale==="ja"?`調査対象${result.indices.length}品・仮単価候補${result.operations.length}品。`:`Researched ${result.indices.length} ingredients; ${result.operations.length} provisional candidates.`)+
           (skipped.length?(locale==="ja"?" 適用候補なし："+skipped.map(item=>item.name).join("、"):" No directly applicable quote: "+skipped.map(item=>item.name).join(", ")):"");
-        const edit=result.edit_instruction?.trim()?await request<AIProposal>(`/api/recipes/${base.id}/propose`,{
-          method:"POST",body:JSON.stringify({instruction:result.edit_instruction})}):undefined;
+        let edit:AIProposal|undefined;
+        if(result.edit_instruction?.trim()){
+          setProcessing("propose");
+          edit=await request<AIProposal>(`/api/recipes/${base.id}/propose`,{
+            method:"POST",body:JSON.stringify({instruction:result.edit_instruction})});
+        }
         proposal=combineResearch(base,result,edit);
         if(!proposal.operations.length){setNotice(researchNotice);return;}
       }else{
+        setProcessing("propose");
         proposal=await request<AIProposal>(`/api/recipes/${base.id}/propose`, {method: "POST", body: JSON.stringify({instruction:text})});
       }
       if(!alive.current||token!==generation.current||latestRecipe.current.id!==base.id||latestRecipe.current.revision!==base.revision)return;
@@ -123,13 +133,13 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
       if(e instanceof Error&&e.message==="409"&&alive.current&&token===generation.current&&latestRecipe.current.id===base.id){
         try{await refreshAfterConflict();}catch{setError(t("failure"));}
       }
-    } finally {working(false);}
+    } finally {setProcessing(null);working(false);}
   }
   async function confirm(voiceApproval?:Review) {
     const current=voiceApproval??review;
     if (lock.current || !current || current!==reviewRef.current || (!voiceApproval&&!approved) ||
       current.proposal.recipe_id!==recipe.id||current.proposal.base_revision!==recipe.revision||!describe(recipe,current.proposal.operations,locale)?.length) return;
-    working(true); setError("");
+    working(true); setError("");setProcessing("save");
     try {
       const result = await request<{recipe: Recipe}>(`/api/recipes/${recipe.id}/confirm`, {method: "POST", body: JSON.stringify({base_revision: current.proposal.base_revision, request_id: current.requestId, operations: current.proposal.operations, save_version: true})});
       latestRecipe.current=result.recipe;invalidate();voiceHistory.current=[];setInstruction("");setNotice(t("savedRecalculated")); onSaved(result.recipe);
@@ -139,7 +149,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
         try {await refreshAfterConflict();} catch {setError(t("failure"));}
       }
       // Keep the same request ID on uncertain network outcomes: retry cannot apply twice.
-    } finally {working(false);}
+    } finally {setProcessing(null);working(false);}
   }
   async function voiceSubmit(text:string,meta?:VoiceCaptureMeta){
     const command=voiceCommand(text);

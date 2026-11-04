@@ -37,7 +37,7 @@ test("explicit tap generates a preview; the draft is untouched", async ({page}) 
   await page.getByLabel("料理イメージの指示（任意）").fill("和風の盛り付け");
   await page.getByRole("button", {name: "✦ 画像を生成", exact: true}).click();
   // Generating state is tied to the actual flight, with a spinner row.
-  await expect(page.getByText("料理イメージを生成中…")).toBeVisible();
+  await expect(page.getByText("料理画像を生成中")).toBeVisible();
   release();
   await expect(page.getByAltText("生成した料理イメージ")).toBeVisible();
   await expect(page.getByText("生成画像はイメージです。数量・価格・完成写真の証拠にはなりません。")).toBeVisible();
@@ -61,13 +61,14 @@ test("generation failure keeps the draft with no preview", async ({page}) => {
   await page.getByRole("button", {name: "✦ 料理画像を生成", exact: true}).click();
   await page.getByRole("button", {name: "✦ 画像を生成", exact: true}).click();
   // The failure surfaces in the message and the processing-status row.
-  await expect(page.getByRole("status", {name: "処理状況"}).getByText("画像の生成に失敗しました。下書きは保持しています。")).toBeVisible();
+  await expect(page.getByRole("status", {name: "音声処理状況"}).getByText("画像生成に失敗")).toBeVisible();
   await expect(page.getByAltText("生成した料理イメージ")).toHaveCount(0);
   await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("カルボナーラ");
 });
 
 test("saving clears the preview so it cannot cross into the next recipe", async ({page}) => {
-  let recipes = 0;
+  let recipes = 0;let savedRecipe:any=null;
+  await page.route("**/api/recipes/*",route=>savedRecipe&&route.request().method()==="GET"&&route.request().url().endsWith(savedRecipe.id)?route.fulfill({json:savedRecipe}):route.fallback());
   await page.route("**/api/voice-recipe", async route => {
     recipes++;
     await route.fulfill({json: recipes === 1 ? draftOne : draftTwo});
@@ -77,7 +78,8 @@ test("saving clears the preview so it cannot cross into the next recipe", async 
   });
   await page.route("**/api/recipes/full", async route => {
     const body = route.request().postDataJSON();
-    await route.fulfill({status: 201, json: {id: body.request_id, title: {value: body.title}, revision: 0, materials: [], selling_price_jpy: {value: body.selling_price_jpy}}});
+    savedRecipe={id: body.request_id, title: {value: body.title}, revision: 0, materials: [], selling_price_jpy: {value: body.selling_price_jpy}};
+    await route.fulfill({status: 201, json:savedRecipe});
   });
   await page.goto("/");
   await dictate(page, "カルボナーラ、卵100グラム");

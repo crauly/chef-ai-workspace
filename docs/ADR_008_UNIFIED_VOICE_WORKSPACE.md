@@ -172,3 +172,10 @@ cleanup. Test results and their limits are recorded in the acceptance document.
   breaks stay `upstream` (`readBody` budget in `voice-transcription.ts`).
 - Audible failure cues are keyed by failure event (per-hook tick), so repeated
   identical messages each announce once, with no double cue on stop.
+
+## 2026-11-04 音声UX補足
+
+認識結果をキュー投入時から表示し、検証済みの先行発話分を保存不可のプレビューとして表示する。
+latest draft／解析カーソル／価格bindingは最新解析完了時にのみ更新する。
+状態表示はルートの単一パネルに統合する。承認・キュー・モード境界は変更しない。
+[実装・検証契約](VOICE_UX_PIPELINE.md)を参照。

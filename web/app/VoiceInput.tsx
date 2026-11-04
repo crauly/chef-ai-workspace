@@ -1,4 +1,5 @@
 "use client";
+import {useVoiceProcessingStatus} from "./VoiceProcessingStatus";
 import type {Locale} from "./i18n";
 import {useVoiceCapture} from "./useVoiceCapture";
 
@@ -6,6 +7,7 @@ export default function VoiceInput({locale, onTranscript, disabled = false}: {
   locale: Locale; onTranscript: (text: string) => void; disabled?: boolean;
 }) {
   const voice = useVoiceCapture(locale, onTranscript);
+  useVoiceProcessingStatus(locale,[...(voice.recording?[{key:"listen" as const}]:[]),...(voice.busy?[{key:"transcribe" as const}]:[])]);
   const ja = locale === "ja";
   return <div className="voice-input">
     <button type="button" disabled={!voice.recording && (disabled || voice.busy || voice.supported === false)}
