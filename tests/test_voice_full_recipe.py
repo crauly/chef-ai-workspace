@@ -239,6 +239,21 @@ class VoiceFullRecipeTests(unittest.TestCase):
         self.assertEqual(result.status_code,201,result.text)
         self.assertNotEqual(result.json()['materials'][0]['ingredient_id'],old_id)
 
+    def test_shared_matcher_owns_policy_without_repeated_exact_lookup(self):
+        from chef_ai_workspace.ingredient_assist import match_recipe_master
+        from unittest.mock import Mock
+        self.repo.find_owned_ingredients_exact=Mock(return_value=[])
+        self.repo.list_owned_ingredient_master=Mock(return_value=[{"id":str(uuid4()),"name":"自家製グアンチャーレ"}])
+        registration=match_recipe_master(self.owner,self.repo,'グアンチャーレ',similarity_action='create')
+        self.assertEqual(registration['action'],'create')
+        self.assertIsNone(registration['ingredient_id'])
+        self.repo.find_owned_ingredients_exact.assert_called_once_with(self.owner,'グアンチャーレ')
+        self.repo.list_owned_ingredient_master.assert_not_called()
+        editing=match_recipe_master(self.owner,self.repo,'グアンチャーレ')
+        self.assertEqual(editing['action'],'choose')
+        self.assertIsNone(editing['ingredient_id'])
+        self.assertEqual(len(editing['candidates']),1)
+
     def test_exact_duplicate_still_rejects_save_without_writing(self):
         self.repo.find_owned_ingredients_exact=lambda owner,name:[{'id':'a'},{'id':'b'}]
         result=self.client.post('/demo/recipes/full',json=self.payload(),headers=self.headers)

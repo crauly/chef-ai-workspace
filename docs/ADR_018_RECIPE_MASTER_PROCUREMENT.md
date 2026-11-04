@@ -59,3 +59,7 @@ npm run build
 完全一致がなく類似候補だけがある場合は新規食材として保存し、候補のIDや価格を引き継がない。
 完全一致が複数ある競合と明示IDのowner検証は維持する。編集のmatch_recipe_masterの選択契約は変更しない。
 Human Gateは一度の保存指示、正式な価格採用・原子的保存・同一request_idの再送は既存経路を使う。
+
+照合のSSOTは `match_recipe_master`。登録のreview/saveは共通の `similarity_action="create"` を渡し、
+編集は既定の `choose` を用いる。完全一致・規格・明示IDの検証はこの関数だけで行い、
+API側で再照合や結果の書換えを行わない。新規方針では不要な類似候補検索も実行しない。
