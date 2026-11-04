@@ -225,6 +225,10 @@ test("detail voice edit by another recipe name navigates on single match", async
   await page.getByRole("button", {name: /マイクを停止/}).first().click();
   await expect(page.getByRole("heading", {name: "ミートソースパスタ"})).toBeVisible();
   await expect(page).toHaveURL(/\/recipes\/[^/]+$/);
+  await expect(page.locator("#voice-controls")).toBeVisible();
+  await expect(page.locator("#voice-controls")).toContainText("現在のモード: 編集");
+  await expect(page.locator("#voice-controls")).toContainText("ミートソースパスタ");
+  await expect(page).toHaveURL(/\/recipes\/[^/?]+$/); // One-time edit hint is consumed.
 });
 
 test("detail voice edit with no match keeps the current recipe", async ({page}) => {
@@ -267,4 +271,25 @@ test("detail voice edit with multiple matches keeps the current recipe", async (
   await expect(page.locator("#voice-controls")).toBeHidden();
   await expect(page).toHaveURL(url);
   await expect(detail.getByRole("heading", {name: "片栗粉のレシピ"})).toBeVisible();
+});
+
+
+test("missing detail recipe shows an error and a usable return path",async({page})=>{
+ await page.goto("/recipes/99999999-9999-4999-8999-999999999999");
+ await expect(page.getByRole("alert")).toBeVisible();
+ await expect(page.getByRole("button",{name:"← レシピ一覧"})).toBeVisible();
+ await page.getByRole("button",{name:"← レシピ一覧"}).click();
+ await expect(page).toHaveURL("/");
+ await expect(page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"})).toBeVisible();
+});
+
+test("partial-cost diagnostics honor a stored material price override",async({page})=>{
+ const materialId="22222222-2222-4222-8222-222222222222";
+ await page.route("**/api/recipes/*/cost",route=>route.fulfill({json:{
+  partial:true,subtotal_jpy:"0",line_costs:{},unresolved_line_ids:[materialId],
+  total_cost_jpy:null,cost_rate_pct:null,estimated:false
+ }}));
+ const detail=await openDetail(page);
+ await expect(detail.getByText("単位換算を確認")).toBeVisible();
+ await expect(detail.getByText("採用価格が未設定")).toHaveCount(0);
 });
