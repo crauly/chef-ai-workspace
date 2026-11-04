@@ -221,7 +221,7 @@ export default function Library(){
      setError(locale==="ja"?"仕入れ先別価格は食材管理画面で承認してください。ここでは採用済み購入条件を選択します。":"Approve supplier prices in ingredient settings, then select the adopted offer here.");
      return;
    }
-   if((editPrice.trim()&&editPrice.trim()!==(line.effective_price?.amount_jpy.value||line.price_override?.amount_jpy.value||""))||editPriceQty!==(line.effective_price?.per_quantity||line.price_override?.per_quantity||"1")||editPriceUnit!==(line.effective_price?.per_unit||line.price_override?.per_unit||line.unit||"g")||(confirmPrice&&line.price_override?.amount_jpy.status==="assumed"))
+   if(!editSupplier&&((editPrice.trim()&&editPrice.trim()!==(line.effective_price?.amount_jpy.value||line.price_override?.amount_jpy.value||""))||editPriceQty!==(line.effective_price?.per_quantity||line.price_override?.per_quantity||"1")||editPriceUnit!==(line.effective_price?.per_unit||line.price_override?.per_unit||line.unit||"g")||(confirmPrice&&line.price_override?.amount_jpy.status==="assumed")))
      operations.push({op:"set_material_price",material_id:line.id,
        price_jpy:editPrice.trim()||line.effective_price?.amount_jpy.value||line.price_override?.amount_jpy.value||"",
        price_quantity:editPriceQty,price_unit:editPriceUnit});
