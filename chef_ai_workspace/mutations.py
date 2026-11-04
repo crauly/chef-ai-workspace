@@ -110,10 +110,10 @@ def prepare_mutation(recipe: Recipe, proposal: Proposal, *, user_confirmed: bool
             except (ValueError, TypeError, KeyError) as exc:
                 raise MutationError("Invalid material price or price unit") from exc
             candidate = replace(candidate, materials=tuple(
-                replace(m, price_mode="override", price_override=quote)
+                replace(m, price_mode="override", price_override=quote, offer_id=None)
                 if m.id == op["material_id"] else m for m in candidate.materials))
         elif kind == "set_material_supplier":
-            _fields(op, {"op", "material_id", "supplier_id"})
+            _fields(op, {"op", "material_id", "supplier_id"}, {"offer_id"})
             if not any(m.id == op["material_id"] for m in candidate.materials):
                 raise MutationError("Unknown material ID")
             supplier_id = op["supplier_id"] or None
@@ -124,8 +124,16 @@ def prepare_mutation(recipe: Recipe, proposal: Proposal, *, user_confirmed: bool
                     raise MutationError("Invalid supplier ID") from exc
             if supplier_id is not None:
                 supplier_id = str(UUID(supplier_id))
+            offer_id = op.get("offer_id") or None
+            if offer_id is not None:
+                try:
+                    offer_id = str(UUID(offer_id))
+                except (ValueError, TypeError, AttributeError) as exc:
+                    raise MutationError("Invalid offer ID") from exc
+                if supplier_id is None:
+                    raise MutationError("A supplier-less market quote cannot be a recipe offer")
             candidate = replace(candidate, materials=tuple(
-                replace(m, supplier_id=supplier_id)
+                replace(m, supplier_id=supplier_id, offer_id=offer_id)
                 if m.id == op["material_id"] else m for m in candidate.materials))
         elif kind == "set_material_quantity":
             _fields(op, {"op", "material_id", "value", "unit"})
@@ -174,7 +182,8 @@ def prepare_mutation(recipe: Recipe, proposal: Proposal, *, user_confirmed: bool
                 raise MutationError("Linked ingredient not in catalog")
             if mode == "inherit":
                 new_line = replace(matches[0], ingredient_id=op["ingredient_id"],
-                                   price_mode="inherit", price_override=None)
+                                   price_mode="inherit", price_override=None,
+                                   supplier_id=None, offer_id=None)
             else:
                 for key in ("price_jpy", "price_quantity", "price_unit"):
                     if key not in op:
@@ -183,7 +192,8 @@ def prepare_mutation(recipe: Recipe, proposal: Proposal, *, user_confirmed: bool
                                    per_quantity=op["price_quantity"], per_unit=op["price_unit"],
                                    source="manual" if user_confirmed else "estimated")
                 new_line = replace(matches[0], ingredient_id=op["ingredient_id"],
-                                   price_mode="override", price_override=quote)
+                                   price_mode="override", price_override=quote,
+                                   supplier_id=None, offer_id=None)
             candidate = replace(candidate, materials=tuple(
                 new_line if m.id == op["material_id"] else m for m in candidate.materials))
         elif kind == "unlink_ingredient":
@@ -206,10 +216,10 @@ def prepare_mutation(recipe: Recipe, proposal: Proposal, *, user_confirmed: bool
                                        source="manual" if user_confirmed else "estimated")
                 else:
                     quote = None
-                new_line = replace(line, ingredient_id=None, price_mode="override",
+                new_line = replace(line, ingredient_id=None, supplier_id=None, offer_id=None, price_mode="override",
                                    price_override=quote)
             else:
-                new_line = replace(line, ingredient_id=None)
+                new_line = replace(line, ingredient_id=None, supplier_id=None, offer_id=None)
             candidate = replace(candidate, materials=tuple(
                 new_line if m.id == op["material_id"] else m for m in candidate.materials))
         elif kind == "set_title":
