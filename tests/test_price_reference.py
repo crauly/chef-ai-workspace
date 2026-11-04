@@ -102,6 +102,29 @@ class ReferenceEndpointTests(unittest.TestCase):
         self.assertEqual(ref["unit_basis"], "g")
         self.assertEqual(len(body["candidates"][0]["observations"]), 1)
 
+    def test_exact_owned_identity_bypasses_name_candidate_limit(self):
+        from chef_ai_workspace.models import Ingredient
+        ingredient_id = str(uuid4())
+        self.repo.load_owned_ingredients = lambda owner, ids: (
+            {ingredient_id: Ingredient(ingredient_id, "豚バラ肉", None)}
+            if owner == self.owner and ids == [ingredient_id] else {})
+        self.repo.search_owned_ingredients = lambda *args: self.fail("Exact ID must bypass name search")
+        offers = self.repo.offers
+        self.repo.list_ingredient_offers = lambda owner, ident: offers if ident == ingredient_id else []
+        res = self.client.get("/demo/price-reference", params={"ingredient_id": ingredient_id}, headers=self.headers())
+        self.assertEqual(res.status_code, 200, res.text)
+        (candidate,) = res.json()["candidates"]
+        self.assertEqual(candidate["ingredient_id"], ingredient_id)
+        self.assertEqual(candidate["reference"]["average_unit_price"], "0.7000")
+        self.assertIn("tax_note", candidate["observations"][0])
+
+    def test_exact_identity_cannot_read_an_unowned_ingredient(self):
+        self.repo.load_owned_ingredients = lambda owner, ids: {}
+        res = self.client.get("/demo/price-reference", params={"name": "豚バラ", "ingredient_id": str(uuid4())}, headers=self.headers())
+        self.assertEqual(res.status_code, 404)
+        res = self.client.get("/demo/price-reference", params={"ingredient_id": "invalid"}, headers=self.headers())
+        self.assertEqual(res.status_code, 422)
+
     def test_external_block_reports_unavailable_without_faking(self):
         from chef_ai_workspace.external_reference import (
             EXTERNAL_REFERENCE_STATUS, fetch_external_reference,

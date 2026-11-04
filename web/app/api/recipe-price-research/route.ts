@@ -1,35 +1,70 @@
 import {NextRequest,NextResponse} from "next/server";
-import {previewAuthorized} from "../../../preview-access";
-import {enrichEntries} from "../../../price-enrichment";
+import {previewAuthorized,sameOrigin} from "../../../preview-access";
+import {enrichEntries,type PriceReferenceEntry} from "../../../price-enrichment";
+import {backendUrl} from "../backend-url";
+import type {Recipe} from "../../types";
+import type {RecipeResearch,ResearchResult} from "../../../recipe-price-research";
 
 export const runtime="nodejs";
 const fail=(status:number,message:string)=>NextResponse.json({error:message},{status,headers:{"Cache-Control":"no-store"}});
-type Row={id:string;name:string;supplier_id:string|null;offer_id:string|null};
-const selectionSchema={type:"object",properties:{indices:{type:"array",items:{type:"integer"}}},required:["indices"],additionalProperties:false};
+const selectionSchema={type:"object",properties:{indices:{type:"array",items:{type:"integer"}},edit_instruction:{type:"string"}},required:["indices","edit_instruction"],additionalProperties:false};
+type Unit={id:string;symbol:string;aliases?:string[];dimension:string;base_factor:string|null};
+const positive=(value:string|null)=>value!==null&&Number.isFinite(Number(value))&&Number(value)>0;
+function resolveUnit(units:Unit[],text:string|null,id?:string|null){
+ const found=units.filter(u=>id?u.id===id:u.symbol===text||(u.aliases??[]).includes(text??""));
+ return found.length===1?found[0]:undefined;
+}
 
-// Research is a read-only candidate builder. Only AIEditor -> /recipes/[id]/confirm
-// after explicit chef approval can persist any resulting price.
+
+// External summaries normalize packages. Verify that normalization against the
+// approved owner factors too; a helper's built-in kg/g ratio is not authority.
+function verifiedExternalBasis(ref:PriceReferenceEntry,units:Unit[],basis:Unit|undefined){
+ if(ref.origin!=="external")return true;
+ if(!basis||!ref.samples?.length)return false;
+ let total=0;
+ for(const sample of ref.samples){
+  const from=resolveUnit(units,sample.package_unit??null);
+  if(!from||!positive(sample.package_quantity??null))return false;
+  let quantity=Number(sample.package_quantity);
+  if(from.id!==basis.id){
+   if(from.dimension!==basis.dimension||!positive(from.base_factor)||!positive(basis.base_factor))return false;
+   quantity*=Number(from.base_factor)/Number(basis.base_factor);
+  }
+  const price=Number(sample.amount)/quantity;
+  if(!Number.isFinite(price)||price<0)return false;
+  total+=price;
+ }
+ return Number((total/ref.samples.length).toFixed(4))===Number(ref.average_unit_price);
+}
+
+// Read-only. Recipe ownership/revision and purchasing identity come from the
+// trusted backend, never client-supplied row names/supplier flags. The existing
+// confirm endpoint is still the sole explicit approval and atomic write gate.
 export async function POST(req:NextRequest){
- if(!await previewAuthorized(req)||req.headers.get("origin")!==req.nextUrl.origin)return fail(403,"Unauthorized");
+ if(!await previewAuthorized(req)||!sameOrigin(req))return fail(403,"Unauthorized");
  const apiKey=process.env.MODEL_API_KEY;
  if(!apiKey)return fail(503,"Model unavailable");
  try{
   const raw=await req.text();
   if(new TextEncoder().encode(raw).length>16000)return fail(413,"Request too large");
-  const body:unknown=JSON.parse(raw);
+  let body:unknown;
+  try{body=JSON.parse(raw);}catch{return fail(400,"Invalid JSON");}
   if(!body||typeof body!=="object"||Array.isArray(body))return fail(400,"Invalid request");
   const input=body as Record<string,unknown>;
   if(typeof input.instruction!=="string"||!input.instruction.trim()||input.instruction.length>4000||
-   !Array.isArray(input.materials)||input.materials.length>40||!input.materials.length)return fail(400,"Invalid request");
-  const materials:Row[]=[];
-  for(const row of input.materials){
-   if(!row||typeof row!=="object"||Array.isArray(row))return fail(400,"Invalid material");
-   const r=row as Record<string,unknown>;
-   if(typeof r.id!=="string"||!r.id||r.id.length>100||
-      typeof r.name!=="string"||!r.name.trim()||r.name.length>200)return fail(400,"Invalid material");
-   materials.push({id:r.id,name:r.name.trim(),supplier_id:typeof r.supplier_id==="string"?r.supplier_id:null,offer_id:typeof r.offer_id==="string"?r.offer_id:null});
-  }
-  const system=`You identify EXACTLY which material rows a chef wants to research for provisional market purchase prices. The instruction can be Japanese or English. Select all rows for "全部", "すべて", "全材料", "all", and equivalents. Support named subsets, multiple names, ranges such as "AからBまで" (inclusive, by the order supplied), and contextual pronouns. Do not assume only one row is meant. Use only valid zero-based indices from the provided materials list. If the scope cannot be determined confidently, return an empty indices array. This is selection ONLY, never a price estimate or authorization.`;
+     typeof input.recipe_id!=="string"||! /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.recipe_id)||
+     !Number.isSafeInteger(input.base_revision)||Number(input.base_revision)<0)return fail(400,"Invalid request");
+  const backend=backendUrl(),access=process.env.DEMO_ACCESS_TOKEN;
+  if(!backend||!access)return fail(503,"Backend unavailable");
+  const read=(path:string)=>fetch(new URL(path,backend),{headers:{"X-Demo-Access":access},cache:"no-store",redirect:"error",signal:AbortSignal.timeout(15000)});
+  const saved=await read("/demo/recipes/"+encodeURIComponent(input.recipe_id));
+  if(!saved.ok)return fail([401,403,404].includes(saved.status)?saved.status:502,"Recipe unavailable");
+  const recipe=await saved.json() as Recipe;
+  if(recipe.id!==input.recipe_id||recipe.revision!==input.base_revision)return fail(409,"Stale recipe");
+  if(!Array.isArray(recipe.materials)||!recipe.materials.length||recipe.materials.length>40)return fail(400,"Invalid materials");
+  const materials=recipe.materials.map(m=>({...m,name:(recipe.display_names?.[m.id]?.display||m.material_name.value||"").trim()}));
+  if(materials.some(m=>!m.name||m.name.length>200)||new Set(materials.map(m=>m.id)).size!==materials.length)return fail(502,"Invalid saved materials");
+  const system=`You identify EXACTLY which material rows a chef wants to research for provisional market purchase prices. The instruction can be Japanese or English. Select all rows for "全部", "すべて", "全材料", "all", and equivalents. Support named subsets, multiple names, ranges such as "AからBまで" (inclusive, by the order supplied), and contextual pronouns. Do not assume only one row is meant. Use only valid zero-based indices from the provided materials list. If the scope cannot be determined confidently, return an empty indices array. Also return edit_instruction: copy ONLY the chef-requested non-price edits (quantities, selling price, recipe title), preserving all prior corrections and latest overrides in the instruction history. Return an empty string when there are none. Never add a change, invent numbers, or include researched purchase prices in edit_instruction. Respect negations/exclusions. This is selection ONLY, never a price estimate or authorization.`;
   const response=await fetch("https://api.meta.ai/v1/chat/completions",{
    method:"POST",headers:{"Authorization":"Bearer "+apiKey,"Content-Type":"application/json"},
    body:JSON.stringify({model:"muse-spark-1.3",reasoning_effort:"low",max_completion_tokens:1024,
@@ -42,34 +77,62 @@ export async function POST(req:NextRequest){
   const choices=model&&typeof model==="object"?(model as {choices?:unknown}).choices:null;
   if(!Array.isArray(choices)||choices.length!==1)return fail(502,"Invalid selection");
   const choice=choices[0] as {message?:{content?:unknown}};
-  if(typeof choice?.message?.content!=="string")return fail(502,"Invalid selection");
+  if((choices[0] as {finish_reason?:string}).finish_reason!=="stop"||typeof choice?.message?.content!=="string")return fail(502,"Invalid selection");
   const parsed:unknown=JSON.parse(choice.message.content);
   if(!parsed||typeof parsed!=="object"||!Array.isArray((parsed as {indices?:unknown}).indices))return fail(502,"Invalid selection");
+  const editInstruction=(parsed as {edit_instruction?:unknown}).edit_instruction;
+  if(typeof editInstruction!=="string"||editInstruction.length>4000)return fail(502,"Invalid edit instruction");
   const indices=(parsed as {indices:unknown[]}).indices;
   if(!indices.every(i=>typeof i==="number"&&Number.isInteger(i)&&i>=0&&i<materials.length))return fail(502,"Invalid indices");
   const unique=[...new Set(indices as number[])].sort((a,b)=>a-b);
-  if(!unique.length)return NextResponse.json({indices:[],operations:[],results:[],ambiguous:true},{headers:{"Cache-Control":"no-store"}});
-  const entries=unique.map(i=>({material_name:materials[i].name,material_index:i,request:input.instruction as string,trigger:"muse" as const}));
-  const results:{index:number;name:string;status:string;description:string}[]=[];
-  const operations:Record<string,string>[]=[];
-  // Bound concurrency limits external Meta Search Grounding calls, not the total
-  // number of requested rows. "All" never silently truncates the selection.
-  for(let offset=0;offset<entries.length;offset+=3){
-   const batch=entries.slice(offset,offset+3);
-   const {priceReferences}=await enrichEntries(apiKey,batch);
-   priceReferences.forEach((ref,j)=>{
-    const row=materials[batch[j].material_index];
-    const usable=ref.status==="available"&&ref.currency==="JPY"&&
-     typeof ref.average_unit_price==="string"&&/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/.test(ref.average_unit_price)&&Number(ref.average_unit_price)>0&&
-     typeof ref.unit_basis==="string"&&/^[\\p{L}\\p{N}µμ%°]{1,24}$/u.test(ref.unit_basis)&&
-     !row.supplier_id&&!row.offer_id;
-    results.push({index:batch[j].material_index,name:row.name,
-     status:usable?"candidate":row.supplier_id||row.offer_id?"linked_supplier":ref.status==="available"?"unsupported_unit":ref.status,
-     description:row.supplier_id||row.offer_id?`${row.name}：仕入先または購入条件が紐づいているため、単価の上書き候補は生成しません。仕入条件を確認してください。`:ref.text});
-    if(usable)operations.push({op:"set_material_price",material_id:row.id,
-     price_jpy:ref.average_unit_price!,price_quantity:"1",price_unit:ref.unit_basis!});
-   });
+  if(!unique.length)return NextResponse.json({indices:[],operations:[],results:[],ambiguous:true,edit_instruction:editInstruction},{headers:{"Cache-Control":"no-store"}});
+  const unitResponse=await read("/demo/units");
+  if(!unitResponse.ok)return fail(503,"Unit master unavailable");
+  const unitBody=await unitResponse.json() as {items?:Unit[]};
+  if(!Array.isArray(unitBody.items))return fail(502,"Invalid unit master");
+  const units=unitBody.items;
+  const results:ResearchResult[]=[];
+  const operations:RecipeResearch["operations"]=[];
+  const entries=unique.filter(i=>{
+   const row=materials[i];
+   if(!row.supplier_id&&!row.offer_id)return true;
+   results.push({index:i,name:row.name,status:"linked_supplier",description:"仕入先・購入条件が指定されています。食材管理の価格採用経路で確認してください。既存価格は変更しません。"});
+   return false;
+  }).map(i=>({material_name:materials[i].name,material_index:i,ingredient_id:materials[i].ingredient_id??undefined,request:input.instruction as string,trigger:"muse" as const}));
+  // Three concurrent searches, not three selected ingredients. Every selected
+  // row gets a result and source evidence; failures never become zero prices.
+  // Repeated recipe lines share one Ingredient price. Research it once so
+  // independent searches cannot propose conflicting updates to the same SSOT.
+  const grouped=new Map<string,typeof entries>();
+  for(const entry of entries){const key=entry.ingredient_id??`row:${entry.material_index}`;grouped.set(key,[...(grouped.get(key)??[]),entry]);}
+  const groups=[...grouped.values()];
+  for(let offset=0;offset<groups.length;offset+=3){
+   const batch=groups.slice(offset,offset+3);
+   const {priceReferences,researchStatus}=await enrichEntries(apiKey,batch.map(group=>group[0]));
+   batch.forEach((group,j)=>{for(const entry of group){
+    const ref={...priceReferences[j],material_index:entry.material_index};
+    const row=materials[entry.material_index];
+    const price=ref.average_unit_price;
+    const quoteUnit=resolveUnit(units,ref.unit_basis);
+    const recipeUnit=resolveUnit(units,row.unit,row.unit_id);
+    const compatible=quoteUnit&&recipeUnit&&(quoteUnit.id===recipeUnit.id||
+      quoteUnit.dimension===recipeUnit.dimension&&positive(quoteUnit.base_factor)&&positive(recipeUnit.base_factor));
+    let status:string=ref.status;
+    if(ref.status==="available"){
+     status=ref.currency!=="JPY"?"unsupported_currency":
+      typeof price!=="string"||! /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(price)||!positive(price)?"invalid_price":
+      !row.ingredient_id&&ref.origin==="ledger"&&ref.ingredient_name!==row.name?"identity_mismatch":
+      !quoteUnit?"unknown_unit":!compatible?"incompatible_unit":
+      !verifiedExternalBasis(ref,units,quoteUnit)?"unverified_conversion":"candidate";
+    }
+    results.push({index:entry.material_index,name:row.name,status,
+     description:ref.text+(status!=="candidate"?`（候補なし：${status}）`: "（未承認の仮単価。共有食材の採用価格を更新する変更案です。）"),
+     reference:ref,research_status:{...researchStatus[j],material_index:entry.material_index}});
+    if(status==="candidate")operations.push({op:"set_material_price",material_id:row.id,
+     price_jpy:price!,price_quantity:"1",price_unit:quoteUnit!.symbol});
+   }});
   }
-  return NextResponse.json({indices:unique,operations,results,ambiguous:false},{headers:{"Cache-Control":"no-store"}});
+  results.sort((a,b)=>a.index-b.index);
+  return NextResponse.json({indices:unique,operations,results,ambiguous:false,edit_instruction:editInstruction},{headers:{"Cache-Control":"no-store"}});
  }catch{return fail(502,"Price research failed");}
 }

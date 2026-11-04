@@ -317,6 +317,7 @@ test("long-press edit action opens the actual detail editor",async({page})=>{
 test("detail bulk price research proposes every selected row but cannot save without approval",async({page})=>{
  const recipeId="11111111-1111-4111-8111-111111111111";
  let confirmations=0;
+ let researchMaterials: {id:string;material_name:{value:string}}[]=[];
  await page.route(`**/api/recipes/${recipeId}`,async route=>{
   const recipe=await (await route.fetch()).json();
   recipe.materials=[
@@ -324,20 +325,24 @@ test("detail bulk price research proposes every selected row but cannot save wit
    {...recipe.materials[0],id:"33333333-3333-4333-8333-333333333333",material_name:{value:"バター",status:"confirmed"}},
    {...recipe.materials[0],id:"44444444-4444-4444-8444-444444444444",material_name:{value:"牛乳",status:"confirmed"}},
   ];
+  researchMaterials=recipe.materials;
   await route.fulfill({json:recipe});
  });
  await page.route("**/api/recipe-price-research",async route=>{
   const body=route.request().postDataJSON();
   expect(body.instruction).toContain("すべて");
-  expect(body.materials.map((m:{name:string})=>m.name)).toEqual(["小麦粉","バター","牛乳"]);
+  expect(body.recipe_id).toBe(recipeId);
+  expect(body.base_revision).toBe(0);
+  expect(researchMaterials.map(m=>m.material_name.value)).toEqual(["小麦粉","バター","牛乳"]);
   await route.fulfill({json:{
    ambiguous:false,indices:[0,1,2],
    operations:[
-    {op:"set_material_price",material_id:body.materials[0].id,price_jpy:"0.8",price_quantity:"1",price_unit:"g"},
-    {op:"set_material_price",material_id:body.materials[1].id,price_jpy:"2",price_quantity:"1",price_unit:"g"},
-    {op:"set_material_price",material_id:body.materials[2].id,price_jpy:"0.3",price_quantity:"1",price_unit:"ml"}
+    {op:"set_material_price",material_id:researchMaterials[0].id,price_jpy:"0.8",price_quantity:"1",price_unit:"g"},
+    {op:"set_material_price",material_id:researchMaterials[1].id,price_jpy:"2",price_quantity:"1",price_unit:"g"},
+    {op:"set_material_price",material_id:researchMaterials[2].id,price_jpy:"0.3",price_quantity:"1",price_unit:"ml"}
    ],
-   results:body.materials.map((m:{name:string})=>({name:m.name,status:"candidate",description:"仕入調査の参考価格・要確認"}))
+   edit_instruction:"",
+   results:researchMaterials.map((m,i)=>({index:i,name:m.material_name.value,status:"candidate",description:"仕入調査の参考価格・要確認"}))
   }});
  });
  await page.route(`**/api/recipes/${recipeId}/confirm`,route=>{
@@ -361,4 +366,80 @@ test("detail price scope ambiguity creates no mutation proposal",async({page})=>
  await page.locator(".instruction-form button").last().click();
  await expect(page.getByText(/調査対象を特定できませんでした/)).toBeVisible();
  await expect(page.locator(".proposal")).toHaveCount(0);
+});
+
+test("bulk research preserves other edits and retries the exact approved proposal",async({page})=>{
+ const recipeId="11111111-1111-4111-8111-111111111111",materialId="22222222-2222-4222-8222-222222222222";
+ const attempts:{request_id:string;operations:Record<string,string>[]}[]=[];
+ let saved:Record<string,any>|undefined;
+ await page.route(`**/api/recipes/${recipeId}`,async route=>{
+  saved??=await (await route.fetch()).json();return route.fulfill({json:saved});
+ });
+ await page.route("**/api/recipe-price-research",route=>route.fulfill({json:{indices:[0],ambiguous:false,
+  edit_instruction:"片栗粉の使用量を15gに変更、売価を1800円に変更",
+  operations:[{op:"set_material_price",material_id:materialId,price_jpy:"0.7600",price_quantity:"1",price_unit:"g"}],
+  results:[{index:0,name:"片栗粉",status:"candidate",description:"未承認の仮単価",
+   reference:{origin:"external",observation_count:1,fetched_at:"2026-11-04",sources:[{url:"https://shop.example/product",title:"販売元の原文"}],
+    currency:"JPY",samples:[{name:"片栗粉",seller:"販売元A",amount:"380",package:"500g",tax_note:"税込",shipping_note:"別途",url:"https://shop.example/product"}]}}]}}));
+ await page.route(`**/api/recipes/${recipeId}/propose`,route=>{
+  const {instruction}=route.request().postDataJSON();expect(instruction).toContain("15g");expect(instruction).not.toContain("価格");
+  return route.fulfill({json:{recipe_id:recipeId,base_revision:0,requires_confirmation:true,operations:[
+   {op:"set_material_quantity",material_id:materialId,value:"15",unit:"g"},
+   {op:"set_selling_price",value_jpy:"1800"},
+   {op:"set_material_price",material_id:materialId,price_jpy:"999",price_quantity:"1",price_unit:"g"}]}});
+ });
+ await page.route(`**/api/recipes/${recipeId}/confirm`,route=>{
+  const body=route.request().postDataJSON();attempts.push(body);
+  if(attempts.length===1)return route.fulfill({status:502,json:{error:"uncertain save"}});
+  saved!.revision=1;saved!.materials[0].quantity.value="15";saved!.selling_price_jpy.value="1800";
+  return route.fulfill({json:{recipe:saved}});
+ });
+ const detail=await openDetail(page);await detail.getByRole("button",{name:"◇ AIに変更相談"}).click();
+ await page.locator("#ai-instruction").fill("片栗粉の価格を調べて、使用量を15g、売価を1800円に変更");
+ await page.locator(".instruction-form button").last().click();
+ await expect(page.locator(".proposal ol li")).toHaveCount(3);
+ await expect(page.locator(".proposal ol")).toContainText("15");await expect(page.locator(".proposal ol")).not.toContainText("999");
+ await expect(page.getByRole("link",{name:"販売元の原文"})).toHaveAttribute("href","https://shop.example/product");
+ expect(attempts).toHaveLength(0);await expect(page.locator(".proposal button").first()).toBeDisabled();
+ await page.locator(".proposal input[type=checkbox]").check();await page.locator(".proposal button").first().click();
+ await expect.poll(()=>attempts.length).toBe(1);await expect(page.locator(".ai-workspace .error")).toBeVisible();
+ await page.locator(".proposal button").first().click();await expect.poll(()=>attempts.length).toBe(2);
+ expect(attempts[1].request_id).toBe(attempts[0].request_id);expect(attempts[1].operations).toEqual(attempts[0].operations);
+ expect(attempts[0].operations.map(op=>op.op)).toEqual(["set_material_quantity","set_selling_price","set_material_price"]);
+ expect(attempts[0].operations[2].price_jpy).toBe("0.7600");
+});
+
+test("detail browse voice research opens an unapproved price proposal",async({page})=>{
+ await page.setViewportSize({width:390,height:844});await microphone(page);
+ let confirms=0,ordinaryProposals=0;
+ await page.route("**/api/voice/transcribe",route=>route.fulfill({json:{transcript:"すべての材料の価格を調べて"}}));
+ await page.route("**/api/recipe-price-research",route=>route.fulfill({json:{indices:[0],ambiguous:false,edit_instruction:"",
+  operations:[{op:"set_material_price",material_id:"22222222-2222-4222-8222-222222222222",price_jpy:"0.8",price_quantity:"1",price_unit:"g"}],
+  results:[{index:0,name:"片栗粉",status:"candidate",description:"仕入履歴の仮単価・要確認"}]}}));
+ await page.route("**/propose",route=>{ordinaryProposals++;return route.fulfill({status:503,json:{error:"unexpected"}});});
+ await page.route("**/confirm",route=>{confirms++;return route.fulfill({status:409,json:{error:"unapproved"}});});
+ await openDetail(page);await expect(page.locator("#voice-controls")).toBeHidden();
+ await page.getByRole("button",{name:"下部の音声操作"}).click();await page.waitForTimeout(2500);
+ await page.getByRole("button",{name:/マイクを停止/}).first().click();
+ await expect(page.locator(".proposal ol li")).toHaveCount(1);await expect(page.locator("#voice-controls")).toBeVisible();
+ expect(confirms).toBe(0);expect(ordinaryProposals).toBe(0);await expect(page.locator(".proposal button").first()).toBeDisabled();
+});
+
+test("English detail returns Home without a REV badge",async({page})=>{
+ await openDetail(page);await page.getByLabel("Display language").selectOption("en-US");
+ await expect(page.getByRole("button",{name:"← Home",exact:true})).toBeVisible();
+ await expect(page.locator(".detail-topbar")).not.toContainText("REV");
+ await page.getByRole("button",{name:"← Home",exact:true}).click();await expect(page).toHaveURL("/");
+});
+
+test("stale research refreshes the selected recipe and requires a new proposal",async({page})=>{
+ const recipeId="11111111-1111-4111-8111-111111111111";let reads=0;
+ await page.route(`**/api/recipes/${recipeId}`,async route=>{
+  const recipe=await (await route.fetch()).json();recipe.revision=reads++?1:0;return route.fulfill({json:recipe});
+ });
+ await page.route("**/api/recipe-price-research",route=>route.fulfill({status:409,json:{error:"Stale recipe"}}));
+ const detail=await openDetail(page);await detail.getByRole("button",{name:"◇ AIに変更相談"}).click();
+ await page.locator("#ai-instruction").fill("すべての食材の価格を調べて");await page.locator(".instruction-form button").last().click();
+ await expect(page.getByText("最新のレシピを取得しました。変更案を作り直してください。")).toBeVisible();
+ await expect(page.locator(".proposal")).toHaveCount(0);expect(reads).toBeGreaterThanOrEqual(2);
 });

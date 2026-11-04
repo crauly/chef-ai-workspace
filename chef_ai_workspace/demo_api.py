@@ -1088,6 +1088,7 @@ MAX_REFERENCE_CANDIDATES = 3
 
 @router.get("/price-reference")
 def reference_demo_price(name: str = Query(default="", max_length=200),
+                         ingredient_id: UUID | None = None,
                          ctx=Depends(demo_context)):
     """Ledger-grounded reference price for draft creation.
 
@@ -1102,15 +1103,27 @@ def reference_demo_price(name: str = Query(default="", max_length=200),
     from .price_history import summarize_reference_price
     owner, repository = ctx
     query = (name or "").strip()
-    if not query:
+    if not query and ingredient_id is None:
         raise HTTPException(422, "Ingredient name required")
     searcher = getattr(repository, "search_owned_ingredients", None)
     offers_of = getattr(repository, "list_ingredient_offers", None)
     latest_of = getattr(repository, "list_latest_observations_for_offers", None)
-    if not callable(searcher) or not callable(offers_of) or not callable(latest_of):
+    if ((ingredient_id is None and not callable(searcher))
+            or not callable(offers_of) or not callable(latest_of)):
         raise HTTPException(503, "Price reference not configured")
-    hits = [hit for hit in (searcher(owner, query, MAX_REFERENCE_CANDIDATES) or [])
-            if isinstance(hit, dict) and hit.get("id") and hit.get("name")]
+    if ingredient_id is not None:
+        # Saved recipe identity must not be displaced by the first three
+        # similarly named products/specifications in a name search.
+        loader = getattr(repository, "load_owned_ingredients", None)
+        if not callable(loader):
+            raise HTTPException(503, "Price reference not configured")
+        ingredient = loader(owner, [str(ingredient_id)]).get(str(ingredient_id))
+        if ingredient is None:
+            raise HTTPException(404, "Ingredient not found or inaccessible")
+        hits = [{"id": str(ingredient_id), "name": ingredient.name}]
+    else:
+        hits = [hit for hit in (searcher(owner, query, MAX_REFERENCE_CANDIDATES) or [])
+                if isinstance(hit, dict) and hit.get("id") and hit.get("name")]
     hits = hits[:MAX_REFERENCE_CANDIDATES]
     candidates = []
     for hit in hits:
@@ -1152,6 +1165,8 @@ def reference_demo_price(name: str = Query(default="", max_length=200),
                 "package_quantity": full["package_quantity"],
                 "package_unit": full["package_unit"],
                 "source": row.get("source"),
+                "tax_note": row.get("tax_note"),
+                "shipping_note": row.get("shipping_note"),
                 "observed_at": row.get("observed_at"),
                 "supplier_id": row.get("supplier_id")})
         candidates.append({

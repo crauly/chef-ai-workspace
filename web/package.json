@@ -8,7 +8,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "playwright test",
-    "preview:fixtures": "sh -c 'node tests/backend.mjs & B=$!; trap \"kill $B\" INT TERM EXIT; FASTAPI_BASE_URL=http://127.0.0.1:8100 DEMO_ACCESS_TOKEN=test-only-backend-token DEMO_PREVIEW_PASSWORD=test-only-preview-password-32-characters npm run dev -- --port 3100'"
+    "preview:fixtures": "sh -c 'node tests/backend.mjs & B=$!; trap \"kill $B\" INT TERM EXIT; FASTAPI_BASE_URL=http://127.0.0.1:8100 DEMO_ACCESS_TOKEN=test-only-backend-token DEMO_PREVIEW_PASSWORD=test-only-preview-password-32-characters npm run dev -- --port 3100'",
+    "test:price-research": "node --test tests/recipe-price-research.node.cjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.3",
