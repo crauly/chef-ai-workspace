@@ -27,6 +27,14 @@ export default function PlateSettingsSection({locale}:{locale:Locale}){
  }
  async function act(fn:()=>Promise<void>){setBusy(true);setError("");try{await fn();await refresh();}catch{setError(ja?"保存に失敗しました。空き容量を確認してください":"Could not save; check device storage");}finally{setBusy(false);}}
  return <div className="plate-settings-body">
+  <section className="plate-register"><h3><span className="plate-register-plus" aria-hidden="true">＋</span>{ja?"新しい皿を登録":"Register a new plate"}</h3><p>{ja?"盛り付けに使う皿を登録します。名前・写真・補足を入力してください。":"Register a plate for presentation with name, photo and notes."}</p>
+   <label className="plate-note-label">{ja?"皿の名前":"Plate name"}<input maxLength={60} value={name} onChange={e=>setName(e.target.value)} placeholder={ja?"例：白い丸皿 24cm":"e.g. white round plate"}/></label>
+   <label className="plate-file-label">{ja?"皿の写真":"Plate photo"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>void choose(e.target.files?.[0]??null)}/></label>
+   {image&&<img className="plate-preview" src={image} alt={ja?"登録予定の皿":"New plate preview"}/>}
+   <label className="plate-note-label">{ja?"補足（任意）":"Note (optional)"}<input maxLength={PLATE_NOTE_MAX} value={note} onChange={e=>setNote(e.target.value)}/></label>
+   <button type="button" disabled={busy||!name.trim()||!image} onClick={()=>void act(async()=>{await addPlate({name,image:image!,note});setImage(null);setName("");setNote("");})}>{ja?"この皿を登録":"Save plate"}</button>
+  </section>
+<section className="plate-registered-section" aria-label={ja?"登録済みのお皿":"Registered plates"}>
   <div className="plate-settings-heading"><div><strong>{ja?"登録済みのお皿":"Registered plates"}</strong><p>{ja?"登録済みのお皿から標準のお皿を指定できます":"Choose the default plate from the registered plates"}</p></div><span className="plate-settings-status">{plates.length}{ja?"枚":" plates"}</span></div>
   <p className="plate-local-note">{ja?"写真はこのブラウザのIndexedDBに保存され、他の端末とは同期されません。同じブラウザを使う人には見えます。生成時のみ画像を送信します。":"Photos stay in this browser (IndexedDB), not synced between devices; shared-browser users can access them. Sent only for generation."}</p>
   {plates.length>0&&<div className="plate-gallery">{plates.map(p=><div className="plate-gallery-item" key={p.id}>
@@ -35,13 +43,7 @@ export default function PlateSettingsSection({locale}:{locale:Locale}){
     <button type="button" className="secondary" disabled={busy} onClick={()=>void act(()=>removePlate(p.id))}>{ja?"削除":"Delete"}</button>
    </div></div>
   </div>)}</div>}
-  <div className="plate-register"><strong>{ja?"新しい皿を登録":"Register a new plate"}</strong>
-   <label className="plate-note-label">{ja?"皿の名前":"Plate name"}<input maxLength={60} value={name} onChange={e=>setName(e.target.value)} placeholder={ja?"例：白い丸皿 24cm":"e.g. white round plate"}/></label>
-   <label className="plate-file-label">{ja?"皿の写真":"Plate photo"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>void choose(e.target.files?.[0]??null)}/></label>
-   {image&&<img className="plate-preview" src={image} alt={ja?"登録予定の皿":"New plate preview"}/>}
-   <label className="plate-note-label">{ja?"補足（任意）":"Note (optional)"}<input maxLength={PLATE_NOTE_MAX} value={note} onChange={e=>setNote(e.target.value)}/></label>
-   <button type="button" disabled={busy||!name.trim()||!image} onClick={()=>void act(async()=>{await addPlate({name,image:image!,note});setImage(null);setName("");setNote("");})}>{ja?"この皿を登録":"Save plate"}</button>
-  </div>
+  </section>
   {error&&<p role="alert" className="error">{error}</p>}
  </div>;
 }
