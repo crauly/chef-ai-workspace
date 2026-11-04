@@ -28,10 +28,10 @@ test("desktop settings keeps Chef brand and displays labeled ingredient table, f
  await page.getByLabel("食材名で検索").fill("牛乳");
  await expect(table.locator("tbody tr")).toHaveCount(1);
  await page.getByLabel("食材名で検索").fill("");
- await page.getByLabel("仕入れ先",{exact:true}).selectOption("B商事");
+ await page.locator(".ingredient-supplier-filter select").selectOption("B商事");
  await expect(table.locator("tbody tr")).toHaveCount(1);
  await expect(table.getByRole("row",{name:/小麦粉/})).toBeVisible();
- await page.getByLabel("仕入れ先",{exact:true}).selectOption("all");
+ await page.locator(".ingredient-supplier-filter select").selectOption("all");
  await table.getByRole("button",{name:/価格・規格/}).click();
  await expect(table.locator("tbody tr").first()).toContainText("バター");
 });
@@ -40,15 +40,15 @@ test("mobile settings uses one selector and readable ingredient cards",async({pa
  await page.setViewportSize({width:390,height:844});
  await mockIngredients(page);
  await page.goto("/settings");
- await expect(page.getByLabel("設定項目")).toHaveValue("");
- await page.getByLabel("設定項目").selectOption("ingredient");
+ await expect(page.locator(".settings-mobile-picker select")).toHaveValue("");
+ await page.locator(".settings-mobile-picker select").selectOption("ingredient");
  await expect(page.locator(".settings-sidebar")).toBeHidden();
- await expect(page.getByLabel("設定項目")).toBeVisible();
+ await expect(page.locator(".settings-mobile-picker select")).toBeVisible();
  await expect(page.locator(".ingredient-table-wrap")).toBeHidden();
  const cards=page.locator(".ingredient-item-card");
  await expect(cards).toHaveCount(3);
  await expect(cards.filter({hasText:"牛乳"})).toContainText("A食品");
- await page.getByLabel("設定項目").selectOption("plate");
+ await page.locator(".settings-mobile-picker select").selectOption("plate");
  await expect(page.getByRole("heading",{name:"盛り付け用の皿"})).toBeVisible();
 });
 
