@@ -1052,8 +1052,15 @@ def _impact_envelope(owner: str, repository, ingredient_id: str,
                      if m.price_mode == "inherit" and m.ingredient_id})
     loader = getattr(repository, "load_owned_ingredients", None)
     catalog = loader(owner, needed) if callable(loader) else {}
-    impacts = assess_impact(tuple(recipes), catalog or {},
-                            ingredient_id, quote)
+    price_loader = getattr(repository, "load_owned_supplier_prices", None)
+    units = _owned_unit_definitions(owner, repository)
+    impacts = []
+    for recipe in recipes:
+        prices = price_loader(owner, recipe) if callable(price_loader) else {}
+        impacts.extend(assess_impact(
+            (recipe,), catalog or {}, ingredient_id, quote,
+            supplier_prices=prices, units=units,
+            candidate_offer_id=obs.offer_id, candidate_supplier_id=obs.supplier_id))
     return {"basis_observation_id": str(basis_id), "comparable": True,
             "reasons": [],
             "items": [_json(asdict(impact)) for impact in impacts]}

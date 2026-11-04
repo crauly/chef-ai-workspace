@@ -156,6 +156,21 @@ class RecipeCrudTests(unittest.TestCase):
         self.assertIsNone(line.offer_id)
         self.assertEqual(self.repo.commits[-1]["state"]["materials"][0]["offer_id"], None)
 
+    def test_clear_supplier_and_offer_then_edit_market_price(self):
+        old_line = self.repo.recipe.materials[0]
+        self.repo.recipe = replace(self.repo.recipe, materials=(replace(
+            old_line, supplier_id=str(uuid4()), offer_id=str(uuid4())),))
+        saved = self.save(
+            {"op": "set_material_supplier", "material_id": old_line.id,
+             "supplier_id": "", "offer_id": ""},
+            {"op": "set_material_price", "material_id": old_line.id,
+             "price_jpy": "500", "price_quantity": "1", "price_unit": "kg"})
+        line = saved.recipe.materials[0]
+        self.assertIsNone(line.supplier_id)
+        self.assertIsNone(line.offer_id)
+        self.assertEqual(self.repo.ingredients[line.ingredient_id].current_price.amount_jpy.value, "500")
+        self.assertEqual(self.repo.commits[-1]["cost_snapshot"]["total_cost_jpy"], "50")
+
     def test_switching_supplier_clears_selected_offer(self):
         old_line = self.repo.recipe.materials[0]
         supplier, offer, other_supplier = str(uuid4()), str(uuid4()), str(uuid4())

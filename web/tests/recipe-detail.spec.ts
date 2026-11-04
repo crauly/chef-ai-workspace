@@ -138,3 +138,47 @@ test("ongoing recording stays stoppable after opening a recipe on desktop",async
  await recording.getByRole("button",{name:"マイクを停止"}).click();
  await expect(recording).toBeHidden();
 });
+
+test("clearing a supplier applies before the market price edit", async ({page}) => {
+  const recipeId = "11111111-1111-4111-8111-111111111111";
+  const supplierId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  let saved: Record<string, any> | undefined;
+  let operations: Record<string, string>[] = [];
+  await page.route(`**/api/recipes/${recipeId}`, async route => {
+    if (!saved) {
+      saved = await (await route.fetch()).json();
+      const line = saved!.materials[0];
+      line.price_mode = "inherit";
+      line.ingredient_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+      line.supplier_id = supplierId;
+      line.offer_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+      line.effective_price = line.price_override;
+      line.price_override = null;
+    }
+    await route.fulfill({json: saved});
+  });
+  await page.route("**/api/suppliers?*", route => route.fulfill({json: {items: [{id: supplierId, name: "仕入れ先A"}]}}));
+  await page.route("**/api/ingredients/*/offer-prices", route => route.fulfill({json: {items: []}}));
+  await page.route(`**/api/recipes/${recipeId}/confirm`, async route => {
+    operations = route.request().postDataJSON().operations;
+    const line = saved!.materials[0];
+    for (const op of operations) {
+      if (op.op === "set_material_supplier") {line.supplier_id = op.supplier_id || null; line.offer_id = op.offer_id || null;}
+      if (op.op === "set_material_price") {
+        if (line.supplier_id || line.offer_id) return route.fulfill({status: 409, json: {detail: "Supplier price forbidden"}});
+        line.effective_price = {amount_jpy: {value: op.price_jpy, status: "confirmed", origin: "user"}, per_quantity: op.price_quantity, per_unit: op.price_unit};
+      }
+    }
+    saved!.revision++;
+    await route.fulfill({json: {recipe: saved}});
+  });
+  const detail = await openDetail(page);
+  await detail.getByRole("button", {name: "片栗粉を編集"}).click();
+  const dialog = page.getByRole("dialog", {name: "片栗粉を編集"});
+  await dialog.getByRole("combobox", {name: "仕入先", exact: true}).selectOption("");
+  await dialog.getByLabel("仕入単価（円）", {exact: true}).fill("1200");
+  await dialog.getByRole("button", {name: "変更して保存"}).click();
+  await expect(dialog).toBeHidden();
+  expect(operations.map(op => op.op)).toEqual(["set_material_supplier", "set_material_price"]);
+  await expect(detail.getByText(/仕入単価.*1200/)).toBeVisible();
+});
