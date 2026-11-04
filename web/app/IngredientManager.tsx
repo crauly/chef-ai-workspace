@@ -29,6 +29,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
  const [price,setPrice]=useState("");
  const [quantity,setQuantity]=useState("");
  const [unit,setUnit]=useState("");
+ const [priceSupplier,setPriceSupplier]=useState("");
  useEffect(()=>{
   if(!editing)return;
   const onKey=(event:KeyboardEvent)=>{if(event.key==="Escape"&&!busy)setEditing(null);};
@@ -48,7 +49,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
  },[ja]);
  useEffect(()=>{void load();},[load]);
  async function begin(item:Ingredient){
-  setEditing(item.id);setName(item.name);setSpec(item.spec??"");
+  setEditing(item.id);setName(item.name);setSpec(item.spec??"");setPriceSupplier("");
   setPrice(item.current_price?.amount_jpy?.value??"");
   setQuantity(item.current_price?.per_quantity??"");
   setUnit(item.current_price?.per_unit??"");
@@ -82,18 +83,36 @@ export default function IngredientManager({locale}:{locale:Locale}){
  }
  async function save(id:string){
   if(busy)return;
-  const values=[price.trim(),quantity.trim(),unit.trim()];
-  if(!name.trim()||name.trim().length>200||values.some(Boolean)&&!values.every(Boolean)||
-     (values.every(Boolean)&&(!Number.isFinite(Number(price))||Number(price)<0||!Number.isFinite(Number(quantity))||Number(quantity)<=0))){
-   setError(ja?"食材名と仕入価格・数量・単位を正しく入力してください。価格を未設定にする場合は3項目とも空欄にしてください。":"Enter a valid name and complete price, quantity and unit, or leave all three blank.");return;
+  if(!name.trim()||name.trim().length>200){
+   setError(ja?"食材名を正しく入力してください。":"Enter a valid ingredient name.");return;
   }
   setBusy(true);
   try{
    const r=await fetch("/api/ingredients/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({name:name.trim(),spec:spec.trim()||null,price_jpy:values[0]||null,price_quantity:values[1]||null,price_unit:values[2]||null})});
+    body:JSON.stringify({name:name.trim(),spec:spec.trim()||null})});
    if(!r.ok)throw new Error("save");
    setEditing(null);await load();
   }catch{setError(ja?"食材を保存できませんでした。":"Could not save ingredient.");}
+  finally{setBusy(false);}
+ }
+ async function approvePrice(id:string){
+  if(busy)return;
+  const value=price.trim(),qty=quantity.trim(),u=unit.trim();
+  if(!value||!qty||!u||!Number.isFinite(Number(value))||Number(value)<0||
+     !Number.isFinite(Number(qty))||Number(qty)<=0){
+   setError(ja?"価格・数量・単位をすべて正しく入力してください。":"Enter a valid price, quantity and unit.");return;
+  }
+  const supplier=availableSuppliers.find(s=>s.id===priceSupplier);
+  const target=supplier?.name??(ja?"相場参考価格（仕入れ先なし）":"Market reference price (no supplier)");
+  if(!window.confirm(ja?`${target}の価格 ¥${value} / ${qty} ${u} を採用しますか？`:`Adopt ${target}: JPY ${value} / ${qty} ${u}?`))return;
+  setBusy(true);
+  try{
+   const r=await fetch("/api/offer-prices",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({ingredient_id:id,supplier_id:priceSupplier||null,
+                         amount_jpy:value,quantity:qty,unit:u})});
+   if(!r.ok)throw new Error("adopt");
+   setEditing(null);await load();
+  }catch{setError(ja?"価格を採用できませんでした。単位マスターと仕入れ条件を確認してください。":"Could not adopt price. Check units and purchase terms.");}
   finally{setBusy(false);}
  }
  async function create(){
@@ -148,6 +167,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
   <div className="ingredient-editor-fields">
    <label>{ja?"食材名":"Ingredient name"}<input autoFocus value={name} maxLength={200} disabled={busy} onChange={e=>setName(e.target.value)}/></label>
    <label>{ja?"規格（商品の識別用）":"Specification (identity only)"}<input value={spec} maxLength={200} disabled={busy} placeholder={ja?"例：1号缶、10個入り":"e.g. No.1 can, 10-count"} onChange={e=>setSpec(e.target.value)}/></label>
+   <label>{ja?"仕入れ先（採用価格）":"Supplier (adopted price)"}<select value={priceSupplier} disabled={busy||supplierLoading} onChange={e=>{setPriceSupplier(e.target.value);setPrice("");setQuantity("");setUnit("");}}><option value="">{ja?"相場参考価格（仕入れ先なし）":"Market reference price (no supplier)"}</option>{availableSuppliers.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select></label>
    <label>{ja?"仕入価格（円）":"Purchase price (JPY)"}<input inputMode="decimal" value={price} disabled={busy} onChange={e=>setPrice(e.target.value)}/></label>
    <label>{ja?"仕入数量":"Purchase quantity"}<input inputMode="decimal" value={quantity} disabled={busy} onChange={e=>setQuantity(e.target.value)}/></label>
    <label>{ja?"仕入単位":"Purchase unit"}<input value={unit} maxLength={32} disabled={busy} onChange={e=>setUnit(e.target.value)}/></label>
@@ -160,7 +180,8 @@ export default function IngredientManager({locale}:{locale:Locale}){
    </select></label>
    <button type="button" className="secondary" disabled={busy||!linkSupplier||supplierLoading} onClick={()=>void linkSupplierTo(item)}>{ja?"紐付ける":"Link supplier"}</button>
   </div>
-  <p className="ingredient-muted">{ja?"既存の購入条件・価格履歴は変更しません。":"Existing purchase offers and price history are preserved."}</p>
+  <p className="ingredient-muted">{ja?"「保存」は食材名・規格のみを更新します。価格は「価格を登録・採用」で履歴に記録して反映します。規格による自動単位換算はしません。":"Save updates identity only. Adopt price explicitly to record an observation. Specifications do not convert units."}</p>
+  <div className="ingredient-actions"><button type="button" disabled={busy||supplierLoading} onClick={()=>void approvePrice(item.id)}>{ja?"価格を登録・採用":"Record and adopt price"}</button></div>
   <div className="ingredient-actions"><button type="button" disabled={busy} onClick={()=>void save(item.id)}>{ja?"保存":"Save"}</button><button type="button" className="secondary" disabled={busy} onClick={()=>setEditing(null)}>{ja?"キャンセル":"Cancel"}</button></div>
  </section></div>;
  return <section className="ingredient-manager" aria-label={ja?"食材ライブラリ":"Ingredient library"}>
@@ -182,7 +203,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
   {error&&<p role="alert" className="error">{error}</p>}
   {loading?<p>{ja?"読み込み中":"Loading"}</p>:items.length===0?<p>{ja?"登録済み食材はありません。":"No ingredients registered."}</p>:<>
    <div className="ingredient-table-wrap"><table className="ingredient-table">
-    <thead><tr><th scope="col">{ja?"No.":"No."}</th><th scope="col" aria-sort={sort==="name"?(descending?"descending":"ascending"):"none"}><button type="button" className="ingredient-sort" onClick={()=>sortBy("name")}>{ja?"食材名":"Ingredient"} ↕</button></th><th scope="col" aria-sort={sort==="price"?(descending?"descending":"ascending"):"none"}><button type="button" className="ingredient-sort" onClick={()=>sortBy("price")}>{ja?"価格・規格":"Price / Unit"} ↕</button></th><th scope="col" aria-sort={sort==="supplier"?(descending?"descending":"ascending"):"none"}><button type="button" className="ingredient-sort" onClick={()=>sortBy("supplier")}>{ja?"仕入れ先":"Supplier"} ↕</button></th><th scope="col">{ja?"備考":"Notes"}</th><th scope="col">{ja?"操作":"Actions"}</th></tr></thead>
+    <thead><tr><th scope="col">{ja?"No.":"No."}</th><th scope="col" aria-sort={sort==="name"?(descending?"descending":"ascending"):"none"}><button type="button" className="ingredient-sort" onClick={()=>sortBy("name")}>{ja?"食材名":"Ingredient"} ↕</button></th><th scope="col" aria-sort={sort==="price"?(descending?"descending":"ascending"):"none"}><button type="button" className="ingredient-sort" onClick={()=>sortBy("price")}>{ja?"採用価格・単位":"Adopted price / Unit"} ↕</button></th><th scope="col" aria-sort={sort==="supplier"?(descending?"descending":"ascending"):"none"}><button type="button" className="ingredient-sort" onClick={()=>sortBy("supplier")}>{ja?"仕入れ先":"Supplier"} ↕</button></th><th scope="col">{ja?"備考":"Notes"}</th><th scope="col">{ja?"操作":"Actions"}</th></tr></thead>
     <tbody>{visible.map((item,i)=><tr key={item.id}>
      <td>{(effectivePage-1)*pageSize+i+1}</td>
      <td><strong>{item.name}</strong>{item.spec&&<div className="ingredient-muted">{item.spec}</div>}</td>
@@ -194,7 +215,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
    </table></div>
    <div className="ingredient-cards">{visible.map(item=><article key={item.id} className="ingredient-item-card">
     <div className="ingredient-item-head"><strong>{item.name}{item.spec&&<span className="ingredient-muted"> · {item.spec}</span>}</strong><button type="button" className="secondary" disabled={busy} onClick={()=>void begin(item)} aria-label={ja?`${item.name}を編集`:`Edit ${item.name}`}>›</button></div>
-    <dl><div><dt>{ja?"価格・規格":"Price / Unit"}</dt><dd className={item.current_price?.amount_jpy?.value==null?"ingredient-unset":""}>{priceLabel(item)}</dd></div>
+    <dl><div><dt>{ja?"採用価格・単位":"Adopted price / Unit"}</dt><dd className={item.current_price?.amount_jpy?.value==null?"ingredient-unset":""}>{priceLabel(item)}</dd></div>
     <div><dt>{ja?"仕入れ先":"Supplier"}</dt><dd>{suppliers(item)}</dd></div></dl>
     <button type="button" className="secondary ingredient-delete" disabled={busy} onClick={()=>void remove(item)}>{ja?"削除":"Delete"}</button>
    </article>)}</div>
