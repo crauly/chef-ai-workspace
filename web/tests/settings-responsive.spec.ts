@@ -52,24 +52,37 @@ test("mobile settings uses one selector and readable ingredient cards",async({pa
  await expect(page.getByRole("heading",{name:"盛り付け用の皿"})).toBeVisible();
 });
 
-test("ingredient editor explicitly links a registered supplier through purchase offers",async({page})=>{
- await mockIngredients(page);
+test("ingredient editor chooses a supplier only through an approved purchase price",async({page})=>{
  const ingredient="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
  const supplier="dddddddd-dddd-dddd-dddd-dddddddddddd";
  let posted:unknown=null;
+ let linked=false;
+ await page.route("**/api/ingredients",async route=>route.fulfill({json:{
+  items:[{id:ingredient,name:"バター",current_price:null}],
+  suppliers_by_ingredient:linked?{[ingredient]:["新規取引先"]}:{},
+ }}));
  await page.route("**/api/suppliers?**",async route=>route.fulfill({json:{items:[{id:supplier,name:"新規取引先"}]}}));
- await page.route("**/api/ingredients/*/suppliers",async route=>{
+ await page.route("**/api/ingredients/*/offer-prices",async route=>route.fulfill({json:{items:[]}}));
+ await page.route("**/api/offer-prices",async route=>{
   posted=route.request().postDataJSON();
+  linked=true;
   await route.fulfill({status:201,json:{offer_id:"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"}});
  });
+ page.on("dialog",dialog=>dialog.accept());
  await page.goto("/settings");
  await page.getByRole("navigation",{name:"設定項目"}).getByRole("button",{name:"食材ライブラリ"}).click();
  await page.getByRole("row",{name:/バター/}).getByRole("button",{name:"編集"}).click();
  await expect(page.getByRole("dialog",{name:"バターを編集"})).toBeVisible();
- await page.getByLabel("仕入れ先を追加").selectOption(supplier);
- await page.getByRole("button",{name:"紐付ける"}).click();
- await expect.poll(()=>posted).toEqual({supplier_id:supplier});
- await expect(page.getByRole("row",{name:/バター/})).toBeVisible();
+ const dialog=page.getByRole("dialog",{name:"バターを編集"});
+ await expect(dialog.locator("select")).toHaveCount(1);
+ await expect(dialog.getByRole("button",{name:"紐付ける"})).toHaveCount(0);
+ await dialog.getByLabel("仕入れ先（採用価格）").selectOption(supplier);
+ await dialog.getByLabel("仕入価格（円）").fill("350");
+ await dialog.getByLabel("仕入数量").fill("500");
+ await dialog.getByLabel("仕入単位").fill("g");
+ await dialog.getByRole("button",{name:"価格を登録・採用"}).click();
+ await expect.poll(()=>posted).toEqual({ingredient_id:ingredient,supplier_id:supplier,amount_jpy:"350",quantity:"500",unit:"g"});
+ await expect(page.getByRole("row",{name:/バター/})).toContainText("新規取引先");
 });
 
 test("ingredient prices keep fractional precision rather than rounding in the list",async({page})=>{
