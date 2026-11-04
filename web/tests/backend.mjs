@@ -45,6 +45,7 @@ createServer(async (req, res) => {
       {id:"00000000-0000-4000-8000-000000000004",symbol:"L",dimension:"volume",base_factor:"1000",aliases:[]}
     ]});
   }
+  if (path === "/demo/price-research" && req.method === "GET") return send(200,{settings:{enabled:false,interval_hours:24},candidates:[]});
   if (path === "/demo/recipes") {
     const params = new URL(req.url, "http://localhost").searchParams;
     const q = params.get("q") || "", page = Number(params.get("page") || 1), size = Number(params.get("page_size") || 20);

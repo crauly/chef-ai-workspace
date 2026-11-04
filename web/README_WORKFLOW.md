@@ -190,3 +190,19 @@ acceptance check from fixture tests.
 
 Regression: `node --test tests/edit-preview.node.cjs` and
 `npx playwright test tests/edit-preview.spec.ts`.
+
+## Voice recovery and scheduled research
+
+Voice drafts continue when the unit catalog is temporarily unavailable; retry the
+catalog before approving a formal save. Failed analysis retains unprocessed speech
+on this device, including across reload, and offers an explicit analysis retry.
+
+Scheduled research is initially OFF globally and per ingredient. Configure the
+interval in Settings → Scheduled price research, and enable individual ingredients
+in their create/edit forms. Results stay unadopted until the chef reviews the source,
+package quantity/unit, tax and shipping and explicitly adopts a candidate. The bell
+links to pending candidates. Adoption updates the existing shared/adopted-offer cost
+path; other suppliers and purchase conditions keep their own approved prices.
+
+Database migration, scheduler activation, deployment protection, verification and
+production limitations: [ADR-016](../docs/ADR_016_SCHEDULED_PRICE_RESEARCH.md).

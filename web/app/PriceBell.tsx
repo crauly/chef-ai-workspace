@@ -15,6 +15,7 @@ function changeLabel(n:Notification,ja:boolean):string{
  return `${sign}${n.change_jpy}${unit}`;
 }
 export default function PriceBell({locale}:{locale:string}){
+ const [researchCount,setResearchCount]=useState(0);
  const [items,setItems]=useState<Notification[]>([]);
  const [openId,setOpenId]=useState<string|null>(null);
  const [detail,setDetail]=useState<Detail|null>(null);
@@ -28,6 +29,7 @@ export default function PriceBell({locale}:{locale:string}){
  const reload=useCallback(async()=>{
   try{const result=await read<{items:Notification[]}>("/api/notifications");
    setItems(result.items);setError("");
+   try{const research=await read<{candidates:unknown[]}>("/api/price-research");setResearchCount(research.candidates.length);}catch{}
   }catch{setError(ja?"通知を取得できませんでした。":"Could not load notifications.");}
  },[ja]);
  useEffect(()=>{void reload();},[reload]);
@@ -59,7 +61,7 @@ export default function PriceBell({locale}:{locale:string}){
    else setError(ja?"確認を作成できませんでした。":"Could not confirm the observation.");}
   finally{setBusy(false);}
  }
- const unread=items.filter(i=>i.status==="unread").length;
+ const unread=items.filter(i=>i.status==="unread").length+researchCount;
  useEffect(()=>{
   if(previousUnread.current!==null&&unread>previousUnread.current)setAnimate(true);
   previousUnread.current=unread;
@@ -76,6 +78,7 @@ export default function PriceBell({locale}:{locale:string}){
   <div className="toolbar"><h2>{ja?"価格通知":"Price notifications"} 🔔 {unread>0&&<span role="status">({unread}{ja?"件の未読":" unread"})</span>}</h2>
   <button type="button" disabled={busy} onClick={()=>void reload()}>{ja?"更新":"Refresh"}</button></div>
   {error&&<p role="alert" className="error">{error}</p>}
+  <a href="/settings?section=research">{ja?`未採用の定期調査候補（${researchCount}件）`:`Scheduled price candidates (${researchCount})`}</a>
   <details className="price-bell-advanced"><summary>{ja?"価格観測から通知を作成":"Create notification from observation"}</summary><form onSubmit={confirm}>
    <input aria-label={ja?"価格観測ID":"Price observation ID"} placeholder={ja?"価格観測ID":"Price observation ID"} value={observationId} onChange={e=>setObservationId(e.target.value)} required/>
    <button type="submit" disabled={busy||!observationId.trim()}>{ja?"価格を確認して通知":"Confirm price"}</button>

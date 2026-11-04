@@ -6,12 +6,14 @@ import UnitManager from "../UnitManager";
 import IngredientManager from "../IngredientManager";
 import SourcingSuggestions from "../SourcingSuggestions";
 import PlateSettingsSection from "../PlateSettingsSection";
+import PriceResearchSettings from "../PriceResearchSettings";
 import PriceBell from "../PriceBell";
 import {type Locale} from "../i18n";
 
-type Tab="ingredient"|"supplier"|"unit"|"sourcing"|"plate";
-const tabs:Tab[]=["ingredient","supplier","unit","sourcing","plate"];
+type Tab="ingredient"|"supplier"|"unit"|"sourcing"|"plate"|"research";
+const tabs:Tab[]=["ingredient","supplier","unit","sourcing","plate","research"];
 const names:Record<Tab,{ja:string;en:string}>={
+ research:{ja:"定期価格調査",en:"Scheduled price research"},
  ingredient:{ja:"食材ライブラリ",en:"Ingredient Library"},
  supplier:{ja:"仕入れ先管理",en:"Suppliers"},
  unit:{ja:"単位管理",en:"Units"},
@@ -20,6 +22,7 @@ const names:Record<Tab,{ja:string;en:string}>={
 };
 function SettingsGlyph({tab}:{tab:Tab}){
  const paths:Record<Tab,React.ReactNode>={
+  research:<><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></>,
   ingredient:<><path d="M4 7h16l-2 13H6L4 7Z"/><path d="m8 7 4-5 4 5M3 11h18"/></>,
   supplier:<><path d="M3 7h12v12H3zM15 11h4l3 4v4h-7z"/><circle cx="7" cy="19" r="2"/><circle cx="18" cy="19" r="2"/></>,
   unit:<><path d="M3 8h18M5 5v14h14V5M9 8v4M13 8v3M17 8v4"/></>,
@@ -65,8 +68,9 @@ export default function SettingsPage(){
     <div className="settings-panel-heading"><h2 id="settings-panel-title" className="settings-panel-title">{tab?(ja?names[tab].ja:names[tab].en):(ja?"設定":"Settings")}</h2>
      {tab&&<button type="button" className="secondary settings-help-button" aria-expanded={helpOpen} onClick={()=>setHelpOpen(v=>!v)}>{ja?"使い方":"Help"}</button>}
     </div>
-    {tab&&helpOpen&&<p className="settings-help" role="note">{tab==="ingredient"?(ja?"食材を検索し、価格・仕入れ先を確認できます。編集から価格の変更と仕入れ先の追加ができます。":"Search ingredients, review prices and suppliers, and open Edit to update prices or link a supplier."):tab==="supplier"?(ja?"仕入れ先を登録・編集します。食材との紐付けは食材ライブラリから行います。":"Manage suppliers here; link them to ingredients from the Ingredient Library."):tab==="unit"?(ja?"単位の名称と別名を管理します。":"Manage unit names and aliases."):tab==="sourcing"?(ja?"食材IDから購入候補を確認します。":"Find purchasing suggestions by ingredient ID."):(ja?"皿を登録し、画像生成に使用する標準の皿を指定できます。":"Register plates and choose a default for image generation.")}</p>}
+    {tab&&helpOpen&&<p className="settings-help" role="note">{tab==="ingredient"?(ja?"食材を検索し、価格・仕入れ先を確認できます。編集から価格の変更と仕入れ先の追加ができます。":"Search ingredients, review prices and suppliers, and open Edit to update prices or link a supplier."):tab==="supplier"?(ja?"仕入れ先を登録・編集します。食材との紐付けは食材ライブラリから行います。":"Manage suppliers here; link them to ingredients from the Ingredient Library."):tab==="unit"?(ja?"単位の名称と別名を管理します。":"Manage unit names and aliases."):tab==="research"?(ja?"全体設定と食材ごとの設定を有効にすると、参考価格を定期調査します。採用には確認が必要です。":"Enable global and ingredient switches for scheduled research. Price adoption requires approval."):tab==="sourcing"?(ja?"食材IDから購入候補を確認します。":"Find purchasing suggestions by ingredient ID."):(ja?"皿を登録し、画像生成に使用する標準の皿を指定できます。":"Register plates and choose a default for image generation.")}</p>}
     {!tab&&<p className="settings-panel-description" role="status">{ja?"左のメニューから設定項目を選択してください。スマートフォンでは上の設定項目から選択できます。":"Choose a setting from the sidebar or the selector above on mobile."}</p>}
+    {tab==="research"&&<PriceResearchSettings locale={locale}/>}
     {tab==="ingredient"&&<IngredientManager locale={locale}/>}
     {tab==="supplier"&&<SupplierManager locale={locale}/>}
     {tab==="unit"&&<UnitManager locale={locale}/>}

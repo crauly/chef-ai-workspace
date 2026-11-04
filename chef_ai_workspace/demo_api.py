@@ -7,7 +7,7 @@ the demo routes without an isolated demo owner and a long random secret.
 import hmac
 from dataclasses import asdict
 from uuid import uuid4
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, StrictBool
 from .models import Recipe, TrackedValue
 from .costing import calculate_cost, unit_factor_catalog
 from .mutations import Proposal, MutationError, prepare_mutation
@@ -330,6 +330,7 @@ def link_demo_ingredient_supplier(ingredient_id:UUID, body:IngredientSupplierLin
 
 class IngredientMasterCreateBody(BaseModel):
     model_config=ConfigDict(extra="forbid")
+    price_research_enabled: StrictBool | None = None
     name: str=Field(min_length=1,max_length=200)
     spec: str | None=Field(default=None,max_length=200)
 
@@ -338,6 +339,8 @@ class IngredientMasterCreateBody(BaseModel):
 def create_demo_ingredient_master(body:IngredientMasterCreateBody,ctx=Depends(demo_context)):
     owner,repo=ctx
     if not body.name.strip(): raise HTTPException(422,"Ingredient name required")
+    if body.price_research_enabled is not None:
+        return {"id": str(repo.save_research_ingredient(owner, None, body.name.strip(), body.spec, body.price_research_enabled))}
     create=getattr(repo,"create_owned_ingredient_master",None)
     if not callable(create): raise HTTPException(503,"Ingredient master unavailable")
     return {"id":str(create(owner,body.name.strip(),body.spec.strip() or None if body.spec is not None else None))}
@@ -354,6 +357,7 @@ def delete_demo_ingredient_master(ingredient_id:UUID,ctx=Depends(demo_context)):
 
 class IngredientMasterEditBody(BaseModel):
     model_config=ConfigDict(extra="forbid")
+    price_research_enabled: StrictBool | None = None
     name: str=Field(min_length=1,max_length=200)
     spec: str | None=Field(default=None,max_length=200)
     price_jpy: str | None=None
@@ -368,6 +372,9 @@ def edit_demo_ingredient_master(ingredient_id:UUID, body:IngredientMasterEditBod
     owner, repository=ctx
     if any(value is not None for value in (body.price_jpy,body.price_quantity,body.price_unit)):
         raise HTTPException(422,"Use explicit offer price adoption")
+    if body.price_research_enabled is not None:
+        repository.save_research_ingredient(owner, str(ingredient_id), body.name.strip(), body.spec, body.price_research_enabled)
+        return {"id": str(ingredient_id), "updated": True}
     editor=getattr(repository,"update_owned_ingredient_master",None)
     if not callable(editor):
         raise HTTPException(503,"Ingredient master unavailable")
@@ -1632,3 +1639,48 @@ def save_demo_dish_image(recipe_id:UUID,body:DishImageBody,ctx=Depends(demo_cont
     except ValueError:
         raise HTTPException(404,"Recipe not found")
     return {"saved":True}
+
+
+class ResearchSettingsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: StrictBool
+    interval_hours: int = Field(ge=1, le=8760)
+
+class ResearchAdoptBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    observation_id: UUID
+
+class ResearchFinishBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ingredient_id: UUID
+    token: UUID
+    candidate: dict | None = None
+    error: str | None = Field(default=None, max_length=100)
+
+def _research(ctx, action, payload=None):
+    owner, repo = ctx
+    try:
+        return repo.price_research(owner, action, payload)
+    except ValueError as exc:
+        raise HTTPException(409, "Research state changed; reload and review") from exc
+
+@router.get("/price-research")
+def read_price_research(ctx=Depends(demo_context)):
+    return _research(ctx, "read")
+
+@router.patch("/price-research")
+def configure_price_research(body: ResearchSettingsBody, ctx=Depends(demo_context)):
+    return _research(ctx, "settings", body.model_dump())
+
+@router.post("/price-research/adopt")
+def adopt_research_price(body: ResearchAdoptBody, ctx=Depends(demo_context)):
+    return _research(ctx, "adopt", {"observation_id": str(body.observation_id)})
+
+# These endpoints are only called by the protected server worker, not the browser BFF.
+@router.post("/price-research/claim")
+def claim_price_research(ctx=Depends(demo_context)):
+    return _research(ctx, "claim")
+
+@router.post("/price-research/finish")
+def finish_price_research(body: ResearchFinishBody, ctx=Depends(demo_context)):
+    return _research(ctx, "finish", body.model_dump(mode="json"))

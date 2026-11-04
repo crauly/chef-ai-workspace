@@ -230,7 +230,7 @@ class SupabasePersistence:
         rows=[]
         while True:
             response=(self.client.table("ingredients")
-                      .select("id,name,spec,current_price")
+                      .select("id,name,spec,current_price,price_research_enabled,last_research_at,last_research_error")
                       .eq("owner_id",owner_id)
                       .order("id").range(len(rows),len(rows)+499).execute())
             batch=response.data or []
@@ -1212,3 +1212,16 @@ class SupabasePersistence:
             except Exception:
                 pass
         return True
+
+    def price_research(self, owner_id, action, payload=None):
+        try:
+            return self.client.rpc('owned_price_research', {
+                'p_owner_id': owner_id, 'p_action': action,
+                'p_payload': payload or {}}).execute().data
+        except APIError as exc:
+            raise ValueError('Research transaction rejected') from exc
+
+    def save_research_ingredient(self, owner_id, ingredient_id, name, spec, enabled):
+        return self.client.rpc('save_owned_research_ingredient', {
+            'p_owner_id': owner_id, 'p_id': ingredient_id,
+            'p_name': name, 'p_spec': spec, 'p_enabled': enabled}).execute().data
