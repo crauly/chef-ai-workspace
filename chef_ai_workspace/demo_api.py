@@ -753,6 +753,12 @@ def _complete_demo_recipe(body: CompleteRecipeBody, ctx, review_only=False):
                     ingredient_id=str(material.ingredient_id) if material.ingredient_id else None,
                     new_master=material.new_master,spec=material.spec,candidate_rows=candidate_rows)
             except MutationError as exc: raise HTTPException(409,str(exc)) from exc
+            # Similar names are suggestions, not a reason to reject an explicitly
+            # approved recipe save. Create a distinct master rather than silently
+            # linking to a different product or inheriting its purchase price.
+            # Truly ambiguous exact identities still require a choice.
+            if plan["action"]=="choose" and not finder(owner,name):
+                plan={**plan,"action":"create","candidates":[]}
             if plan["action"]=="choose" and not review_only:
                 raise HTTPException(409,"Choose an ingredient master before saving")
             ing_id=plan["ingredient_id"] or str(uuid4())
