@@ -22,7 +22,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  locale:Locale;selected:Recipe|null;editor:RefObject<EditorHandle|null>;onBrowse:(target:string,openVoiceEdit?:boolean)=>Promise<Recipe|null>;
  onCreated:(recipe:Recipe)=>void;reviewBoundary:RefObject<(()=>number)|null>;editRequest:number;detailOnly?:boolean;captureActiveRef?:RefObject<boolean|null>;
 }){
- const [mode,setMode]=useState<VoiceMode>("idle"),[volume,setVolume]=useState(.5),[manual,setManual]=useState("");
+ const [mode,setMode]=useState<VoiceMode>(selected?"browse":"idle"),[volume,setVolume]=useState(.5),[manual,setManual]=useState("");
  const [message,setMessage]=useState(locale==="ja"?"登録・呼び出し・修正を一つのマイクで続けられます。":"Create, browse and edit with one microphone."),[heard,setHeard]=useState("");
  const [routing,setRouting]=useState(false);
  const [feedbackError,setFeedbackError]=useState(false);
@@ -33,7 +33,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  const [draftPending,setDraftPending]=useState(false);
  const [diag,setDiag]=useState<VoiceDiagEvent[]>([]);
  useEffect(()=>subscribeVoiceEvents(()=>setDiag(getVoiceEvents())),[]);
- const currentMode=useRef<VoiceMode>("idle"),boundary=useRef(0),modeBoundary=useRef(0);
+ const currentMode=useRef<VoiceMode>(selected?"browse":"idle"),boundary=useRef(0),modeBoundary=useRef(0);
  const registration=useRef<RegistrationHandle|null>(null);
  const selectedRef=useRef(selected);selectedRef.current=selected;
  const previousTarget=useRef(selected?.id);
@@ -115,11 +115,12 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
   if(next!=="idle"&&volume>0)playVoiceCue(next,volume);
  }
  async function navigate(nav:Navigation,source?:string,traceId=""){
-  if(detailOnly&&nav.mode!=="edit"){window.location.assign("/");return;}
   if(registration.current?.isSaving()||editor.current?.isBusy()){logVoiceEvent("mode.transition.rejected","busy saving",traceId);feedback("保存・変更処理中です。完了後に切り替えてください。",true);return;}
   if(editor.current?.hasPending()&&(nav.mode!=="edit"||nav.target)){
    logVoiceEvent("mode.transition.rejected","unsaved edit proposal",traceId);feedback("未保存の変更案があります。保存するか、「変更案を破棄」と話してから切り替えてください。",true);return;
   }
+  // Do not discard an unsaved proposal when a mode command leaves this route.
+  if(detailOnly&&nav.mode!=="edit"){window.location.assign("/");return;}
   if(nav.mode==="edit"&&nav.target&&selectedRef.current?.title.value!==nav.target){
    const previousRecipe=selectedRef.current;
    transition("browse");feedback("編集対象のレシピを検索しています。");
