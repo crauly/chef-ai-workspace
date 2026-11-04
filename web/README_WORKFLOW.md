@@ -175,3 +175,18 @@ approved Offer and price history; the former price-free “add/link supplier”
 control is removed. Choosing `相場参考価格` does not fetch or calculate a
 market average. See
 [`APPROVED_RECIPE_PROCUREMENT.md`](../docs/APPROVED_RECIPE_PROCUREMENT.md).
+
+## Edit proposal confirmation
+
+In edit mode, describing a change automatically opens the confirmation dialog.
+Review before/after changes and the projected ingredient composition. Added rows
+are highlighted; removed rows are named explicitly. Approve using the existing
+checkbox and save button, or say “承認”, “更新して”, or “保存して” after the
+current proposal is displayed. The dialog's microphone button controls the same
+Workspace capture. Back/Escape retains the proposal and clears approval; no save
+is performed by opening or closing the dialog. Uncertain saves retain the same
+request ID for retry. Real kitchen audio/provider behavior remains a separate
+acceptance check from fixture tests.
+
+Regression: `node --test tests/edit-preview.node.cjs` and
+`npx playwright test tests/edit-preview.spec.ts`.

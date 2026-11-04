@@ -54,6 +54,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  // it, and searchFallback restores the displayed recipe when no single match
  // is found instead of leaving the detail blank with a hung waiter.
  const searchFallback=useRef<Recipe|null>(null),pendingVoiceSearch=useRef(false);
+ const [micControl,setMicControl]=useState<import("./EditProposalDialog").MicControl|null>(null);
  const editor=useRef<EditorHandle|null>(null),reviewBoundary=useRef<(()=>number)|null>(null);
  const browseWaiter=useRef<((recipe:Recipe|null)=>void)|null>(null);
  useEffect(()=>{if(selected&&browseWaiter.current){browseWaiter.current(selected);browseWaiter.current=null;}},[selected]);
@@ -306,7 +307,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
   return new Promise(resolve=>{browseWaiter.current=resolve;search(target,true,openVoiceEdit);});
  }
  return <main id="top" className={pageKind==="detail"?"recipe-detail-page":""}><div><header className="chef-header"><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><PriceBell locale={locale}/><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">Japanese</option><option value="en-US">English</option></select></label></div><div className="chef-brand"><img src="/chef-ai-mark.svg" alt="" width="58" height="58"/><h1>Chef AI</h1></div>{pageKind==="home"&&<p className="muted">{t("intro")}</p>}</header>
- </div>{(pageKind==="home"||selected)&&<div><VoiceWorkspace captureActiveRef={captureActive} detailOnly={pageKind==="detail"} locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} setEditTargetSelectionPending={pending=>{editSelectionPending.current=pending;}} editRequest={voiceEditRequest} onCreated={recipe=>{showDetail(recipe);setError("");void reload();}}/></div>}
+ </div>{(pageKind==="home"||selected)&&<div><VoiceWorkspace onMicControl={setMicControl} captureActiveRef={captureActive} detailOnly={pageKind==="detail"} locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} setEditTargetSelectionPending={pending=>{editSelectionPending.current=pending;}} editRequest={voiceEditRequest} onCreated={recipe=>{showDetail(recipe);setError("");void reload();}}/></div>}
  {pageKind==="detail"&&detailCandidatesActive&&<section className="workspace-section" aria-label={locale==="ja"?"レシピ検索結果":"Recipe search results"} aria-busy={loadingList}>
   <h2>{locale==="ja"?"候補からレシピを選択":"Choose a recipe"}</h2>
   {items.length===0?<p role="status">{loadingList?(locale==="ja"?"検索しています…":"Searching…"):(locale==="ja"?"このページに候補はありません。":"No recipes on this page.")}</p>:<div className="recipe-list">{items.map(item=><button key={item.id} className="recipe-list-item" disabled={busy||loadingList} onClick={()=>void open(item.id)} aria-label={locale==="ja"?`${item.title}の詳細を開く`:`View ${item.title}`}>
@@ -434,7 +435,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  <button type="button" disabled={busy} className="detail-ai-button" onClick={()=>setVoiceEditRequest(n=>n+1)}>{locale==="ja"?"🎙 音声でレシピを修正":"🎙 Edit recipe by voice"}</button>
  <p className="muted">{locale==="ja"?"編集モードへ切り替わります。マイクをオンにして変更内容を話してください。変更案を確認・承認してから保存します。":"Edit mode opens automatically. Enable the microphone and describe changes. Review and approve before saving."}</p>
  <button type="button" disabled={busy} aria-expanded={aiOpen} onClick={()=>setAiOpen(v=>!v)} className="detail-ai-button">{locale==="ja"?"◇ AIに変更相談":"◇ Ask AI to edit"}</button>
- <div hidden={!aiOpen}><AIEditor key={selected.id} recipe={selected} locale={locale} control={editor} markReview={()=>reviewBoundary.current?.()??-1} onBusy={b=>{setBusy(b);if(b)setAiOpen(true);}} onSaved={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");void reload();}} /></div>
+ <div hidden={!aiOpen}><AIEditor micControl={micControl} key={selected.id} recipe={selected} locale={locale} control={editor} markReview={()=>reviewBoundary.current?.()??-1} onBusy={b=>{setBusy(b);if(b)setAiOpen(true);}} onSaved={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");void reload();}} /></div>
  </section>}
  {actionItem&&<div className="name-choice-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setActionItem(null);}}>
    <section role="dialog" aria-modal="true" aria-label={locale==="ja"?"レシピの操作":"Recipe actions"} className="name-choice-dialog recipe-action-dialog">

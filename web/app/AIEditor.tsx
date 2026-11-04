@@ -2,19 +2,21 @@
 import {useEffect,useImperativeHandle,useRef,useState,type Ref} from "react";
 import {label, type Locale} from "./i18n";
 import {useVoiceProcessingStatus,type VoiceStatusKey} from "./VoiceProcessingStatus";
+import EditProposalDialog,{type MicControl} from "./EditProposalDialog";
 import VoiceInput from "./VoiceInput";
 import ResearchEvidence from "./ResearchEvidence";
 import {isPriceResearchRequest,combineResearch,type RecipeResearch,type ResearchResult} from "../recipe-price-research";
 import {request, type AIProposal, type Operation, type Recipe} from "./types";
-import {voiceCommand} from "./voice-commands";
+import {editVoiceCommand} from "./voice-commands";
 import type {VoiceCaptureMeta} from "./useVoiceCapture";
 
-type Review = {proposal: AIProposal; instruction: string; requestId: string};
-function describe(recipe: Recipe, operations: Operation[], locale: Locale): string[] | null {
+type Review = {proposal: AIProposal; instruction: string; requestId: string;modal:boolean};
+export function describe(recipe: Recipe, operations: Operation[], locale: Locale) {
   const ja = locale === "ja";
   const lines = new Map(recipe.materials.map(line => [line.id, {...line}]));
   let title = recipe.title.value, selling = recipe.selling_price_jpy.value;
   const changes: string[] = [];
+  const addedIds=new Set<string>();
   for (const op of operations) {
     if (!op || Object.values(op).some(value => typeof value !== "string")) return null;
     const line = lines.get(op.material_id);
@@ -30,26 +32,38 @@ function describe(recipe: Recipe, operations: Operation[], locale: Locale): stri
         const p = line.effective_price??line.price_override;
         const before = line.price_mode === "inherit" && !p ? (ja ? "共通食材の単価" : "Shared ingredient price") : p ? `¥${p.amount_jpy.value ?? "—"} / ${p.per_quantity} ${p.per_unit}` : "—";
         changes.push(`${line.material_name.value || label(locale, "unnamed")} · ${ja ? "単価" : "Price"}: ${before} → ¥${op.price_jpy} / ${op.price_quantity} ${op.price_unit}`);
-        lines.set(line.id, {...line, price_mode: "override", price_override: {amount_jpy: {value: op.price_jpy, status: "assumed"}, per_quantity: op.price_quantity, per_unit: op.price_unit}}); break;
+        const quote={amount_jpy:{value:op.price_jpy,status:"assumed"},per_quantity:op.price_quantity,per_unit:op.price_unit};
+        lines.set(line.id, {...line, price_mode: "override", price_override:quote,effective_price:quote}); break;
       }
+      case "set_material_name":
+        if(!line)return null;
+        changes.push(`${ja?"食材名":"Ingredient"}: ${line.material_name.value??"—"} → ${op.value}`);
+        lines.set(line.id,{...line,material_name:{value:op.value,status:"assumed"}});break;
+      case "remove_material":
+        if(!line)return null;
+        changes.push(`${ja?"削除":"Remove"}: ${line.material_name.value??label(locale,"unnamed")} (${line.quantity.value??"—"} ${line.unit??""})`);
+        lines.delete(line.id);break;
       case "add_material":
         if (lines.has(op.material_id)) return null;
+        addedIds.add(op.material_id);
         changes.push(`${ja ? "食材を追加" : "Add ingredient"}: ${op.name}, ${op.quantity} ${op.unit}, ¥${op.price_jpy} / ${op.price_quantity} ${op.price_unit}`);
         lines.set(op.material_id, {id: op.material_id, material_name: {value: op.name, status: "assumed"}, quantity: {value: op.quantity, status: "assumed"}, unit: op.unit, price_mode: "override", price_override: {amount_jpy: {value: op.price_jpy, status: "assumed"}, per_quantity: op.price_quantity, per_unit: op.price_unit}}); break;
       default: return null;
     }
   }
-  return changes;
+  return {changes,materials:Array.from(lines.values()),addedIds};
 }
 
 export type EditorHandle={submit:(text:string,meta?:VoiceCaptureMeta)=>Promise<void>;hasPending:()=>boolean;invalidate:()=>void;isBusy:()=>boolean};
-export default function AIEditor({recipe, locale, onSaved, onBusy,control,markReview}: {
+export default function AIEditor({recipe, locale, onSaved, onBusy,control,markReview,micControl}: {
   recipe: Recipe; locale: Locale; onSaved: (recipe: Recipe) => void; onBusy: (busy: boolean) => void;
+  micControl?:MicControl|null;
   control?:Ref<EditorHandle>;markReview?:()=>number;
 }) {
   const t = (key: Parameters<typeof label>[1]) => label(locale, key);
   const [instruction, setInstruction] = useState("");
   const [review, setReview] = useState<Review | null>(null);
+  const [reviewOpen,setReviewOpen]=useState(false);
   const [approved, setApproved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [processing,setProcessing]=useState<VoiceStatusKey|null>(null);
@@ -62,11 +76,12 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
   const reviewRef=useRef<Review|null>(null),reviewEpoch=useRef(-1),generation=useRef(0),alive=useRef(true);
   const voiceHistory=useRef<string[]>([]),latestRecipe=useRef(recipe);latestRecipe.current=recipe;
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;generation.current++;};},[]);
-  function invalidate(){generation.current++;reviewRef.current=null;setReview(null);setApproved(false);setResearchResults([]);}
+  function invalidate(){setReviewOpen(false);reviewEpoch.current=-1;generation.current++;reviewRef.current=null;setReview(null);setApproved(false);setResearchResults([]);}
   useEffect(()=>{invalidate();voiceHistory.current=[];},[recipe.id,recipe.revision]);
   useImperativeHandle(control,()=>({submit:voiceSubmit,hasPending:()=>Boolean(reviewRef.current||voiceHistory.current.length||instruction.trim()),invalidate,isBusy:()=>lock.current}));
-  const changes = review ? describe(recipe, review.proposal.operations, locale) : null;
-  const valid = review && review.proposal.recipe_id === recipe.id && review.proposal.base_revision === recipe.revision && changes !== null;
+  const preview = review ? describe(recipe, review.proposal.operations, locale) : null;
+  const changes=preview?.changes;
+  const valid = review && review.proposal.recipe_id === recipe.id && review.proposal.base_revision === recipe.revision && preview !== null;
   async function refreshAfterConflict() {
     invalidate();
     const latest = await request<Recipe>(`/api/recipes/${recipe.id}`);
@@ -83,7 +98,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
   async function propose(e: React.FormEvent) {
     e.preventDefault();voiceHistory.current=[];await proposeText(instruction);
   }
-  async function proposeText(text:string) {
+  async function proposeText(text:string,showConfirmation=false) {
     if (lock.current || !text.trim()) return;
     const token=++generation.current,base=latestRecipe.current;
     working(true); setError(""); setNotice(""); setReview(null); setApproved(false);setResearchResults([]);
@@ -125,8 +140,8 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
       if (proposal.recipe_id !== base.id) throw new Error("invalid");
       if (proposal.base_revision !== base.revision) {await refreshAfterConflict(); return;}
       if (describe(base, proposal.operations, locale) === null) throw new Error("invalid");
-      const next:Review={proposal,instruction:text,requestId:crypto.randomUUID()};reviewRef.current=next;setReview(next);
-      reviewEpoch.current=markReview?.()??-1;
+      const next:Review={proposal,instruction:text,requestId:crypto.randomUUID(),modal:showConfirmation};reviewRef.current=next;setReview(next);setReviewOpen(showConfirmation);
+      reviewEpoch.current=showConfirmation?-1:markReview?.()??-1;
       setNotice(researchNotice+" "+(locale==="ja"?"変更案を表示しました。差分を確認後、もう一度「保存してください」と明示するか、確認チェックと保存ボタンを操作してください。":"Review the proposal, then explicitly request saving or use the approval controls."));
     } catch (e) {
       report(e);
@@ -138,7 +153,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
   async function confirm(voiceApproval?:Review) {
     const current=voiceApproval??review;
     if (lock.current || !current || current!==reviewRef.current || (!voiceApproval&&!approved) ||
-      current.proposal.recipe_id!==recipe.id||current.proposal.base_revision!==recipe.revision||!describe(recipe,current.proposal.operations,locale)?.length) return;
+      current.proposal.recipe_id!==recipe.id||current.proposal.base_revision!==recipe.revision||!describe(recipe,current.proposal.operations,locale)?.changes.length) return;
     working(true); setError("");setProcessing("save");
     try {
       const result = await request<{recipe: Recipe}>(`/api/recipes/${recipe.id}/confirm`, {method: "POST", body: JSON.stringify({base_revision: current.proposal.base_revision, request_id: current.requestId, operations: current.proposal.operations, save_version: true})});
@@ -152,7 +167,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
     } finally {setProcessing(null);working(false);}
   }
   async function voiceSubmit(text:string,meta?:VoiceCaptureMeta){
-    const command=voiceCommand(text);
+    const command=editVoiceCommand(text);
     if(command==="cancel"||command==="hold"){
       invalidate();if(command==="cancel"){voiceHistory.current=[];setInstruction("");}
       setNotice(locale==="ja"?"保存していません。変更案の承認を解除しました。":"Not saved. Proposal approval was cleared.");return;
@@ -160,13 +175,13 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
     if(command==="review"||command==="save"){
       const current=reviewRef.current;
       if(!current){setNotice(locale==="ja"?"保存できる変更案がありません。変更内容を話してください。":"No proposal to save. Describe the desired changes.");return;}
-      if(command==="save"&&(!meta||meta.reviewEpoch===reviewEpoch.current))await confirm(current);
-      else {reviewEpoch.current=markReview?.()??-1;setNotice(locale==="ja"?"差分を確認してください。その後、もう一度「保存してください」と明示してください。":"Review the changes, then explicitly request saving again.");}
+      if((reviewOpen||!current.modal)&&command==="save"&&(!meta||meta.reviewEpoch===reviewEpoch.current))await confirm(current);
+      else {setReviewOpen(true);reviewEpoch.current=markReview?.()??-1;setNotice(locale==="ja"?"差分を確認してください。その後、もう一度「保存してください」と明示してください。":"Review the changes, then explicitly request saving again.");}
       return;
     }
     const next=[...voiceHistory.current,text];
     if(next.join("\n").length>4000){setError(locale==="ja"?"変更指示が長すぎます。変更案を確認・保存するか、破棄してください。":"Too many change instructions. Review and save or discard the existing proposal.");return;}
-    voiceHistory.current=next;setInstruction(next.join("\n"));await proposeText(next.join("\n"));
+    voiceHistory.current=next;setInstruction(next.join("\n"));await proposeText(next.join("\n"),true);
   }
   async function record(e: React.FormEvent) {
     e.preventDefault(); if (lock.current || !heard.trim() || !preferred.trim() || heard.trim() === preferred.trim()) return;
@@ -176,6 +191,18 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
       setNotice(t("correctionSaved")); setHeard(""); setPreferred("");
     } catch (e) {report(e, true);} finally {working(false);}
   }
+  const proposalContent = review && <section className="proposal" aria-label={t("proposalDiff")}>
+      <h3>{t("proposalDiff")}</h3><p className="muted">{t("originalInstruction")}: {review.instruction}</p>
+      {review.proposal.provider && <p className="tag">{review.proposal.provider.name === "meta_responses" ? "Meta Muse" : (locale === "ja" ? "代替モデル" : "Substitute model")} · {review.proposal.provider.model}</p>}
+      {!valid ? <p role="alert">{t("staleProposal")}</p> : changes?.length ? <>
+        <ol>{changes.map((change, i) => <li key={i}>{change}</li>)}</ol>
+        {preview&&<section aria-label={locale==="ja"?"更新後の食材構成":"Ingredients after changes"}><h4>{locale==="ja"?"更新後の食材構成":"Ingredients after changes"}</h4><ul>{preview.materials.map(line=><li key={line.id} className={preview.addedIds.has(line.id)?"font-bold text-emerald-300":""}>{preview.addedIds.has(line.id)&&<strong>{locale==="ja"?"追加：":"Added: "}</strong>}{line.material_name.value} · {line.quantity.value??"—"} {line.unit??""}</li>)}</ul></section>}
+        <p>{t("proposalOnly")}</p>
+        <label className="approval"><input type="checkbox" checked={approved} disabled={busy} onChange={e => setApproved(e.target.checked)}/>{t("approveValues")}</label>
+        <div className="actions"><button type="button" disabled={busy || !approved} onClick={() => void confirm()}>{t("confirmSave")}</button>
+        <button className="secondary" type="button" disabled={busy} onClick={() => {invalidate();voiceHistory.current=[];setInstruction("");}}>{t("discard")}</button></div>
+      </> : <p>{t("noProposal")}</p>}
+    </section>;
   return <section className="ai-workspace" aria-label={t("aiInstruction")} aria-busy={busy}>
     <p className="tag">{t("conversation")}</p><h2>{t("aiInstruction")}</h2>
     <p className="muted">{t("approvalHelp")}</p><p className="provider-note">{t("museStatus")}</p>
@@ -186,18 +213,11 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
     </form>
     {error && <p className="error" role="alert">{error}</p>}
     <p role="status">{notice}</p>
-    <ResearchEvidence results={researchResults} locale={locale}/>
-    {review && <section className="proposal" aria-label={t("proposalDiff")}>
-      <h3>{t("proposalDiff")}</h3><p className="muted">{t("originalInstruction")}: {review.instruction}</p>
-      {review.proposal.provider && <p className="tag">{review.proposal.provider.name === "meta_responses" ? "Meta Muse" : (locale === "ja" ? "代替モデル" : "Substitute model")} · {review.proposal.provider.model}</p>}
-      {!valid ? <p role="alert">{t("staleProposal")}</p> : changes?.length ? <>
-        <ol>{changes.map((change, i) => <li key={i}>{change}</li>)}</ol>
-        <p>{t("proposalOnly")}</p>
-        <label className="approval"><input type="checkbox" checked={approved} disabled={busy} onChange={e => setApproved(e.target.checked)}/>{t("approveValues")}</label>
-        <div className="actions"><button type="button" disabled={busy || !approved} onClick={() => void confirm()}>{t("confirmSave")}</button>
-        <button className="secondary" type="button" disabled={busy} onClick={() => {invalidate();voiceHistory.current=[];setInstruction("");}}>{t("discard")}</button></div>
-      </> : <p>{t("noProposal")}</p>}
-    </section>}
+    {!reviewOpen&&<ResearchEvidence results={researchResults} locale={locale}/>}
+    {reviewOpen&&review?<EditProposalDialog locale={locale} busy={busy} micControl={micControl} onPresented={()=>{reviewEpoch.current=markReview?.()??-1;}} onClose={()=>{setReviewOpen(false);setApproved(false);reviewEpoch.current=-1;}}>
+      {error&&<p role="alert" className="error">{error}</p>}<p role="status">{notice}</p><ResearchEvidence results={researchResults} locale={locale}/>{proposalContent}
+    </EditProposalDialog>:<>{proposalContent}{review&&<button type="button" onClick={()=>setReviewOpen(true)}>{locale==="ja"?"変更案を確認":"Review changes"}</button>}</>}
+
     <details className="correction"><summary>{t("correctionTitle")}</summary>
       <p className="muted">{t("correctionHelp")}</p>
       <form onSubmit={record}>

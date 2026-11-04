@@ -10,7 +10,7 @@ import type {EditorHandle} from "./AIEditor";
 import VoiceRecipeRegistration,{type RegistrationHandle} from "./VoiceRecipeRegistration";
 import {playVoiceCue,type VoiceMode} from "./VoiceModePanel";
 import {voiceNavigation,explicitEditRequest,type Navigation} from "./voice-navigation";
-import {voiceCommand} from "./voice-commands";
+import {voiceCommand,editVoiceCommand} from "./voice-commands";
 import {useVoiceCapture,type VoiceCaptureMeta} from "./useVoiceCapture";
 import {useRealtimeVoiceCapture} from "./useRealtimeVoiceCapture";
 import {logVoiceEvent,getVoiceEvents,subscribeVoiceEvents,type VoiceDiagEvent} from "./voice-diagnostics";
@@ -20,7 +20,8 @@ function MicrophoneGlyph(){return <svg width="36" height="36" viewBox="0 0 24 24
 function ListeningWave({active}:{active:boolean}){return <div className={"listening-wave"+(active?" is-active":"")} aria-hidden="true">{[.32,.65,1,.55,.88,.42,.7,.96,.6,.35,.72,.4].map((v,i)=><span key={i} style={{"--bar-scale":v,"--bar-delay":`${i*65}ms`} as React.CSSProperties}/>)}</div>;}
 
 const voiceMessagesEn:Record<string,string> = {"参照モードです。表示中のレシピの変更内容を話すと編集へ進みます。":"Browse mode. Describe a change to edit the displayed recipe.","保存・変更処理中です。完了後に切り替えてください。":"Saving or editing is in progress. Switch modes after it finishes.","未保存の変更案があります。保存するか、「変更案を破棄」と話してから切り替えてください。":"You have unsaved proposed changes. Save or discard them before switching.","編集対象のレシピを検索しています。":"Searching for the recipe to edit.","編集対象を一つに絞れませんでした。検索結果から選んでください。":"Could not identify a unique recipe. Select one from the search results.","編集するレシピを先に呼び出してください。":"Open a recipe before editing.","登録モードです。保持していた下書きを続けます。":"Create mode. Continuing your saved draft.","登録モードです。料理名・食材・分量・仕入単価をどうぞ。":"Create mode. Tell me the dish, ingredients, quantities and purchase prices.","編集モードです。変更内容を話してください。保存には変更案の確認と明示承認が必要です。":"Edit mode. Describe the changes. Review and explicitly approve proposals before saving.","承認された下書きを保存中です。完了後に続きをお願いします。":"Saving the approved draft. Continue after it finishes.","切り替え前の承認は適用していません。現在のモードを確認して、もう一度お願いします。":"Approval from a previous mode was not applied. Check the current mode and try again.","処理待ちの発話が多すぎます。処理完了後に再度お願いします。":"Too many queued utterances. Try again when processing completes.","切り替え前の承認は適用していません。もう一度お願いします。":"An earlier approval was ignored. Please repeat the request.","保持していた下書きを確認します。":"Reviewing your preserved draft.","変更案を破棄しました。レシピ自体は変更していません。":"Proposed changes discarded. The recipe was not changed.","切り替えずに現在の内容を保持しています。希望する操作をもう一度教えてください。":"Kept the current mode and content. Please clarify your request.","切り替え先を確認できませんでした。登録・参照・編集のどれかを教えてください。":"Could not determine the requested mode. Choose create, browse or edit.","登録モードです。料理の内容を下書きにします。":"Create mode. Starting a recipe draft.","対象のレシピを呼び出してください。候補が複数なら画面で選んでください。":"Open the target recipe. If several match, select one on screen.","参照中です。変更内容を話すと編集へ進みます。保存はしません。":"Browsing. Describe a change to enter edit mode; nothing will be saved yet.","変更せず、参照モードのままです。":"No changes made. Staying in browse mode.","参照モードのままです。変更する場合は、対象と変更内容を教えてください。":"Still in browse mode. Specify the target and desired change to edit.","編集モードです。変更案を作成します。":"Edit mode. Preparing a proposed change.","操作を完了できませんでした。現在の内容を確認して、もう一度お願いします。":"Could not complete the operation. Check the current state and try again."};
-export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditTargetSelectionPending,onCreated,reviewBoundary,editRequest,detailOnly=false,captureActiveRef}:{
+export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditTargetSelectionPending,onCreated,reviewBoundary,editRequest,detailOnly=false,captureActiveRef,onMicControl}:{
+ onMicControl:(control:import("./EditProposalDialog").MicControl|null)=>void;
  locale:Locale;selected:Recipe|null;editor:RefObject<EditorHandle|null>;onBrowse:(target:string,openVoiceEdit?:boolean)=>Promise<Recipe|null>;
  setEditTargetSelectionPending:(pending:boolean)=>void;
  onCreated:(recipe:Recipe)=>void;reviewBoundary:RefObject<(()=>number)|null>;editRequest:number;detailOnly?:boolean;captureActiveRef?:RefObject<boolean|null>;
@@ -157,6 +158,9 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
  // One mic state drives both the panel button and the fixed bottom control,
  // so recording/stop/processing can never disagree between the two.
  const micDisabled=realtimeActive?realtime.state==="draining":!voice.recording&&(voice.supported===false||voice.busy);
+ const toggleMicRef=useRef(()=>{});toggleMicRef.current=toggleMic;
+ useEffect(()=>{onMicControl({recording:micRecording,disabled:micDisabled,toggle:()=>toggleMicRef.current()});},[onMicControl,micRecording,micDisabled]);
+ useEffect(()=>()=>onMicControl(null),[onMicControl]);
  function toggleMic(){
   if(micRecording){if(realtimeActive)realtime.stop();else voice.stop();}
   else void (realtimeActive?realtime.start():voice.start());
@@ -185,6 +189,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
   return()=>{active=false;observer.disconnect();};
  },[]);
 
+ function commandForMode(text:string){return currentMode.current==="edit"?editVoiceCommand(text):voiceCommand(text);}
  function receive(text:string,meta?:VoiceCaptureMeta){
   if(!text.trim())return;
   setHeard(text);
@@ -192,8 +197,8 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
   if(registration.current?.isSaving()){feedback("承認された下書きを保存中です。完了後に続きをお願いします。",true);return;}
   const captured:VoiceCaptureMeta={reviewEpoch:meta?.reviewEpoch??boundary.current,traceId:meta?.traceId??newTrace(),source:meta?.source};
   // Approval/navigation from an earlier mode must never affect a new target.
-  if(captured.reviewEpoch<modeBoundary.current&&voiceCommand(text)!=="data"){feedback("切り替え前の承認は適用していません。現在のモードを確認して、もう一度お願いします。",true);return;}
-  if(currentMode.current==="edit"&&voiceCommand(text)==="data"&&!voiceNavigation(text))editor.current?.invalidate();
+  if(captured.reviewEpoch<modeBoundary.current&&commandForMode(text)!=="data"){feedback("切り替え前の承認は適用していません。現在のモードを確認して、もう一度お願いします。",true);return;}
+  if(currentMode.current==="edit"&&commandForMode(text)==="data"&&!voiceNavigation(text))editor.current?.invalidate();
   if(queue.current.length>=30){logVoiceEvent("queue.dropped","30 utterances pending",captured.traceId??"");feedback("処理待ちの発話が多すぎます。処理完了後に再度お願いします。",true);return;}
   queue.current.push({text,meta:captured});void drain();
  }
@@ -206,8 +211,8 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
   if(running.current)return;running.current=true;setRouting(true);
   try{while(alive.current&&queue.current.length){
    const input=queue.current.shift()!;
-   if(input.meta.reviewEpoch<modeBoundary.current&&voiceCommand(input.text)!=="data"){feedback("切り替え前の承認は適用していません。もう一度お願いします。",true);continue;}
-   const control=voiceCommand(input.text);
+   if(input.meta.reviewEpoch<modeBoundary.current&&commandForMode(input.text)!=="data"){feedback("切り替え前の承認は適用していません。もう一度お願いします。",true);continue;}
+   const control=commandForMode(input.text);
    // A pending registration draft stays reachable from idle/browse: an explicit
    // review/save request with no navigation meaning routes to the draft instead
    // of starting a new search. Navigation-shaped requests keep normal routing so
@@ -220,7 +225,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
    }
    // In an active task, a human's explicit save/review is a control first.
    // “レシピを登録してください” must not be swallowed as create navigation.
-   if(voiceCommand(input.text)!=="data"&&(currentMode.current==="create"||currentMode.current==="edit")){
+   if(commandForMode(input.text)!=="data"&&(currentMode.current==="create"||currentMode.current==="edit")){
     if(currentMode.current==="create"){registration.current?.submit(input.text,input.meta);setDraftPending(Boolean(registration.current?.hasPending()));}
     else await editor.current?.submit(input.text,input.meta);
     continue;
@@ -232,7 +237,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
    let nav=voiceNavigation(input.text);
    // Only navigation paraphrases need an intent call. Material dictation and
    // approval controls stay on their existing paths without another model hop.
-   if(!nav&&!isPriceResearchRequest(input.text)&&voiceCommand(input.text)==="data"&&/(?:モード|レシピ.*(?:登録|参照|呼び出|検索|見たい|編集)|メニュー.*(?:登録|作成)|探したい|呼び出したい)/.test(input.text)&&!/[0-9０-９]/.test(input.text)){
+   if(!nav&&!isPriceResearchRequest(input.text)&&commandForMode(input.text)==="data"&&/(?:モード|レシピ.*(?:登録|参照|呼び出|検索|見たい|編集)|メニュー.*(?:登録|作成)|探したい|呼び出したい)/.test(input.text)&&!/[0-9０-９]/.test(input.text)){
     if(/しない|しません|ではなく|じゃなく|やめ/.test(input.text)){feedback("切り替えずに現在の内容を保持しています。希望する操作をもう一度教えてください。",true);continue;}
     const result=await checkIntent(input.text,currentMode.current);
     if(!["create","browse","edit"].includes(result.intent)||typeof result.target!=="string"){
@@ -250,7 +255,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
    else if(currentMode.current==="browse"||currentMode.current==="edit"){
     if(!selectedRef.current||!editor.current){feedback("対象のレシピを呼び出してください。候補が複数なら画面で選んでください。",true);continue;}
     if(currentMode.current==="browse"){
-     if(voiceCommand(input.text)!=="data"){feedback("参照中です。変更内容を話すと編集へ進みます。保存はしません。");continue;}
+     if(commandForMode(input.text)!=="data"){feedback("参照中です。変更内容を話すと編集へ進みます。保存はしません。");continue;}
      if(!explicitEditRequest(input.text)){
       if(/(?:変更|修正|訂正|追加)(?:は)?(?:しない|しません)/.test(input.text)){feedback("変更せず、参照モードのままです。");continue;}
       const intent=await checkIntent(input.text,"browse");
