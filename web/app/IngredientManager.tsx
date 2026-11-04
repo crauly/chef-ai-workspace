@@ -19,7 +19,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
  const [supplierFilter,setSupplierFilter]=useState("all");
  const [supplierMap,setSupplierMap]=useState<Record<string,string[]>|null>(null);
  const [showCreate,setShowCreate]=useState(false);
- const [availableSuppliers,setAvailableSuppliers]=useState<{id:string;name:string}[]>([]);
+ const [availableSuppliers,setAvailableSuppliers]=useState<{id:string;name:string;is_market_reference?:boolean}[]>([]);
  const [linkSupplier,setLinkSupplier]=useState("");
  const [supplierLoading,setSupplierLoading]=useState(false);
  const [page,setPage]=useState(1);
@@ -57,16 +57,17 @@ export default function IngredientManager({locale}:{locale:Locale}){
   setUnit(item.current_price?.per_unit??"");
   setError("");setLinkSupplier("");setSupplierLoading(true);setApprovedPrices([]);
   try{
-   const collected:{id:string;name:string}[]=[];
+   const collected:{id:string;name:string;is_market_reference?:boolean}[]=[];
    for(let page=1;page<=100;page++){
     const response=await fetch(`/api/suppliers?page=${page}&page_size=100`,{cache:"no-store"});
     if(!response.ok)throw new Error("suppliers");
-    const data=await response.json() as {items?:{id:string;name:string}[]};
+    const data=await response.json() as {items?:{id:string;name:string;is_market_reference?:boolean}[]};
     if(!Array.isArray(data.items))throw new Error("shape");
     collected.push(...data.items);
     if(data.items.length<100)break;
    }
    setAvailableSuppliers(collected);
+   setPriceSupplier(collected.find(s=>s.is_market_reference)?.id??"");
    const pricesResponse=await fetch(`/api/ingredients/${item.id}/offer-prices`,{cache:"no-store"});
    if(!pricesResponse.ok)throw new Error("approved prices");
    const pricing=await pricesResponse.json() as {items?:typeof approvedPrices};
@@ -110,7 +111,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
    setError(ja?"価格・数量・単位をすべて正しく入力してください。":"Enter a valid price, quantity and unit.");return;
   }
   const supplier=availableSuppliers.find(s=>s.id===priceSupplier);
-  const target=supplier?.name??(ja?"相場参考価格（仕入れ先なし）":"Market reference price (no supplier)");
+  const target=supplier?.name??(ja?"相場参考価格":"Market reference price");
   if(!window.confirm(ja?`${target}の価格 ¥${value} / ${qty} ${u} を採用しますか？`:`Adopt ${target}: JPY ${value} / ${qty} ${u}?`))return;
   setBusy(true);
   try{
@@ -174,7 +175,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
   <div className="ingredient-editor-fields">
    <label>{ja?"食材名":"Ingredient name"}<input autoFocus value={name} maxLength={200} disabled={busy} onChange={e=>setName(e.target.value)}/></label>
    <label>{ja?"規格（商品の識別用）":"Specification (identity only)"}<input value={spec} maxLength={200} disabled={busy} placeholder={ja?"例：1号缶、10個入り":"e.g. No.1 can, 10-count"} onChange={e=>setSpec(e.target.value)}/></label>
-   <label>{ja?"仕入れ先（採用価格）":"Supplier (adopted price)"}<select value={priceSupplier} disabled={busy||supplierLoading} onChange={e=>{setPriceSupplier(e.target.value);setPrice("");setQuantity("");setUnit("");}}><option value="">{ja?"相場参考価格（仕入れ先なし）":"Market reference price (no supplier)"}</option>{availableSuppliers.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select></label>
+   <label>{ja?"仕入れ先（採用価格）":"Supplier (adopted price)"}<select value={priceSupplier} disabled={busy||supplierLoading} onChange={e=>{setPriceSupplier(e.target.value);setPrice("");setQuantity("");setUnit("");}}>{!availableSuppliers.some(s=>s.is_market_reference)&&<option value="">{ja?"相場参考価格":"Market reference price"}</option>}{availableSuppliers.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select></label>
    <label>{ja?"仕入価格（円）":"Purchase price (JPY)"}<input inputMode="decimal" value={price} disabled={busy} onChange={e=>setPrice(e.target.value)}/></label>
    <label>{ja?"仕入数量":"Purchase quantity"}<input inputMode="decimal" value={quantity} disabled={busy} onChange={e=>setQuantity(e.target.value)}/></label>
    <label>{ja?"仕入単位":"Purchase unit"}<input value={unit} maxLength={32} disabled={busy} onChange={e=>setUnit(e.target.value)}/></label>
@@ -189,7 +190,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
   </div>
   <div className="ingredient-supplier-prices"><strong>{ja?"採用価格の比較":"Approved price comparison"}</strong>
    {approvedPrices.length===0?<p className="ingredient-muted">{ja?"採用価格はありません。":"No approved prices."}</p>:
-   <ul>{approvedPrices.map(quote=><li key={quote.offer_id}>{quote.supplier_name??(ja?"相場参考価格（仕入れ先なし）":"Market reference (no supplier)")}：¥{formatAmount(quote.amount_jpy)} / {quote.quantity} {quote.unit}</li>)}</ul>}
+   <ul>{approvedPrices.map(quote=><li key={quote.offer_id}>{quote.supplier_name??(ja?"相場参考価格":"Market reference price")}：¥{formatAmount(quote.amount_jpy)} / {quote.quantity} {quote.unit}</li>)}</ul>}
    <p className="ingredient-muted">{ja?"購入数量・単位が異なる価格は、そのまま高安比較しません。":"Different package quantities or units are not directly comparable."}</p>
   </div>
   <p className="ingredient-muted">{ja?"「保存」は食材名・規格のみを更新します。価格は「価格を登録・採用」で履歴に記録して反映します。規格による自動単位換算はしません。":"Save updates identity only. Adopt price explicitly to record an observation. Specifications do not convert units."}</p>

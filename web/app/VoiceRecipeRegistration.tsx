@@ -52,13 +52,9 @@ export function priceMissingNames(draft:Draft):string[]{
  });
  return [...names];
 }
-// Save boundary: recipe lines carry no supplier column and
-// CompleteRecipeMaterial forbids extras, so every save mode projects drafts
-// through toSaveMaterials (prices nulled when unknown, supplier omitted).
-// The spoken purchase source stays visible in review and is handed to the
-// chef as a memo; formal supplier linkage uses the existing ledger path
-// (ingredient-assist -> offer observations -> observations/confirm, all
-// Human-Gate approved), never an automatic write.
+// Explicit approval projects the complete supplier name with the existing
+// all-or-nothing price trio. Supplier/offer identity is resolved atomically
+// on the server; the model never chooses owner IDs or adopts before this gate.
 // Block 3 (dish image) pure helpers live in ./dish-image (shared with the
 // saved-recipe detail section). Re-exported here so existing imports keep
 // working; the generated image stays a preview, never recipe evidence.
@@ -70,7 +66,7 @@ export function toSaveMaterials(draft:Draft){
   const quantity=m.quantity&&m.unit?m.quantity:null;
   const unit=quantity?m.unit:null;
   const priced=Boolean(quantity&&unit&&m.price_jpy&&m.price_quantity&&m.price_unit);
-  return {name:m.name,quantity,unit,
+  return {name:m.name,quantity,unit,supplier:m.supplier?.trim()||null,
    price_jpy:priced?m.price_jpy:null,price_quantity:priced?m.price_quantity:null,
    price_unit:priced?m.price_unit:null};
  });

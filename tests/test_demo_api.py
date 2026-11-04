@@ -109,20 +109,16 @@ class DemoLibraryTests(unittest.TestCase):
 if __name__=="__main__": unittest.main()
 
 class SaveBoundaryContractTests(unittest.TestCase):
-    """Recipe lines carry no supplier column: CompleteRecipeMaterial forbids
-    extras, so the voice save boundary must project spoken suppliers out of
-    every save payload (confirmed and unconfirmed alike) instead of 422ing.
-    Supplier linkage stays on the existing ledger path (ingredient-assist ->
-    offer observations -> observations/confirm) behind the Human Gate."""
+    """The approved body preserves a supplier name; IDs are resolved server-side."""
 
-    def test_material_with_supplier_is_rejected(self):
+    def test_material_with_supplier_is_accepted_for_atomic_save(self):
         from chef_ai_workspace.demo_api import CompleteRecipeBody
         body = {"request_id": str(uuid4()), "title": "ペペロンチーノ",
                 "materials": [{"name": "パスタ", "quantity": "100", "unit": "g",
                                "price_jpy": "350", "price_quantity": "500",
                                "price_unit": "g", "supplier": "築地場外"}]}
-        with self.assertRaises(Exception):
-            CompleteRecipeBody.model_validate(body)
+        parsed = CompleteRecipeBody.model_validate(body)
+        self.assertEqual(parsed.materials[0].supplier, "築地場外")
 
     def test_projected_material_without_supplier_is_accepted(self):
         from chef_ai_workspace.demo_api import CompleteRecipeBody

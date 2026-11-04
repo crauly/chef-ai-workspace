@@ -180,7 +180,11 @@ def _displayed_recipe(owner, repository, found):
     out = asdict(found)
     price_loader = getattr(repository, "load_owned_supplier_prices", None)
     supplier_prices = price_loader(owner, found) if callable(price_loader) else {}
+    supplier_ids=sorted({m.supplier_id for m in found.materials if m.supplier_id})
+    names_loader=getattr(repository,"load_owned_supplier_names",None)
+    supplier_names=names_loader(owner,supplier_ids) if supplier_ids and callable(names_loader) else {}
     for line in out["materials"]:
+        line["supplier_name"]=supplier_names.get(line.get("supplier_id"))
         ingredient = catalog.get(line.get("ingredient_id"))
         quote = (supplier_prices.get((line.get("ingredient_id"), f"offer:{line['offer_id']}"))
                  if line.get("offer_id") else
@@ -252,6 +256,8 @@ def list_demo_suppliers(page: int = Query(default=1, ge=1),
                         page_size: int = Query(default=50, ge=1, le=100),
                         ctx=Depends(demo_context)):
     owner, repository = ctx
+    seed=getattr(repository,"ensure_market_reference_supplier",None)
+    if callable(seed): seed(owner)
     return {"items": repository.list_owned_suppliers(owner, limit=page_size, offset=(page-1)*page_size),
             "page": page, "page_size": page_size}
 
@@ -505,6 +511,7 @@ class CompleteRecipeMaterial(BaseModel):
     price_jpy: str | None = Field(default=None, max_length=30)
     price_quantity: str | None = Field(default=None, max_length=30)
     price_unit: str | None = Field(default=None, min_length=1, max_length=32)
+    supplier: str | None = Field(default=None, max_length=200)
 
 
 class UnitCandidateBody(BaseModel):
@@ -537,7 +544,11 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
     except ValueError:
         existing = None
     if existing is not None:
-        # An uncertain network retry must not create duplicates.
+        # An uncertain retry must not create suppliers/offers or adopt twice.
+        verifier = getattr(repository, "verify_owned_creation_payload", None)
+        if callable(verifier):
+            try: verifier(owner, recipe_id, body.model_dump(mode="json"))
+            except ValueError as exc: raise HTTPException(409, "Creation request conflict") from exc
         return _displayed_recipe(owner, repository, existing)
     # The explicit recipe-save action is the only approval gate for new units.
     # Candidates are checked against the owned catalog; unknown spelling may
@@ -609,10 +620,15 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
     if not callable(finder):
         raise HTTPException(503,"Ingredient master lookup unavailable")
     reader=getattr(repository,"load_owned_ingredients",None)
+    procurement_writer=getattr(repository,"create_owned_procured_recipe",None)
+    procured=callable(procurement_writer)
+    if not procured and any(m.supplier for m in body.materials):
+        raise HTTPException(503,"Atomic procurement save unavailable")
+    procurement=[]
     prepared_lines=[]
     catalog={}
     entries_by_name={}
-    for line in recipe.materials:
+    for line, material in zip(recipe.materials, body.materials):
         name=(line.material_name.value or "").strip()
         key=name.casefold()
         entry=entries_by_name.get(key)
@@ -638,7 +654,9 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
             catalog[ing_id]=Ingredient(ing_id,name,existing_price)
         ing_id=entry["id"]
         quote=line.price_override
-        if quote is not None:
+        procurement.append({"material_id":line.id,"supplier":material.supplier.strip() if material.supplier else None,
+                            "quote":asdict(quote) if quote is not None else None})
+        if quote is not None and not procured:
             if entry["current_price"] is not None and entry["current_price"]!=asdict(quote):
                 raise HTTPException(422,"Conflicting quotes for one shared ingredient")
             entry["current_price"]=asdict(quote)
@@ -654,10 +672,15 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
         supplier_prices = price_loader(owner, recipe) if callable(price_loader) else {}
         snapshot = _json(asdict(calculate_cost(
             recipe, catalog, unit_factor_catalog(known_units), supplier_prices)))
-        repository.create_owned_recipe(owner, recipe, snapshot, unit_candidates=new_units,
-                                       ingredient_entries=ingredient_entries)
+        if procured:
+            procurement_writer(owner, recipe, snapshot, unit_candidates=new_units,
+                               ingredient_entries=ingredient_entries, procurement=procurement,
+                               request_payload=body.model_dump(mode="json"))
+        else:
+            repository.create_owned_recipe(owner, recipe, snapshot, unit_candidates=new_units,
+                                           ingredient_entries=ingredient_entries)
     except ValueError as exc:
-        raise HTTPException(409, "Recipe already exists") from exc
+        raise HTTPException(409, "Recipe creation or procurement conflict") from exc
     # The transaction resolves canonical unit IDs in the stored state.
     # Return the persisted representation, not the pre-commit proposal.
     committed = repository.load_owned_recipe(owner, recipe_id)
