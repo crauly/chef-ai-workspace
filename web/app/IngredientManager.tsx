@@ -20,7 +20,6 @@ export default function IngredientManager({locale}:{locale:Locale}){
  const [supplierMap,setSupplierMap]=useState<Record<string,string[]>|null>(null);
  const [showCreate,setShowCreate]=useState(false);
  const [availableSuppliers,setAvailableSuppliers]=useState<{id:string;name:string;is_market_reference?:boolean}[]>([]);
- const [linkSupplier,setLinkSupplier]=useState("");
  const [supplierLoading,setSupplierLoading]=useState(false);
  const [page,setPage]=useState(1);
  const [sort,setSort]=useState<"name"|"price"|"supplier">("name");
@@ -55,7 +54,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
   setPrice(item.current_price?.amount_jpy?.value??"");
   setQuantity(item.current_price?.per_quantity??"");
   setUnit(item.current_price?.per_unit??"");
-  setError("");setLinkSupplier("");setSupplierLoading(true);setApprovedPrices([]);
+  setError("");setSupplierLoading(true);setApprovedPrices([]);
   try{
    const collected:{id:string;name:string;is_market_reference?:boolean}[]=[];
    for(let page=1;page<=100;page++){
@@ -75,19 +74,6 @@ export default function IngredientManager({locale}:{locale:Locale}){
    setApprovedPrices(pricing.items);
   }catch{setError(ja?"仕入れ先一覧を取得できません。":"Could not load suppliers.");}
   finally{setSupplierLoading(false);}
- }
- async function linkSupplierTo(item:Ingredient){
-  if(busy||!linkSupplier)return;
-  setBusy(true);
-  try{
-   const response=await fetch("/api/ingredients/"+item.id+"/suppliers",{
-    method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({supplier_id:linkSupplier}),
-   });
-   if(!response.ok)throw new Error("link");
-   setLinkSupplier("");await load();
-  }catch{setError(ja?"仕入れ先を紐付けできませんでした。":"Could not link supplier.");}
-  finally{setBusy(false);}
  }
  async function save(id:string){
   if(busy)return;
@@ -181,13 +167,6 @@ export default function IngredientManager({locale}:{locale:Locale}){
    <label>{ja?"仕入単位":"Purchase unit"}<input value={unit} maxLength={32} disabled={busy} onChange={e=>setUnit(e.target.value)}/></label>
   </div>
   {error&&<p role="alert" className="error">{error}</p>}
-  <div className="ingredient-supplier-link">
-   <label>{ja?"仕入れ先を追加":"Add supplier"}<select value={linkSupplier} disabled={busy||supplierLoading} onChange={e=>setLinkSupplier(e.target.value)}>
-    <option value="">{supplierLoading?(ja?"読み込み中…":"Loading…"):(ja?"仕入れ先を選択":"Choose supplier")}</option>
-    {availableSuppliers.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}
-   </select></label>
-   <button type="button" className="secondary" disabled={busy||!linkSupplier||supplierLoading} onClick={()=>void linkSupplierTo(item)}>{ja?"紐付ける":"Link supplier"}</button>
-  </div>
   <div className="ingredient-supplier-prices"><strong>{ja?"採用価格の比較":"Approved price comparison"}</strong>
    {approvedPrices.length===0?<p className="ingredient-muted">{ja?"採用価格はありません。":"No approved prices."}</p>:
    <ul>{approvedPrices.map(quote=><li key={quote.offer_id}>{quote.supplier_name??(ja?"相場参考価格":"Market reference price")}：¥{formatAmount(quote.amount_jpy)} / {quote.quantity} {quote.unit}</li>)}</ul>}

@@ -147,13 +147,14 @@ microphone need not be restarted when switching modes.
 - **Browse / 参照**: select 参照 or ask for a recipe by name; verify the
   browse state and choose a unique recipe result. Browse does not change the
   saved recipe.
-- **Edit / 編集**: **first open/select the recipe to be modified** by browsing
-  or selecting it from the library. Only then select 編集 or ask to modify that
-  recipe. On the home screen with no selected recipe, pressing 編集 alone is
-  rejected with guidance to open a recipe first. Dictate the change, inspect
-  the proposal and before/after diff, then explicitly approve before the
-  existing `/api/recipes/{id}/confirm` write. If a requested recipe search
-  is ambiguous, select a result before editing.
+- **Edit / 編集**: on the home screen, select 編集 first, search/select the
+  target recipe, and verify that its detail route opened in 編集 mode. Saying
+  “〇〇のレシピを編集して” follows the same route; one match opens directly,
+  while multiple matches show selectable results. On an already-open detail,
+  the edit button starts edit mode for that recipe. Dictate changes only after
+  checking the displayed mode and target, inspect the proposal and before/after
+  diff, then explicitly approve before the existing
+  `/api/recipes/{id}/confirm` write.
 
 This is an **operating sequence, not a new hard enforcement rule**. Existing
 backward-compatible direct dictation from idle may still enter create mode;
@@ -166,14 +167,11 @@ by switching tasks. Do not confuse mode confirmation with permission to save.
 type a recipe name and create it, then edit its materials in the detail view.
 The mode buttons do not themselves implement a manual ingredient form.
 
-**Procurement UI terminology warning:** Ingredient management currently labels
-an abstract, owner-scoped Supplier as `相場参考価格` (market reference price).
-Selecting it in `仕入れ先（採用価格）` and manually entering amount / package
-quantity / unit does **not** fetch or calculate any market average. Explicit
-`価格を登録・採用` adopts that entered quote on a market-reference offer and
-updates the ingredient's shared adopted price. The separate `仕入れ先を追加`
-control only links an actual supplier to the ingredient; it does not adopt a
-price. The label can mislead operators into assuming a researched market
-quote; clarify the UI wording in a separate reviewed change without modifying
-the Supplier/Offer/Human Gate contract. See
+**Procurement UI:** the ingredient editor has one supplier selector. To record
+and adopt a purchase price, choose the supplier (including the abstract
+`相場参考価格` supplier), enter amount, purchase quantity and unit, then use
+`価格を登録・採用` and confirm. A supplier is therefore linked through its
+approved Offer and price history; the former price-free “add/link supplier”
+control is removed. Choosing `相場参考価格` does not fetch or calculate a
+market average. See
 [`APPROVED_RECIPE_PROCUREMENT.md`](../docs/APPROVED_RECIPE_PROCUREMENT.md).

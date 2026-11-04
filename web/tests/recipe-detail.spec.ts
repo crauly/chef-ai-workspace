@@ -205,6 +205,7 @@ test("independent detail route keeps selected recipe bound to voice edit", async
  await expect(detail.getByRole("heading", {name: "片栗粉のレシピ"})).toBeVisible();
  await detail.getByRole("button", {name: "🎙 音声でレシピを修正"}).click();
  await expect(page.locator("#voice-controls")).toBeVisible();
+ await expect(page.locator("#voice-controls")).toContainText("現在のモード: 編集");
  await expect(page.locator("#voice-controls")).toContainText("片栗粉のレシピ");
  await expect(page.getByRole("button", {name: /音声操作を開始/})).toBeVisible();
  await page.reload();
@@ -233,6 +234,51 @@ test("detail voice edit by another recipe name navigates on single match", async
   await expect(page).toHaveURL(/\/recipes\/[^/?]+$/); // One-time edit hint is consumed.
 });
 
+test("home Edit mode asks for a recipe, then opens its detail route in edit mode",async({page,request})=>{
+ await microphone(page);
+ await page.route("**/api/voice/transcribe",route=>route.fulfill({json:{transcript:"片栗粉を15gに変更して"}}));
+ await page.goto("/");
+ await page.getByRole("group",{name:"操作モード"}).getByRole("button",{name:"編集"}).click();
+ await expect(page.locator("#voice-controls")).toContainText("現在のモード: 参照");
+ await expect(page.locator("#voice-controls")).toContainText("編集するレシピを検索して選択してください。");
+ await page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"}).click();
+ await expect(page).toHaveURL(/\/recipes\/[^/?]+$/);
+ await expect(page.getByRole("heading",{name:"片栗粉のレシピ"})).toBeVisible();
+ await expect(page.locator("#voice-controls")).toContainText("現在のモード: 編集");
+ await expect(page.locator("#voice-controls")).toContainText("片栗粉のレシピ");
+ await page.getByRole("button",{name:"🎙 音声操作を開始",exact:true}).click();
+ await expect(page.getByRole("button",{name:/マイクを停止/}).first()).toBeVisible();
+ await page.waitForTimeout(2500);
+ await page.getByRole("button",{name:/マイクを停止/}).first().click();
+ await expect(page.getByLabel("提案の差分")).toBeVisible();
+ let state=await (await request.get("http://127.0.0.1:8100/test/state")).json();
+ expect(state.confirms).toHaveLength(0);
+ await page.locator(".proposal input[type=checkbox]").check();
+ await page.locator(".proposal .actions button").first().click();
+ await expect(page.getByRole("region",{name:"Recipe cost summary"})).toContainText("¥15");
+ state=await (await request.get("http://127.0.0.1:8100/test/state")).json();
+ expect(state.confirms).toHaveLength(1);
+});
+
+test("home voice edit keeps edit intent when the user selects among multiple recipes",async({page})=>{
+ await page.setViewportSize({width:390,height:844});
+ await microphone(page);
+ await page.route("**/api/voice/transcribe",route=>route.fulfill({json:{transcript:"スを編集して"}}));
+ await page.goto("/");
+ await page.getByRole("button",{name:"下部の音声操作"}).click();
+ await expect(page.getByRole("button",{name:/マイクを停止/}).first()).toBeVisible();
+ // The fixture microphone emits voiced frames only after AudioWorklet startup.
+ await page.waitForTimeout(2500);
+ await page.getByRole("button",{name:/マイクを停止/}).first().click();
+ await expect(page.getByRole("button",{name:/ミートソースパスタの詳細を開く/})).toBeVisible();
+ await expect(page.getByRole("button",{name:/きのこのクリームスープの詳細を開く/})).toBeVisible();
+ await page.getByRole("button",{name:"ミートソースパスタの詳細を開く"}).click();
+ await expect(page).toHaveURL(/\/recipes\/[^/?]+$/);
+ await expect(page.getByRole("heading",{name:"ミートソースパスタ"})).toBeVisible();
+ await expect(page.locator("#voice-controls")).toContainText("現在のモード: 編集");
+ await expect(page.locator("#voice-controls")).toContainText("ミートソースパスタ");
+});
+
 test("detail voice edit with no match keeps the current recipe", async ({page}) => {
   await page.setViewportSize({width: 390, height: 844});
   await microphone(page);
@@ -253,7 +299,7 @@ test("detail voice edit with no match keeps the current recipe", async ({page}) 
   await expect(detail.getByRole("heading", {name: "片栗粉のレシピ"})).toBeVisible();
 });
 
-test("detail voice edit with multiple matches keeps the current recipe", async ({page}) => {
+test("detail voice edit with multiple matches lets the user choose a target", async ({page}) => {
   // "ス" matches both ミートソースパスタ and きのこのクリームスープ, sharing the
   // same length!==1 branch as the no-match case: feedback, no navigation, waiter released.
   await page.setViewportSize({width: 390, height: 844});
@@ -273,6 +319,11 @@ test("detail voice edit with multiple matches keeps the current recipe", async (
   await expect(page.locator("#voice-controls")).toBeHidden();
   await expect(page).toHaveURL(url);
   await expect(detail.getByRole("heading", {name: "片栗粉のレシピ"})).toBeVisible();
+  await page.getByRole("region",{name:"レシピ検索結果"}).getByRole("button",{name:"きのこのクリームスープの詳細を開く"}).click();
+  await expect(page).toHaveURL(/\/recipes\/[^/?]+$/);
+  await expect(page.getByRole("heading",{name:"きのこのクリームスープ"})).toBeVisible();
+  await expect(page.locator("#voice-controls")).toContainText("現在のモード: 編集");
+  await expect(page.locator("#voice-controls")).toContainText("きのこのクリームスープ");
 });
 
 
