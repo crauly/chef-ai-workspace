@@ -15,6 +15,8 @@ export default function IngredientManager({locale}:{locale:Locale}){
  const [items,setItems]=useState<Ingredient[]>([]);
  const [loading,setLoading]=useState(true);
  const [busy,setBusy]=useState(false);
+ const [selectedIds,setSelectedIds]=useState<string[]>([]);
+ const [deleteResult,setDeleteResult]=useState("");
  const [error,setError]=useState("");
  const [editing,setEditing]=useState<string|null>(null);
  const [newName,setNewName]=useState("");
@@ -175,6 +177,22 @@ export default function IngredientManager({locale}:{locale:Locale}){
   }catch{setError(ja?"食材を登録できませんでした。重複名を確認してください。":"Could not create ingredient. Check for duplicate names.");}
   finally{setBusy(false);}
  }
+ async function removeSelected(){
+  const selected=items.filter(item=>selectedIds.includes(item.id));
+  if(busy||!selected.length)return;
+  if(!window.confirm(ja?`選択した${selected.length}件の食材を削除しますか？この操作は取り消せません。使用中の食材は削除できません。`:`Delete ${selected.length} selected ingredients? This cannot be undone. Ingredients in use cannot be deleted.`))return;
+  setBusy(true);setError("");setDeleteResult("");
+  const succeeded:string[]=[],failed:string[]=[];
+  for(const item of selected){
+   try{const r=await fetch("/api/ingredients/"+encodeURIComponent(item.id),{method:"DELETE"});if(!r.ok)throw new Error("delete");succeeded.push(item.id);}
+   catch{failed.push(item.name);}
+  }
+  setSelectedIds(ids=>ids.filter(id=>!succeeded.includes(id)));
+  try{await load();}
+  catch{setError(ja?"削除後の食材一覧を更新できませんでした。":"Unable to reload ingredients after deleting.");}
+  setDeleteResult(ja?`${succeeded.length}件を削除しました。${failed.length?` ${failed.length}件は削除できませんでした：${failed.join("、")}`:""}`:`Deleted ${succeeded.length} ingredients.${failed.length?` Failed (${failed.length}): ${failed.join(", ")}`:""}`);
+  setBusy(false);
+ }
  async function remove(item:Ingredient){
   if(busy||!window.confirm(ja?`「${item.name}」を削除しますか？使用中の食材は削除できません。`:`Delete ${item.name}? Ingredients in use cannot be deleted.`))return;
   setBusy(true);
@@ -206,6 +224,9 @@ export default function IngredientManager({locale}:{locale:Locale}){
  const pages=Math.max(1,Math.ceil(ordered.length/pageSize));
  const effectivePage=Math.min(page,pages);
  const visible=ordered.slice((effectivePage-1)*pageSize,effectivePage*pageSize);
+ const visibleSelected=visible.length>0&&visible.every(item=>selectedIds.includes(item.id));
+ const toggleSelected=(id:string,checked:boolean)=>setSelectedIds(ids=>checked?[...new Set([...ids,id])]:ids.filter(x=>x!==id));
+ const toggleVisible=(checked:boolean)=>setSelectedIds(ids=>checked?[...new Set([...ids,...visible.map(item=>item.id)])]:ids.filter(id=>!visible.some(item=>item.id===id)));
  const formatAmount=(raw:string)=>{const [whole,...fraction]=raw.split(".");return whole.replace(/\B(?=(\d{3})+(?!\d))/g,",")+(fraction.length?"."+fraction.join("."):"");};
  const priceLabel=(item:Ingredient)=>{
   const quote=displayedPrice(item);
@@ -261,6 +282,11 @@ export default function IngredientManager({locale}:{locale:Locale}){
     {supplierNames.map(n=><option value={n} key={n}>{n}</option>)}
    </select></label>
   </div>
+  <div className="ingredient-actions">
+   <button type="button" className="secondary ingredient-delete" disabled={busy||loading||selectedIds.length===0} onClick={()=>void removeSelected()}>{ja?`選択した${selectedIds.length}件を削除`:`Delete selected (${selectedIds.length})`}</button>
+   <label><input type="checkbox" checked={visibleSelected} disabled={busy||loading||visible.length===0} onChange={e=>toggleVisible(e.target.checked)}/>{ja?"このページをすべて選択":"Select all on this page"}</label>
+  </div>
+  {deleteResult&&<p role="status">{deleteResult}</p>}
   {(query||supplierFilter!=="all")&&<button type="button" className="secondary" onClick={()=>{setQuery("");setSupplierFilter("all");setPage(1);}}>{ja?"絞り込みを解除":"Clear filters"}</button>}
   {showCreate&&<div className="ingredient-create">
    <label>{ja?"新規食材名":"New ingredient name"}<input value={newName} maxLength={200} disabled={busy} onChange={e=>setNewName(e.target.value)}/></label>
@@ -272,8 +298,9 @@ export default function IngredientManager({locale}:{locale:Locale}){
   {error&&<p role="alert" className="error">{error}</p>}
   {loading?<p>{ja?"読み込み中":"Loading"}</p>:items.length===0?<p>{ja?"登録済み食材はありません。":"No ingredients registered."}</p>:<>
    <div className="ingredient-table-wrap"><table className="ingredient-table">
-    <thead><tr><th scope="col">{ja?"No.":"No."}</th><th scope="col" aria-sort={sort==="name"?(descending?"descending":"ascending"):"none"}><button type="button" className="ingredient-sort" onClick={()=>sortBy("name")}>{ja?"食材名":"Ingredient"} ↕</button></th><th scope="col" aria-sort={sort==="price"?(descending?"descending":"ascending"):"none"}><button type="button" className="ingredient-sort" onClick={()=>sortBy("price")}>{ja?"採用価格・単位":"Adopted price / Unit"} ↕</button></th><th scope="col" aria-sort={sort==="supplier"?(descending?"descending":"ascending"):"none"}><button type="button" className="ingredient-sort" onClick={()=>sortBy("supplier")}>{ja?"仕入れ先":"Supplier"} ↕</button></th><th scope="col">{ja?"備考":"Notes"}</th><th scope="col">{ja?"操作":"Actions"}</th></tr></thead>
+    <thead><tr><th scope="col">{ja?"選択":"Select"}</th><th scope="col">{ja?"No.":"No."}</th><th scope="col" aria-sort={sort==="name"?(descending?"descending":"ascending"):"none"}><button type="button" className="ingredient-sort" onClick={()=>sortBy("name")}>{ja?"食材名":"Ingredient"} ↕</button></th><th scope="col" aria-sort={sort==="price"?(descending?"descending":"ascending"):"none"}><button type="button" className="ingredient-sort" onClick={()=>sortBy("price")}>{ja?"採用価格・単位":"Adopted price / Unit"} ↕</button></th><th scope="col" aria-sort={sort==="supplier"?(descending?"descending":"ascending"):"none"}><button type="button" className="ingredient-sort" onClick={()=>sortBy("supplier")}>{ja?"仕入れ先":"Supplier"} ↕</button></th><th scope="col">{ja?"備考":"Notes"}</th><th scope="col">{ja?"操作":"Actions"}</th></tr></thead>
     <tbody>{visible.map((item,i)=><tr key={item.id}>
+     <td><input type="checkbox" aria-label={ja?`${item.name}を選択`:`Select ${item.name}`} checked={selectedIds.includes(item.id)} disabled={busy} onChange={e=>toggleSelected(item.id,e.target.checked)}/></td>
      <td>{(effectivePage-1)*pageSize+i+1}</td>
      <td><strong>{item.name}</strong>{item.spec&&<div className="ingredient-muted">{item.spec}</div>}</td>
      <td><span className={item.current_price?.amount_jpy?.value==null?"ingredient-unset":""}>{priceLabel(item)}</span></td>
@@ -283,7 +310,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
     </tr>)}</tbody>
    </table></div>
    <div className="ingredient-cards">{visible.map(item=><article key={item.id} className="ingredient-item-card">
-    <div className="ingredient-item-head"><strong>{item.name}{item.spec&&<span className="ingredient-muted"> · {item.spec}</span>}</strong><button type="button" className="secondary" disabled={busy} onClick={()=>void begin(item)} aria-label={ja?`${item.name}を編集`:`Edit ${item.name}`}>›</button></div>
+    <div className="ingredient-item-head"><label><input type="checkbox" aria-label={ja?`${item.name}を選択`:`Select ${item.name}`} checked={selectedIds.includes(item.id)} disabled={busy} onChange={e=>toggleSelected(item.id,e.target.checked)}/></label><strong>{item.name}{item.spec&&<span className="ingredient-muted"> · {item.spec}</span>}</strong><button type="button" className="secondary" disabled={busy} onClick={()=>void begin(item)} aria-label={ja?`${item.name}を編集`:`Edit ${item.name}`}>›</button></div>
     <dl><div><dt>{ja?"採用価格・単位":"Adopted price / Unit"}</dt><dd className={item.current_price?.amount_jpy?.value==null?"ingredient-unset":""}>{priceLabel(item)}</dd></div>
     <div><dt>{ja?"仕入れ先":"Supplier"}</dt><dd>{suppliers(item)}</dd></div></dl>
     <button type="button" className="secondary ingredient-delete" disabled={busy} onClick={()=>void remove(item)}>{ja?"削除":"Delete"}</button>
