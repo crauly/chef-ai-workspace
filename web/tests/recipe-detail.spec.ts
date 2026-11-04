@@ -79,6 +79,8 @@ test("recipe detail has standalone URL, clean top viewport, and supports reload 
  await page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"}).click();
  await expect(page).toHaveURL(/\/recipes\/[^/]+$/);
  await expect(page.getByRole("heading",{name:"片栗粉のレシピ"})).toBeVisible();
+ await expect(page.locator(".detail-topbar .detail-revision")).toHaveCount(0);
+ await expect(page.getByRole("button",{name:"← ホーム"})).toBeVisible();
  await expect(page.locator("#voice-controls")).toBeHidden();
  await expect(page.locator("img[src='/chef-ai-mark.svg']")).toBeVisible();
  await page.reload();
