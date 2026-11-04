@@ -43,7 +43,7 @@ export default function UnitManager({locale}:{locale:Locale}){
   try{
    const r=await fetch("/api/units",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol:newSymbol.trim(),dimension:newDimension})});
    if(!r.ok)throw new Error("create");
-   setNewSymbol("");await load();
+   setNewSymbol("");setNewDimension("other");await load();
   }catch{setError(ja?"単位を登録できません。重複する単位や別名を確認してください。":"Could not create unit. Check duplicate symbols and aliases.");}
   finally{setBusy(false);}
  }
@@ -57,28 +57,38 @@ export default function UnitManager({locale}:{locale:Locale}){
   }catch{setError(ja?"削除できません。レシピや食材価格で使用中の可能性があります。":"Cannot delete a unit that is in use.");}
   finally{setBusy(false);}
  }
+
+ function startEdit(u:Unit){setEditing(u.id);setAliases(u.aliases.join(", "));setSymbol(u.symbol);setDimension(u.dimension);setFactor(u.base_factor??"");setError("");}
  return <section className="workspace-section settings-manager-unit" aria-label={ja?"単位マスター":"Unit master"}>
   <p>{ja?"レシピで使用する単位と別名を確認・編集します。新規単位はレシピ保存時に一括承認されます。":"Review unit names and aliases. New units are approved with recipe saving."}</p>
-  <div><label>{ja?"新規単位名":"New unit"}<input maxLength={32} value={newSymbol} disabled={busy} onChange={e=>setNewSymbol(e.target.value)}/></label><label>{ja?"単位分類":"Dimension"}<select value={newDimension} disabled={busy} onChange={e=>setNewDimension(e.target.value)}><option value="mass">Mass</option><option value="volume">Volume</option><option value="count">Count</option><option value="other">Other</option></select></label><button type="button" disabled={busy||!newSymbol.trim()} onClick={()=>void create()}>{ja?"単位を登録":"Create unit"}</button></div>
+  <section className="unit-create-panel" aria-label={ja?"新しい単位を登録":"Register a new unit"}>
+   <h3><span className="unit-plus-mark" aria-hidden="true">＋</span>{ja?"新しい単位を登録":"Register a new unit"}</h3>
+   <div className="unit-create-fields">
+    <label>{ja?"単位名":"Unit name"}<input maxLength={32} value={newSymbol} disabled={busy} placeholder={ja?"例：ml、パック、束":"e.g. ml, pack, bunch"} onChange={e=>setNewSymbol(e.target.value)}/></label>
+    <label>{ja?"単位分類":"Dimension"}<select value={newDimension} disabled={busy} onChange={e=>setNewDimension(e.target.value)}><option value="mass">Mass</option><option value="volume">Volume</option><option value="count">Count</option><option value="other">Other</option></select></label>
+   </div>
+   <div className="unit-create-actions"><button type="button" className="secondary" disabled={busy} onClick={()=>{setNewSymbol("");setNewDimension("other");}}>{ja?"クリア":"Clear"}</button><button type="button" disabled={busy||!newSymbol.trim()} onClick={()=>void create()}>{ja?"登録する":"Register"}</button></div>
+  </section>
   {error&&<p role="alert">{error}</p>}
-  <button type="button" className="secondary" onClick={()=>void load()} disabled={busy}>{ja?"更新":"Refresh"}</button>
-  <ul>
-   {items.map(u=><li key={u.id}>
-    <strong>{u.symbol}</strong> <span>({u.dimension}{u.base_factor?`, ×${u.base_factor}`:""})</span>
-    {editing===u.id?<div>
-     <label>{ja?"正式単位名":"Canonical unit name"}<input value={symbol} onChange={e=>setSymbol(e.target.value)} disabled={busy}/></label>
-     <label>{ja?"単位の分類":"Dimension"}<select value={dimension} onChange={e=>setDimension(e.target.value)} disabled={busy}><option value="mass">Mass</option><option value="volume">Volume</option><option value="count">Count</option><option value="other">Other</option></select></label>
-     <label>{ja?"基準単位への換算係数（未確認なら空欄）":"Factor to base unit (leave blank if unknown)"}<input inputMode="decimal" value={factor} onChange={e=>setFactor(e.target.value)} disabled={busy}/></label>
-     <label>{ja?"別名（カンマ区切り）":"Aliases (comma separated)"}
-      <input value={aliases} onChange={e=>setAliases(e.target.value)} disabled={busy}/>
-     </label>
-     <button type="button" onClick={()=>void save(u.id)} disabled={busy}>{ja?"保存":"Save"}</button>
-     <button type="button" className="secondary" onClick={()=>setEditing(null)} disabled={busy}>{ja?"取消":"Cancel"}</button>
-    </div>:<>
-     <span> {u.aliases.join(", ")}</span>{" "}
-     <button type="button" className="secondary" onClick={()=>{setEditing(u.id);setAliases(u.aliases.join(", "));setSymbol(u.symbol);setDimension(u.dimension);setFactor(u.base_factor??"");}}>{ja?"単位を編集":"Edit unit"}</button>{" "}<button type="button" className="secondary" disabled={busy} onClick={()=>void remove(u)}>{ja?"削除":"Delete"}</button>
-    </>}
-   </li>)}
-  </ul>
+  <section className="unit-list-panel" aria-label={ja?"登録済みの単位":"Registered units"}>
+   <div className="unit-list-heading"><h3>{ja?"登録済みの単位":"Registered units"}</h3><span className="unit-count">{items.length}{ja?"件":" units"}</span></div>
+   <ul className="unit-card-list">{items.map(u=><li key={u.id} className={editing===u.id?"unit-card unit-card-editing":"unit-card"}>
+    {editing===u.id?<div className="unit-inline-edit">
+      <div className="unit-inline-heading"><strong>{ja?"単位を編集":"Edit unit"} — {u.symbol}</strong><button type="button" className="secondary" aria-label={ja?"編集を閉じる":"Close editor"} onClick={()=>setEditing(null)} disabled={busy}>×</button></div>
+      <div className="unit-inline-fields">
+       <label>{ja?"正式単位名":"Canonical unit name"}<input value={symbol} maxLength={32} onChange={e=>setSymbol(e.target.value)} disabled={busy}/></label>
+       <label>{ja?"単位の分類":"Dimension"}<select value={dimension} onChange={e=>setDimension(e.target.value)} disabled={busy}><option value="mass">Mass</option><option value="volume">Volume</option><option value="count">Count</option><option value="other">Other</option></select></label>
+       <label>{ja?"基準単位への換算係数（未確認なら空欄）":"Factor to base unit (leave blank if unknown)"}<input inputMode="decimal" value={factor} onChange={e=>setFactor(e.target.value)} disabled={busy}/></label>
+       <label>{ja?"別名（カンマ区切り）":"Aliases (comma separated)"}<input value={aliases} onChange={e=>setAliases(e.target.value)} disabled={busy}/></label>
+      </div>
+      <div className="unit-card-actions"><button type="button" className="secondary" onClick={()=>setEditing(null)} disabled={busy}>{ja?"キャンセル":"Cancel"}</button><button type="button" onClick={()=>void save(u.id)} disabled={busy}>{ja?"変更を保存":"Save changes"}</button></div>
+     </div>:
+     <><div className="unit-card-info"><strong>{u.symbol}</strong> <span>({u.dimension}{u.base_factor?", ×"+u.base_factor:""})</span>{u.aliases.length>0&&<small>{u.aliases.join(", ")}</small>}</div>
+      <div className="unit-card-actions">
+       <button type="button" className="secondary" disabled={busy} onClick={()=>startEdit(u)} aria-label={ja?u.symbol+"を編集":"Edit "+u.symbol}><span aria-hidden="true">✎</span> {ja?"編集":"Edit"}</button>
+       <button type="button" className="secondary" disabled={busy} onClick={()=>void remove(u)}><span aria-hidden="true">🗑</span> {ja?"削除":"Delete"}</button>
+      </div></>}
+   </li>)}</ul>
+  </section>
  </section>;
 }
