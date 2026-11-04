@@ -14,14 +14,21 @@ export default function SupplierManager({locale}:{locale:Locale}){
  const [page,setPage]=useState(1);
  const readSeq=useRef(0);
  const pageSize=50;
- async function load(targetPage=page,signal?:AbortSignal){
+ async function load(signal?:AbortSignal){
   const seq=++readSeq.current;
   try{
-   const res=await fetch(`/api/suppliers?page=${targetPage}&page_size=${pageSize}`,{cache:"no-store",signal});
-   if(!res.ok)throw new Error(String(res.status));
-   const data=await res.json() as {items?:unknown};
-   if(!Array.isArray(data.items))throw new Error("bad supplier payload");
-   if(seq===readSeq.current){setItems(data.items as Supplier[]);setError("");}
+   const all:Supplier[]=[];
+   // Fetch the complete master before applying client-side search/pagination.
+   for(let index=1;index<=100;index++){
+    const res=await fetch(`/api/suppliers?page=${index}&page_size=${pageSize}`,{cache:"no-store",signal});
+    if(!res.ok)throw new Error(String(res.status));
+    const data=await res.json() as {items?:unknown};
+    if(!Array.isArray(data.items))throw new Error("bad supplier payload");
+    all.push(...data.items as Supplier[]);
+    if(data.items.length<pageSize)break;
+    if(index===100)throw new Error("supplier pagination exceeded limit");
+   }
+   if(seq===readSeq.current){setItems(all);setError("");}
    return true;
   }catch(e){
    if(seq===readSeq.current && !(e instanceof Error&&e.name==="AbortError"))
@@ -31,9 +38,9 @@ export default function SupplierManager({locale}:{locale:Locale}){
  }
  useEffect(()=>{
   const controller=new AbortController();
-  void load(page,controller.signal);
+  void load(controller.signal);
   return ()=>{controller.abort();readSeq.current++;};
- },[locale,page]);
+ },[locale]);
  function edit(item:Supplier){setEditing(item.id);setEditName(item.name);setEditNote(item.note??"");setError("");}
  function reset(){setEditing(null);setEditName("");setEditNote("");}
  function clearCreate(){setName("");setNote("");}
@@ -69,6 +76,9 @@ export default function SupplierManager({locale}:{locale:Locale}){
   finally{setBusy(false);}
  }
  const filtered=items.filter(item=>[item.name,item.note??""].join(" ").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+ const totalPages=Math.max(1,Math.ceil(filtered.length/pageSize));
+ const currentPage=Math.min(page,totalPages);
+ const visible=filtered.slice((currentPage-1)*pageSize,currentPage*pageSize);
  return <section className="card supplier-manager" aria-label={ja?"仕入れ先管理":"Suppliers"}>
   <p className="muted">{ja?"登録済み仕入先を管理します。購入条件や価格履歴は削除しません。":"Manage suppliers without changing purchase offers or price history."}</p>
   {error&&<p role="alert">{error}</p>}
@@ -85,19 +95,20 @@ export default function SupplierManager({locale}:{locale:Locale}){
   </section>
   <div className="supplier-list-head">
    <h3>{ja?"登録済みの仕入れ先":"Registered suppliers"} ({items.length}{ja?"件":""})</h3>
-   <input type="search" aria-label={ja?"仕入れ先を検索":"Search suppliers"} value={query} onChange={e=>setQuery(e.target.value)} placeholder={ja?"仕入れ先を検索…":"Search suppliers…"}/>
+   <input type="search" aria-label={ja?"仕入れ先を検索":"Search suppliers"} value={query} onChange={e=>{setQuery(e.target.value);setPage(1);}} placeholder={ja?"仕入れ先を検索…":"Search suppliers…"}/>
   </div>
-  <ul className="supplier-manager-list">{filtered.map(item=><li key={item.id} className={editing===item.id?"supplier-inline-active":""}>
+  <ul className="supplier-manager-list">{visible.map(item=><li key={item.id} className={editing===item.id?"supplier-inline-active":""}>
    {editing===item.id?
     <form className="supplier-inline-edit" onSubmit={saveEdit} aria-label={ja?item.name+"を編集":"Edit "+item.name}>
      <div className="supplier-inline-title"><strong>{ja?"仕入れ先を編集":"Edit supplier"} — {item.name}</strong><button type="button" className="secondary" onClick={reset} disabled={busy} aria-label={ja?"編集を閉じる":"Close editor"}>×</button></div>
      <label>{ja?"仕入れ先名":"Supplier name"}<input autoFocus required maxLength={200} disabled={busy} value={editName} onChange={e=>setEditName(e.target.value)}/></label>
+     <VoiceFieldInput key={editing} locale={locale} label={ja?"仕入れ先名":"supplier name"} disabled={busy} onTranscript={value=>setEditName(value.slice(0,200))}/>
      <label>{ja?"メモ（任意）":"Notes (optional)"}<textarea maxLength={1000} disabled={busy} value={editNote} onChange={e=>setEditNote(e.target.value)}/></label>
      <div className="toolbar"><button type="button" className="secondary" onClick={reset} disabled={busy}>{ja?"キャンセル":"Cancel"}</button><button type="submit" disabled={busy||!editName.trim()}>{ja?"変更を保存":"Save changes"}</button></div>
     </form>:
     <><div className="supplier-list-info"><strong>{item.name}</strong>{item.note&&<small>{item.note}</small>}</div><div className="toolbar"><button type="button" disabled={busy||item.is_market_reference} onClick={()=>edit(item)}>{ja?"編集":"Edit"}</button><button type="button" disabled={busy||item.is_market_reference} onClick={()=>void remove(item)}>{ja?"削除":"Delete"}</button></div></>}
   </li>)}</ul>
   {filtered.length===0&&!error&&<p className="muted">{items.length?(ja?"該当する仕入れ先がありません。":"No matching suppliers."):(ja?"登録済み仕入先はありません。":"No suppliers registered.")}</p>}
-  <div className="toolbar supplier-pagination"><button type="button" disabled={busy||page===1} onClick={()=>setPage(v=>v-1)}>{ja?"前へ":"Previous"}</button><span>{page}</span><button type="button" disabled={busy||items.length<pageSize} onClick={()=>setPage(v=>v+1)}>{ja?"次へ":"Next"}</button></div>
+  <div className="toolbar supplier-pagination"><button type="button" disabled={busy||currentPage===1} onClick={()=>setPage(v=>Math.max(1,v-1))}>{ja?"前へ":"Previous"}</button><span>{currentPage} / {totalPages}</span><button type="button" disabled={busy||currentPage>=totalPages} onClick={()=>setPage(v=>Math.min(totalPages,v+1))}>{ja?"次へ":"Next"}</button></div>
  </section>;
 }
