@@ -83,7 +83,7 @@ test("recipe detail has standalone URL, clean top viewport, and supports reload 
  await expect(page.getByRole("heading",{name:"片栗粉のレシピ"})).toBeVisible();
  await expect(page.locator(".detail-topbar .detail-revision")).toHaveCount(0);
  await expect(page.getByRole("button",{name:"← ホーム"})).toBeVisible();
- await expect(page.locator("#voice-controls")).toBeHidden();
+ await expect(page.locator("#voice-controls")).toBeVisible();
  await expect(page.locator("img[src='/chef-ai-mark.svg']")).toBeVisible();
  await page.reload();
  await expect(page.getByRole("heading",{name:"片栗粉のレシピ"})).toBeVisible();
@@ -135,7 +135,7 @@ test("long press on recipe list opens edit/delete without navigating",async({pag
 // Real routes unmount the voice capture, so opening a recipe mid-recording
 // must refuse with a notice instead of silently discarding in-flight audio.
 // The recording stays stoppable on the current page; opening works after stop.
-test("opening a recipe mid-recording refuses safely and stays stoppable",async({page})=>{
+test("opening a recipe mid-recording preserves capture and stays stoppable",async({page})=>{
  await page.setViewportSize({width:1280,height:800});
  await page.addInitScript(()=>{
   Object.defineProperty(navigator.mediaDevices,"getUserMedia",{value:async()=>{
@@ -149,11 +149,9 @@ test("opening a recipe mid-recording refuses safely and stays stoppable",async({
  await page.getByRole("button",{name:/音声操作を開始/}).click();
  await expect(page.getByRole("button",{name:"■ マイクを停止"})).toBeVisible();
  await page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"}).click();
- await expect(page).toHaveURL("http://localhost:3100/");
- await expect(page.getByText("録音・音声処理中はレシピを開けません。")).toBeVisible();
- await page.getByRole("button",{name:"■ マイクを停止"}).first().click();
- await page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"}).click();
  await expect(page).toHaveURL(/\/recipes\/[^/]+$/);
+ await expect(page.getByRole("button",{name:"■ マイクを停止",exact:true})).toBeVisible();
+ await page.getByRole("button",{name:"■ マイクを停止",exact:true}).click();
 });
 
 test("clearing a supplier applies before the market price edit", async ({page}) => {
@@ -298,7 +296,7 @@ test("detail voice edit with no match keeps the current recipe", async ({page}) 
   await page.waitForTimeout(2500);
   await page.getByRole("button", {name: /マイクを停止/}).first().click();
   await expect(page.getByText("編集対象を一つに絞れませんでした。検索結果から選んでください。")).toBeVisible();
-  await expect(page.locator("#voice-controls")).toBeHidden();
+  await expect(page.locator("#voice-controls")).toBeVisible();
   await expect(page).toHaveURL(url);
   await expect(detail.getByRole("heading", {name: "片栗粉のレシピ"})).toBeVisible();
 });
@@ -320,7 +318,7 @@ test("detail voice edit with multiple matches lets the user choose a target", as
   await page.waitForTimeout(2500);
   await page.getByRole("button", {name: /マイクを停止/}).first().click();
   await expect(page.getByText("編集対象を一つに絞れませんでした。検索結果から選んでください。")).toBeVisible();
-  await expect(page.locator("#voice-controls")).toBeHidden();
+  await expect(page.locator("#voice-controls")).toBeVisible();
   await expect(page).toHaveURL(url);
   await expect(detail.getByRole("heading", {name: "片栗粉のレシピ"})).toBeVisible();
   await page.getByRole("region",{name:"レシピ検索結果"}).getByRole("button",{name:"きのこのクリームスープの詳細を開く"}).click();
@@ -398,6 +396,7 @@ test("missing detail recipe shows an error and a usable return path",async({page
  await page.getByRole("button",{name:"← ホーム"}).click();
  await expect(page).toHaveURL("/");
  await expect(page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"})).toBeVisible();
+ await expect(page.locator("#voice-controls")).toContainText("現在のモード: 待機");
 });
 
 test("partial-cost diagnostics honor a stored material price override",async({page})=>{
@@ -415,7 +414,7 @@ test("detail opens in browse mode before any voice edit request",async({page})=>
  const detail=await openDetail(page);
  await expect(detail.getByRole("heading",{name:"片栗粉のレシピ"})).toBeVisible();
  await expect(page.locator("#voice-controls")).toContainText("現在のモード: 参照");
- await expect(page.locator("#voice-controls")).toBeHidden();
+ await expect(page.locator("#voice-controls")).toBeVisible();
 });
 
 test("long-press edit action opens the actual detail editor",async({page})=>{
@@ -533,7 +532,7 @@ test("detail browse voice research opens an unapproved price proposal",async({pa
   results:[{index:0,name:"片栗粉",status:"candidate",description:"仕入履歴の仮単価・要確認"}]}}));
  await page.route("**/propose",route=>{ordinaryProposals++;return route.fulfill({status:503,json:{error:"unexpected"}});});
  await page.route("**/confirm",route=>{confirms++;return route.fulfill({status:409,json:{error:"unapproved"}});});
- await openDetail(page);await expect(page.locator("#voice-controls")).toBeHidden();
+ await openDetail(page);await expect(page.locator("#voice-controls")).toBeVisible();
  await page.getByRole("button",{name:"下部の音声操作"}).click();await page.waitForTimeout(2500);
  await page.getByRole("button",{name:/マイクを停止/}).first().click();
  await expect(page.locator(".proposal ol li")).toHaveCount(1);await expect(page.locator("#voice-controls")).toBeVisible();

@@ -34,6 +34,9 @@ class MetaResponsesTests(unittest.TestCase):
         self.assertFalse(body["store"])
         self.assertEqual(json.loads(body["input"])["instruction"], phrase)
         self.assertIn("self-corrections", body["instructions"])
+        self.assertIn("add_unpriced_material:", body["instructions"])
+        self.assertIn("set_material_supplier:", body["instructions"])
+        self.assertIn("supplier_candidates", body["instructions"])
         self.assertTrue(set(body).isdisjoint({"messages", "response_format", "temperature"}))
         self.assertNotIn("private-key", repr(provider))
 

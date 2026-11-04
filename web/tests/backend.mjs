@@ -93,7 +93,7 @@ createServer(async (req, res) => {
   if (path.endsWith("/propose")) {
     if (body.instruction === "failure") return send(502, {detail: "private-test-only-backend-token"});
     const revision = body.instruction === "stale" ? target.revision + 1 : target.revision;
-    return send(200, {recipe_id: id, base_revision: revision, requires_confirmation: true, provider: {name: "meta_responses", model: "muse-spark-1.3"}, operations: body.instruction === "empty" ? [] : [{op: "set_material_quantity", material_id: materialId, value: "15", unit: "g"}, {op: "set_selling_price", value_jpy: "1800"}]});
+    return send(200, {recipe_id: target.id, base_revision: revision, requires_confirmation: true, provider: {name: "meta_responses", model: "muse-spark-1.3"}, operations: body.instruction === "empty" ? [] : [{op: "set_material_quantity", material_id: target.materials[0]?.id || materialId, value: "15", unit: "g"}, {op: "set_selling_price", value_jpy: "1800"}]});
   }
   if(path.endsWith('/confirm/review'))return send(200,{ingredients:[],materials:target?.materials??recipe.materials,purchases:[],requires_selection:false});
   if (path.endsWith("/confirm")) {
@@ -105,6 +105,9 @@ createServer(async (req, res) => {
       if (op.op === "set_material_quantity") {line.quantity = tracked(op.value); if (op.unit) line.unit = op.unit;}
       if (op.op === "set_material_price") line.price_override = {amount_jpy: tracked(op.price_jpy), per_quantity: op.price_quantity || "1", per_unit: op.price_unit || "g"};
       if (op.op === "set_selling_price") target.selling_price_jpy = tracked(op.value_jpy);
+      if (op.op === "add_unpriced_material") target.materials.push({id:op.material_id,material_name:tracked(op.name),quantity:op.quantity?tracked(op.quantity):{value:null,status:"unresolved"},unit:op.unit??null,price_mode:"inherit",price_override:null});
+      if (op.op === "set_material_name") line.material_name=tracked(op.value);
+      if (op.op === "set_material_supplier") {line.supplier_id=op.supplier_id||null;line.offer_id=op.offer_id||null;line.supplier_name=suppliers.find(s=>s.id===op.supplier_id)?.name??null;}
     }
     target.revision++; return send(200, {recipe: target});
   }

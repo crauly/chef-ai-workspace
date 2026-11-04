@@ -924,6 +924,18 @@ def propose_demo_change(recipe_id: UUID, body: AIProposalBody,
         hints = getattr(request.app.state, "correction_hints", None)
         suggestions = hints.relevant(owner, str(recipe_id), body.instruction) if hints else []
         context = asdict(recipe)
+        supplier_loader=getattr(repository,"list_owned_suppliers",None)
+        context["supplier_candidates"]=[]
+        if callable(supplier_loader):
+            try:
+                offset=0
+                while True:
+                    page=supplier_loader(owner,limit=50,offset=offset)
+                    context["supplier_candidates"].extend({"id":str(s["id"]),"name":s["name"]} for s in page)
+                    if len(page)<50:break
+                    offset+=len(page)
+            except Exception:
+                raise HTTPException(503,"Supplier master unavailable") from None
         if suggestions:
             context["correction_suggestions"] = suggestions
         if tools == "ledger":
@@ -959,7 +971,8 @@ def propose_demo_change(recipe_id: UUID, body: AIProposalBody,
             raise HTTPException(422, "AI proposal failed validation") from exc
     return {"recipe_id":str(recipe_id),"base_revision":recipe.revision,
             "operations":operations,"requires_confirmation":True,
-            "provider":getattr(provider, "identity", None)}
+            "provider":getattr(provider, "identity", None),
+            "supplier_names":{s["id"]:s["name"] for s in context["supplier_candidates"]}}
 
 
 class CorrectionBody(BaseModel):

@@ -45,6 +45,6 @@ export function editVoiceCommand(utterance:string):VoiceCommand {
  if(existing!=="data")return existing;
  const text=utterance.normalize("NFKC").trim().replace(/[。.!！]+$/g,"");
  if(/^(?:承認|更新)(?:は)?(?:しない(?:で(?:ください)?)?|しません)$/.test(text))return "hold";
- if(/^(?:この変更案を|変更案を|内容を)?(?:承認|更新)(?:して|してください|します)?$/.test(text))return "save";
+ if(/^(?:この変更案を|変更案を|内容を)?(?:承認して保存|承認|更新)(?:して|してください|します)?$/.test(text))return "save";
  return "data";
 }

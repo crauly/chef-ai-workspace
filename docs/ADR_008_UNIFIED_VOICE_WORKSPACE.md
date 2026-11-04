@@ -52,7 +52,7 @@ feedback is not established by synthetic input tests. No TTS layer was added.
 
 ## Human confirmation
 
-Registration retains review → subsequent explicit approval → `/recipes/full`.
+Registration uses an explicit save request → `/recipes/full`; read-only review is optional (2026-11-05 amendment below).
 Editing retains proposed diff → explicit human approval → the existing
 `/recipes/{id}/confirm` contract, revision checks and stable retry request ID.
 Manual editing retains its checkbox/button. A later standalone voice save can
@@ -185,9 +185,9 @@ latest draft／解析カーソル／価格bindingは最新解析完了時にの�
 ## 2026-11-04 編集対象の選択導線
 
 ホームで編集モードを選び、対象未選択なら参照状態で検索・選択を待つ。
-ライブラリから選んだレシピは `/recipes/{id}` に移動し、`voiceEdit=1` の
-一回限りの遷移ヒントで詳細画面の音声編集モードを開始する。音声で名前を
-指定した場合も同じ導線を使い、複数候補は選択後に編集を開始する。
+ライブラリから選んだレシピは `/recipes/{id}` にURLと表示を更新し、同じcontroller内で
+音声編集モードを開始する（2026-11-05の継続capture修正）。音声で名前を指定した場合も
+同じ導線を使い、複数候補は選択後に編集を開始する。外部からの `voiceEdit=1` ヒントも従来どおり受け付ける。
 詳細画面に表示済みのレシピなら編集ボタンで直接開始できる。対象とモードを
 確認してから変更を話し、AI提案・明示承認・既存confirm経路を維持する。
 
@@ -205,3 +205,45 @@ latest draft／解析カーソル／価格bindingは最新解析完了時にの�
 ## 2026-11-05 登録の確認ゲート
 
 登録モードの最初の保存指示は、読取専用の食材・単位・仕入先照合と登録内容の提示に使う。その後の明示保存指示または承認ボタンで、既存の原子的保存へ進む。確認画面を経ず一指示で保存する旧経路は置き換える。録音epochによる古い音声の拒否、編集モードの独立した変更確認、マイク・キューの所有は維持する。下書き・全件価格調査の契約と実APIの検証範囲はADR-011末尾とVOICE_RECIPE_ACCEPTANCE.mdを参照。
+
+## 2026-11-05: 保存一回で未確定レシピを登録する（登録の二段階承認を置換）
+
+料理人の「保存」を正式なHuman Gateの承認とする。事前レビュー表示・二度目の保存発話は必須にしない。
+数量・価格などの不足は既存NULL契約で保存し、分類不明の単位は推測登録せず依存する組を未確定とする。
+料理名が空なら「無題のレシピ」を使う。保存後の詳細画面の不足表示から、後で設定・音声編集で補完する。
+解析中の同じ下書きへの保存指示はFIFOで解析後に処理する。初回idle→createで、続けて収録された保存指示を
+古いモードの承認と誤判定しない。別下書き・モードへの指示拒否、同一request_id、owner・価格採用の原子性は維持する。
+価格検索は保存の前提にせず、保存開始時に中断する。DBが識別競合や障害で拒否した場合は下書きと理由を保持する。
+この変更は登録を対象とし、編集側の提案・確定契約とページ遷移の寿命は変更しない。
+
+## 2026-11-05: 参照・編集を継続マイクの正式経路へ接続
+
+登録保存・参照検索・一覧選択は、同じRecipeControllerを維持してhistory.pushStateとselectedを更新する。
+詳細URLの直接表示・再読込・popstateは既存のowner付きGETで解決する。アプリ内のホーム・下書きへの移動も
+同じcaptureを維持する。詳細からの参照指示でtargetを破棄する旧リダイレクトは廃止する。
+検索結果のPromiseは選択stateと新しいeditor refのcommit後に解決し、別レシピのeditorへ指示しない。
+参照中も主マイク・処理メッセージを表示する。未保存の編集案がある場合の切り替え禁止は維持する。
+
+「〇〇を開いて」などの参照表現と、句読点で区切られた追加・変更を扱う。意図判定など1件の失敗は
+その発話のエラーとして表示し、受信済みの後続発話は引き続き処理する。
+編集の「承認して保存」は既存confirmへ進める。変更案の提示epochと収録epochを比較し、
+提示前・別対象の音声では承認しない。空の提案は確認APIへ送らず、未解決の変更として説明する。
+保存の各guardは停止理由を表示し、入力・同一request_idを保持する。既知の入力・マスター競合を
+版競合として一律refreshせず、その原因を表示する。
+
+編集AIへの操作契約にadd_unpriced_materialとset_material_supplierを含める。propose時にowner付きの
+仕入先一覧からname/idだけをcontextへ渡し、supplier_namesを表示用に返す。AIは仕入先ID・価格・単位を
+捏造しない。確認画面では更新先の仕入先名と購入条件・価格を示す。保存は既存confirm/review、confirm、
+原子的CRUDを使用し、マスター管理・価格履歴・原価の別経路は作らない。
+
+回帰は同一document・同一media streamでの登録→一回保存→参照→編集→明示保存→別対象の参照/編集、
+直接URL/再読込/戻る、候補選択、旧承認拒否、障害後キュー継続、空提案、未確定食材と仕入先価格の保存を確認する。
+外部ASR・モデル・本番DBはfixture外で未検証。
+
+### セルフレビューでの境界修正
+
+履歴移動の直後に旧選択・変更案を無効化し、読込中もWorkspaceを維持する。取得前の対象に対する
+指示は理由を表示して保存しない。旧editorの遅延応答・busy通知は現在の表示へ反映せず、
+承認済みの旧保存は完了させても、現在のURLと異なるレシピへ画面を戻さない。
+登録の保存中にsuspendでsavingを解除しない。価格変更の確認表示は操作順に依存せず、
+同じ材料に対する最終的な仕入先変更を表示対象とする。

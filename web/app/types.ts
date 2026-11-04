@@ -10,7 +10,7 @@ export type Recipe = {
 };
 export type Operation = Record<string, string>;
 export type AIProposal = {recipe_id: string; base_revision: number; operations: Operation[]; requires_confirmation: true;
-  provider?: {name: string; model: string} | null};
+  provider?: {name: string; model: string} | null;supplier_names?:Record<string,string>};
 // Only idempotent reads may retry while the free backend resumes from sleep.
 // Never retry POST: an ambiguous response may already have committed a mutation.
 export async function startupRead<T>(path: string, onWaiting: () => void): Promise<T> {

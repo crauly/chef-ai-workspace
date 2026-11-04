@@ -1,32 +1,58 @@
 import {test,expect,type Page} from '@playwright/test';
+import {voiceInput} from './voice-input';
+const draft={title:'保存テスト',materials:[{name:'しめじ',quantity:'20',unit:'g',price_jpy:'',price_quantity:'',price_unit:'',supplier:''}],selling_price_jpy:'',notes:[],missing:[]};
 async function input(page:Page,text:string){await page.getByLabel('音声認識できない場合の入力').fill(text);await page.getByRole('button',{name:'反映',exact:true}).click();}
-async function setup(page:Page,choose=false){
- const counts={review:0,save:0,reviewId:'',saveId:''};
- await page.route('**/api/voice-recipe',r=>r.fulfill({json:{title:'診断',materials:[{name:'しめじ',quantity:'20',unit:'g',price_jpy:'100',price_quantity:'100',price_unit:'g',supplier:''}],selling_price_jpy:'',notes:[],missing:[]}}));
- await page.route('**/api/recipes/full/review',r=>{const body=r.request().postDataJSON();const needsChoice=choose&&!body.materials[0].ingredient_id;counts.review++;counts.reviewId=body.request_id;return r.fulfill({json:{ingredients:[{name:'しめじ',action:needsChoice?'choose':'create',candidates:needsChoice?[{id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',name:'しめじ'}]:[]}],units:[],suppliers:[]}});});
- await page.route('**/api/recipes/full',r=>{counts.save++;const b=r.request().postDataJSON();counts.saveId=b.request_id;return r.fulfill({json:{id:b.request_id,title:{value:b.title},revision:0,materials:[],selling_price_jpy:{value:null}}});});
- await page.goto('/');await input(page,'しめじ20gで診断レシピ');await expect(page.getByText('未保存の下書き：診断')).toBeVisible();return counts;
+const saveButton=(page:Page)=>page.getByRole('button',{name:/^(レシピを登録|承認して保存)$/});
+async function setup(page:Page,value:any=draft){
+ const bodies:any[]=[];let reviews=0;
+ await page.route('**/api/voice-recipe',r=>r.fulfill({json:value}));
+ page.on('request',r=>{if(r.url().endsWith('/recipes/full'))bodies.push(r.postDataJSON());if(r.url().endsWith('/recipes/full/review'))reviews++;});
+ await page.goto('/');return {bodies,reviews:()=>reviews};
 }
-test('review 200 with choose blocks saving until selection and re-review',async({page})=>{
- const counts=await setup(page,true);await page.getByRole('button',{name:'レシピを登録',exact:true}).click();await expect(page.getByRole('button',{name:'承認して保存',exact:true})).toBeDisabled();await input(page,'保存してください');await expect(page.locator('.voice-detail-message')).toContainText('食材マスターの候補を選択');expect(counts.save).toBe(0);expect(counts.review).toBe(1);
- await page.getByLabel('しめじの食材マスター').selectOption('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');await page.getByRole('button',{name:'選択して再照合',exact:true}).click();await expect.poll(()=>counts.review).toBe(2);await expect(page.getByRole('button',{name:'承認して保存',exact:true})).toBeEnabled();await page.getByRole('button',{name:'承認して保存',exact:true}).click();await expect.poll(()=>counts.save).toBe(1);
+test.beforeEach(async({request})=>{await request.post('http://127.0.0.1:8100/test/reset');});
+test('one spoken save persists incomplete facts and displays gaps after reload',async({page})=>{
+ const state=await setup(page,{...draft,title:'',materials:[{...draft.materials[0],quantity:'2',unit:'束'}],notes:['価格不明'],missing:['料理名','数量・単位']});
+ await voiceInput(page,'しめじ、数量と価格はあとで');await expect(page.getByLabel('未保存のレシピ下書き')).toBeVisible();
+ await voiceInput(page,'保存して');await expect(page).toHaveURL(/\/recipes\/[0-9a-f-]+$/);expect(state.bodies).toHaveLength(1);expect(state.reviews()).toBe(0);
+ expect(state.bodies[0]).toMatchObject({title:'無題のレシピ',unit_candidates:[],materials:[{name:'しめじ',quantity:null,unit:null,price_jpy:null,price_quantity:null,price_unit:null}]});
+ await page.reload();await expect(page.getByRole('heading',{name:'無題のレシピ',exact:true})).toBeVisible();await page.locator('.recipe-gap-disclosure').getByText(/未確定情報/).click();await expect(page.locator('.recipe-gap-disclosure')).toContainText('しめじ：使用量・単位');await expect(page.locator('.recipe-gap-disclosure')).toContainText('しめじ：仕入単価');
 });
-test('local persistence failure releases busy and retries the same save ID',async({page})=>{
- const counts=await setup(page);await page.getByRole('button',{name:'レシピを登録',exact:true}).click();await expect(page.getByRole('button',{name:'承認して保存',exact:true})).toBeEnabled();
- await page.evaluate(()=>{const original=indexedDB.open.bind(indexedDB);indexedDB.open=()=>{indexedDB.open=original;throw new Error('diagnostic local persistence failure');};});await page.getByRole('button',{name:'承認して保存',exact:true}).click();await expect(page.locator('.voice-detail-message')).toContainText('保存IDを端末に保持できません');await expect(page.getByRole('button',{name:'承認して保存',exact:true})).toBeEnabled();expect(counts.save).toBe(0);await page.getByRole('button',{name:'承認して保存',exact:true}).click();await expect.poll(()=>counts.save).toBe(1);expect(counts.saveId).toBe(counts.reviewId);
+test('one button click saves without a mandatory preflight',async({page})=>{
+ const state=await setup(page);await input(page,'しめじ20g、価格不明');await expect(saveButton(page)).toBeEnabled();await saveButton(page).click();await expect(page).toHaveURL(/\/recipes\/[0-9a-f-]+$/);expect(state.bodies).toHaveLength(1);expect(state.reviews()).toBe(0);
 });
-test('pre-review queued save cannot approve; fresh save commits without a repeated review',async({page})=>{
- const counts=await setup(page);let release!:()=>void;const held=new Promise<void>(r=>release=r);
- await page.route('**/api/recipes/full/review',async r=>{counts.review++;if(counts.review===1)await held;await r.fulfill({json:{ingredients:[],units:[],suppliers:[]}});});
- await input(page,'保存してください');await expect.poll(()=>counts.review).toBe(1);await input(page,'保存してください');release();await expect(page.locator('.voice-detail-message')).toContainText('レビュー成立前');expect(counts.review).toBe(1);await expect(page.getByRole('button',{name:'承認して保存',exact:true})).toBeEnabled();expect(counts.save).toBe(0);await input(page,'承認して保存');await expect.poll(()=>counts.save).toBe(1);expect(counts.review).toBe(1);
+test('local persistence failure releases busy; an uncertain POST retry keeps its ID and payload',async({page})=>{
+ const state=await setup(page);await input(page,'しめじ20g');await expect(saveButton(page)).toBeEnabled();
+ await page.evaluate(()=>{const original=indexedDB.open.bind(indexedDB);indexedDB.open=()=>{indexedDB.open=original;throw new Error('local persistence unavailable');};});
+ await saveButton(page).click();await expect(page.locator('.voice-detail-message')).toContainText('保存IDを端末に保持できません');await expect(saveButton(page)).toBeEnabled();expect(state.bodies).toHaveLength(0);
+ let fail=true;await page.route('**/api/recipes/full',async r=>{if(fail){fail=false;await r.abort();}else await r.fallback();});
+ await saveButton(page).click();await expect(page.locator('.voice-detail-message')).toContainText('結果未確認');await expect(saveButton(page)).toBeEnabled();await saveButton(page).click();await expect(page).toHaveURL(/\/recipes\/[0-9a-f-]+$/);expect(state.bodies).toHaveLength(2);expect(state.bodies[1]).toEqual(state.bodies[0]);
 });
-
-for(const changesPrice of [false,true])test(`price research ${changesPrice?'changes facts and requires review':'only updates metadata and preserves approval'}`,async({page})=>{
- const counts=await setup(page);let release!:()=>void;const pending=new Promise<void>(r=>release=r);
- await page.route('**/api/voice-recipe',r=>r.fulfill({json:{title:'診断',materials:[{name:'しめじ',quantity:'20',unit:'g',price_jpy:'',price_quantity:'',price_unit:'',supplier:''}],selling_price_jpy:'',notes:[],missing:[],research_state:'deferred',pending_research:[{material_name:'しめじ',material_index:0,row_name:'しめじ',request:'価格を調べて',trigger:'muse'}]}}));
- await page.route('**/api/voice-recipe/prices',async r=>{await pending;await r.fulfill({json:{research_status:[],price_references:[],provisional_prices:[changesPrice?{material_index:0,material_name:'しめじ',origin:'ledger',price_jpy:'2',price_quantity:'1',price_unit:'g',currency:'JPY',observation_count:1,sources:[],fetched_at:null,status:'provisional',approval:'unapproved',text:'候補'}:null]}});});
- await input(page,'仕入価格は未確定です');await expect(page.getByRole('button',{name:'レシピを登録',exact:true})).toBeEnabled();await page.getByRole('button',{name:'レシピを登録',exact:true}).click();await expect(page.getByRole('button',{name:'承認して保存',exact:true})).toBeEnabled();release();
- if(changesPrice){await expect(page.getByRole('button',{name:'レシピを登録',exact:true})).toBeVisible();await expect(page.locator('.voice-detail-message')).toContainText('再レビュー');await input(page,'保存');await expect.poll(()=>counts.review).toBe(2);}
- else await expect(page.locator('[aria-label="未保存のレシピ下書き"]')).not.toContainText('調査中');
- await input(page,'保存');await expect.poll(()=>counts.save).toBe(1);expect(counts.review).toBe(changesPrice?2:1);
+test('a save queued during parsing waits for that draft and commits only once',async({page})=>{
+ const state=await setup(page);let release!:()=>void;const pending=new Promise<void>(r=>release=r);let parsing=false;
+ await page.route('**/api/voice-recipe',async r=>{parsing=true;await pending;await r.fulfill({json:draft});});
+ await voiceInput(page,'しめじ20g');await expect.poll(()=>parsing).toBe(true);await voiceInput(page,'保存');await voiceInput(page,'保存');expect(state.bodies).toHaveLength(0);release();await expect(page).toHaveURL(/\/recipes\/[0-9a-f-]+$/);expect(state.bodies).toHaveLength(1);
+});
+test('audio recorded for a discarded draft cannot save the replacement',async({page})=>{
+ const state=await setup(page);await voiceInput(page,'しめじ20g');await expect(saveButton(page)).toBeEnabled();
+ let release!:()=>void;const pending=new Promise<void>(r=>release=r);let received=false;const held=async(r:any)=>{received=true;await pending;await r.fulfill({json:{transcript:'保存'}});};
+ await page.route('**/api/voice/transcribe',held);await page.evaluate(()=>(window as any).feedTestVoice());await expect.poll(()=>received).toBe(true);await page.getByRole('button',{name:'下書きを破棄',exact:true}).click();await input(page,'新しいしめじ料理');await expect(saveButton(page)).toBeEnabled();release();await expect(page.locator('.voice-detail-message')).toContainText('別の下書き');expect(state.bodies).toHaveLength(0);await page.unroute('**/api/voice/transcribe',held);await voiceInput(page,'保存');await expect(page).toHaveURL(/\/recipes\/[0-9a-f-]+$/);expect(state.bodies).toHaveLength(1);
+});
+test('save does not wait for price research or adopt its late candidate',async({page})=>{
+ const pendingEntry={material_name:'しめじ',material_index:0,row_name:'しめじ',request:'価格を調べて',trigger:'muse'};
+ const state=await setup(page,{...draft,research_state:'deferred',pending_research:[pendingEntry]});let release!:()=>void;const pending=new Promise<void>(r=>release=r);let researching=false;
+ await page.route('**/api/voice-recipe/prices',async r=>{researching=true;await pending;try{await r.fulfill({json:{research_status:[],price_references:[],provisional_prices:[]}});}catch{}});
+ await input(page,'しめじ20g、価格を調べて');await expect.poll(()=>researching).toBe(true);await expect(saveButton(page)).toBeEnabled();await input(page,'保存');await expect(page).toHaveURL(/\/recipes\/[0-9a-f-]+$/);release();expect(state.bodies).toHaveLength(1);expect(state.bodies[0].materials[0].price_jpy).toBeNull();
+});
+test('review: a retained draft saves with one fresh request from browse',async({page})=>{
+ const state=await setup(page);await input(page,'しめじ20g');await expect(saveButton(page)).toBeEnabled();await input(page,'片栗粉のレシピを開いて');await expect(page.getByRole('heading',{name:'片栗粉のレシピ',exact:true})).toBeVisible();await voiceInput(page,'保存');await expect.poll(()=>state.bodies.length).toBe(1);
+});
+test('review: unnamed draft preserves selected master payload and request id',async({page})=>{
+ const state=await setup(page,{...draft,title:''});let reviewed:any;
+ await page.route('**/api/recipes/full/review',r=>{reviewed=r.request().postDataJSON();return r.fulfill({json:{ingredients:[{name:'しめじ',action:reviewed.materials[0].ingredient_id?'reuse':'choose',candidates:[{id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',name:'しめじ'}]}],units:[],suppliers:[]}});});
+ await input(page,'しめじ20g');await input(page,'内容を確認');await expect(page.getByLabel('正式登録の確認')).toBeVisible();await page.getByLabel('しめじの食材マスター').selectOption('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');await page.getByRole('button',{name:'選択して再照合',exact:true}).click();await expect.poll(()=>reviewed.materials[0].ingredient_id).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');await saveButton(page).click();await expect.poll(()=>state.bodies.length).toBe(1);expect(state.bodies[0]).toEqual(reviewed);
+});
+test('review: late preflight cannot unlock an active formal save',async({page})=>{
+ await setup(page);let releaseReview!:()=>void,releaseSave!:()=>void;const reviewHeld=new Promise<void>(r=>releaseReview=r),saveHeld=new Promise<void>(r=>releaseSave=r);let saving=false;
+ await page.route('**/api/recipes/full/review',async r=>{await reviewHeld;await r.fulfill({json:{ingredients:[],units:[],suppliers:[]}});});await page.route('**/api/recipes/full',async r=>{saving=true;await saveHeld;await r.fallback();});
+ await input(page,'しめじ20g');await expect(saveButton(page)).toBeEnabled();await input(page,'片栗粉のレシピを開いて');await expect(page.getByRole('heading',{name:'片栗粉のレシピ',exact:true})).toBeVisible();await page.getByRole('button',{name:'下書きに戻る',exact:true}).click();await input(page,'保存');await expect.poll(()=>saving).toBe(true);const reviewed=page.waitForResponse(r=>r.url().endsWith('/recipes/full/review'));releaseReview();await reviewed;await page.evaluate(()=>new Promise(requestAnimationFrame));await expect(page.getByRole('button',{name:'下書きを破棄',exact:true})).toBeDisabled();releaseSave();await expect(page).toHaveURL(/\/recipes\/[0-9a-f-]+$/);
 });

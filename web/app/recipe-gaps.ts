@@ -6,7 +6,7 @@ export function recipeGaps(recipe:Recipe):string[]{
  for(const [index,m] of recipe.materials.entries()){
   const name=m.material_name.value?.trim()||`食材${index+1}`;
   if(!m.quantity.value||!m.unit)gaps.push(`${name}：使用量・単位`);
-  if(!m.price_override&&m.price_mode!=="inherit")gaps.push(`${name}：仕入単価`);
+  if(!m.effective_price?.amount_jpy.value&&!m.price_override?.amount_jpy.value)gaps.push(`${name}：仕入単価`);
  }
  return gaps;
 }
