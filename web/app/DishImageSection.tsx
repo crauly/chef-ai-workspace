@@ -3,7 +3,7 @@ import {useEffect,useRef,useState} from "react";
 import type {Locale} from "./i18n";
 import {request} from "./types";
 import {dishImagePrompt,isAbortError} from "./dish-image";
-import {getDishPreview,storeDishPreview} from "./dish-image-cache";
+import {loadDishImage,storeDishPreview} from "./dish-image-cache";
 import {loadPlates,PLATE_LIBRARY_CHANGED,type Plate} from "./plate-library";
 
 // Saved-recipe detail dish illustration (Block 3 reuse, ADR-014).
@@ -19,7 +19,9 @@ import {loadPlates,PLATE_LIBRARY_CHANGED,type Plate} from "./plate-library";
 export default function DishImageSection({recipeId,title,names,locale,disabled}:{
  recipeId:string;title:string;names:string[];locale:Locale;disabled?:boolean}){
  const [image,setImage]=useState<string|null>(null);
- const [savedLocal,setSavedLocal]=useState(false);
+ const [savedCloud,setSavedCloud]=useState(false);
+ const [deviceOnly,setDeviceOnly]=useState(false);
+ const [uploading,setUploading]=useState(false);
  const [saveWarning,setSaveWarning]=useState(false);
  const [generating,setGenerating]=useState(false);
  const [failed,setFailed]=useState(false);
@@ -36,9 +38,9 @@ export default function DishImageSection({recipeId,title,names,locale,disabled}:
  useEffect(()=>{
   owner.current=recipeId;generationStarted.current=false;
   flight.current?.abort();flight.current=null;
-  setImage(null);setSavedLocal(false);setSaveWarning(false);setGenerating(false);setFailed(false);setEnlarged(false);
+  setImage(null);setSavedCloud(false);setDeviceOnly(false);setUploading(false);setSaveWarning(false);setGenerating(false);setFailed(false);setEnlarged(false);
   let valid=true;
-  void getDishPreview(recipeId).then(cached=>{if(valid&&!generationStarted.current&&owner.current===recipeId&&cached){setImage(cached);setSavedLocal(true);}}).catch(()=>{});
+  void loadDishImage(recipeId).then(({image:cached,source})=>{if(valid&&!generationStarted.current&&owner.current===recipeId&&cached){setImage(cached);setSavedCloud(source==="cloud");setDeviceOnly(source==="device");}}).catch(()=>{});
   return()=>{valid=false;flight.current?.abort();flight.current=null;};
  },[recipeId]);
  // Default-plate status only (no form here): re-read when the settings
@@ -75,10 +77,10 @@ export default function DishImageSection({recipeId,title,names,locale,disabled}:
     {method:"POST",body:JSON.stringify(chosen?{prompt,image:chosen.image}:{prompt}),signal:controller.signal});
    if(owner.current!==started||controller.signal.aborted)return;
    setImage(out.image);
-   setSavedLocal(false);setSaveWarning(false);
+   setSavedCloud(false);setDeviceOnly(false);setSaveWarning(false);
    try{
     const saved=await storeDishPreview(started,out.image);
-    if(owner.current===started&&!controller.signal.aborted){setSavedLocal(saved);setSaveWarning(!saved);}
+    if(owner.current===started&&!controller.signal.aborted){setSavedCloud(saved);setDeviceOnly(!saved);setSaveWarning(!saved);}
    }catch{if(owner.current===started&&!controller.signal.aborted)setSaveWarning(true);}
   }catch(err){
    if(owner.current!==started||controller.signal.aborted||isAbortError(err))return;
@@ -86,6 +88,15 @@ export default function DishImageSection({recipeId,title,names,locale,disabled}:
   }finally{
    if(owner.current===started)setGenerating(false);
   }
+ }
+ async function uploadExisting(){
+  if(!image||!deviceOnly||uploading||disabled)return;
+  const target=recipeId,copy=image;
+  setUploading(true);setSaveWarning(false);
+  try{
+   const ok=await storeDishPreview(target,copy);
+   if(owner.current===target){setSavedCloud(ok);setDeviceOnly(!ok);setSaveWarning(!ok);}
+  }finally{if(owner.current===target)setUploading(false);}
  }
  const ja=locale==="ja";
  return <section className="dish-image" aria-label={ja?"料理イメージ":"Dish illustration"}>
@@ -103,8 +114,9 @@ export default function DishImageSection({recipeId,title,names,locale,disabled}:
    <button type="button" className="dish-image-primary" disabled={disabled||generating} onClick={()=>void generate()}>
     {generating?(ja?"生成中…":"Generating…"):image?(ja?"↻ 再生成":"↻ Regenerate"):failed?(ja?"再試行":"Retry"):(ja?"✦ 料理画像を生成":"✦ Generate dish image")}</button>
   </div>
-  <p className="dish-image-note">{savedLocal?(ja?"このブラウザに自動保存済み · 他端末へは同期されません":"Saved in this browser · Not synced to other devices"):ja?"レシピのクラウド保存とは別のプレビューです":"Preview is separate from cloud recipe storage"}</p>
-  {saveWarning&&<p className="dish-image-fail" role="status">{ja?"画像を端末に保存できませんでした。画面を閉じると失われる場合があります。":"Could not retain image on this device. It may be lost after leaving."}</p>}
+  <p className="dish-image-note">{savedCloud?(ja?"クラウドに保存済み · 他端末でも表示できます":"Saved in cloud · Available across devices"):deviceOnly?(ja?"この端末のみ保存 · 他端末には未同期":"Saved on this device only · Not synced"):ja?"レシピとは別に画像を保存します":"Image storage is separate from recipe data"}</p>
+  {deviceOnly&&image&&!generating&&<button type="button" className="dish-image-primary" disabled={uploading||disabled} onClick={()=>void uploadExisting()}>{uploading?(ja?"画像を移行中…":"Uploading image…"):ja?"この画像をクラウドに保存":"Save this image to cloud"}</button>}
+  {saveWarning&&<p className="dish-image-fail" role="status">{ja?"クラウドへの保存に失敗しました。画像はこの端末に残ります。再試行してください。":"Cloud upload failed. The image remains on this device; retry to sync."}</p>}
   {enlarged&&image&&<div className="dish-image-overlay" onClick={()=>setEnlarged(false)}>
    <section role="dialog" aria-modal="true" aria-label={ja?"料理イメージの拡大表示":"Enlarged dish illustration"} className="dish-image-dialog" onClick={e=>e.stopPropagation()}>
     <img src={image} alt={ja?"生成した料理イメージの拡大表示":"Enlarged generated dish illustration"}/>

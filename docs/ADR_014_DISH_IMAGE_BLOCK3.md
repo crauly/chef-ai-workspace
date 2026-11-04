@@ -77,3 +77,8 @@ quantities, prices, or the finished dish.
    `isAbortError`). HTTP/timeout failures still arrive as `Error("<status>")`
    and keep their failure display. `clear()` already aborted + reset; the
    identity guard covers already-settled fetches too.
+
+
+## 2026-11-04 extension — durable generated image storage (PR #128)
+
+Block 3's original **preview-only** restriction is superseded **only for saved-recipe generated illustrations**. The generation API remains stateless; the user-requested artwork is stored separately through a trusted, owner-scoped backend into private Supabase Storage, not in recipe state or model evidence. Existing device-local illustrations remain as explicit legacy migration candidates. This does not authorize automatic persistence of unsaved voice-draft images or ingredient identification evidence. Implementation and rollout details: [IMAGE_STORAGE_DECISION.md](IMAGE_STORAGE_DECISION.md).

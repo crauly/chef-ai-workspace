@@ -1,6 +1,6 @@
 # Storage and Optional Image Evidence — Architecture Decision
 
-**Status:** Product direction approved; implementation pending.
+**Status:** Product direction approved. Generated recipe-dish illustration storage implemented in PR #128; ingredient-photo workflows remain separate and pending.
 **Related:** [MVP](MVP.md), [Architecture](ARCHITECTURE.md), [Core Contracts](CORE_CONTRACTS.md)
 
 ## Decision
@@ -37,3 +37,14 @@
 Implement working recipe mutation + transactional persistence + versioning before optional camera/gallery upload and image-assisted identification. Demo must have a working voice/text path without images. Actual image understanding requires a confirmed image-capable inference path; Supabase Storage alone only stores the file and does **not** provide recognition.
 
 Provider setup, deployment configuration, MVP cutoff and test/video scheduling are tracked in Notion, not public product docs.
+
+
+## Generated recipe illustration persistence — 2026-11-04 (PR #128)
+
+- **SSOT:** private Supabase Storage bucket `chef-recipe-dishes`, with one current record per recipe in `public.recipe_dish_images` (recipe ID, owner ID, object path, MIME type). **Not** the browser's IndexedDB. No binary data stored in Postgres.
+- **Authorization:** existing operator-gated frontend proxy → demo-token-verified FastAPI `demo_context` → server-derived owner / owned-recipe lookup → service-role Storage. Neither secret nor raw object URLs are exposed to browsers. SQL RLS is enabled and anonymous/authenticated table grants are revoked.
+- **Operation:** generating an illustration still requires an explicit user click. Its output is separately saved as optional illustration metadata, never treated as source/evidence for price, ingredients, or recipe content. No recipe revision or Human Gate bypass is introduced.
+- **Legacy:** IndexedDB is read only as a fallback on the original device. Legacy images are migrated by an explicit button; the local copy is not removed. Newly generated images upload directly to cloud; if that fails, they remain device-local when browser storage permits, explicitly marked unsynced.
+- **Integrity:** 3 MiB application payload max (below Vercel's 4.5 MB function request/response limit), 4 MiB private bucket hard limit, PNG/JPEG/WebP payload and byte signatures validated; old cloud object replaced using a new immutable key, with best-effort cleanup on replacement or recipe deletion. A failed metadata update cleans up the new upload.
+- **State of deployment:** the schema was applied on 2026-11-04 to **only** the dedicated Chef AI Workspace Supabase project. PR #128 application code must still be merged/deployed and browser/backend tests completed before claiming cross-device operation.
+- **Non-goal:** optional *ingredient reference photos* and model image understanding are separate concerns; this change only concerns generated finished-dish illustrations.
