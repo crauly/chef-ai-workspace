@@ -109,16 +109,20 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
                 line.ingredient_id == item["id"] for line in candidate.materials):
             raise MutationError("New ledger ingredient must be linked to a recipe material")
     units = unit_factor_catalog(repository.list_owned_units(owner_id))
+    price_loader = getattr(repository, "load_owned_supplier_prices", None)
+    supplier_prices = price_loader(owner_id, candidate) if callable(price_loader) else {}
     try:
-        cost = calculate_cost(candidate, effective, units)
+        cost = calculate_cost(candidate, effective, units, supplier_prices)
     except (ValueError, ArithmeticError) as exc:
         raise MutationError(str(exc)) from exc
     snapshot = asdict(cost)
     if save_version:
         snapshot["effective_quotes"] = {
             line.id: {"price_mode": "inherit", "ingredient_id": line.ingredient_id,
-                      "effective_quote": asdict(effective[line.ingredient_id].current_price)
-                      if effective[line.ingredient_id].current_price else None}
+                      "effective_quote": asdict(supplier_prices.get((line.ingredient_id, line.supplier_id))
+                                                if line.supplier_id else effective[line.ingredient_id].current_price)
+                      if (supplier_prices.get((line.ingredient_id, line.supplier_id))
+                          if line.supplier_id else effective[line.ingredient_id].current_price) else None}
             for line in candidate.materials
         }
     revision = repository.commit_recipe_crud(
