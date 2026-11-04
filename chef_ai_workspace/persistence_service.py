@@ -189,7 +189,9 @@ def save_recipe_with_ledger(*, owner_id: str, trusted_user_confirmed: bool,
         from .costing import unit_factor_catalog
         unit_loader = getattr(repository, "list_owned_units", None)
         units = unit_factor_catalog(unit_loader(owner_id)) if callable(unit_loader) else {}
-        cost = calculate_cost(candidate, effective, units)
+        price_loader = getattr(repository, "load_owned_supplier_prices", None)
+        supplier_prices = price_loader(owner_id, candidate) if callable(price_loader) else {}
+        cost = calculate_cost(candidate, effective, units, supplier_prices)
     except ValueError as exc:
         raise MutationError(str(exc)) from exc
     snapshot = asdict(cost)
