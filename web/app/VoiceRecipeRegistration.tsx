@@ -103,7 +103,7 @@ function applyFoundPrices(draft:Draft):Draft{
  const missing=draft.missing.filter(item=>!draft.materials.some((m,i)=>applied.has(i)&&item===m.name+PRICE_SUFFIX));
  return {...draft,materials,missing};
 }
-export type RegistrationHandle={submit:(text:string,meta?:VoiceCaptureMeta)=>void;hasPending:()=>boolean;isSaving:()=>boolean;suspend:()=>void;requestReview:()=>void};
+export type RegistrationHandle={submit:(text:string,meta?:VoiceCaptureMeta)=>void;hasPending:()=>boolean;isSaving:()=>boolean;suspend:(resume?:boolean)=>void;requestReview:()=>void};
 // Live microphone signals owned by the workspace (single mic). Display only:
 // recording = mic open, transcribing = batch transcription in flight/backlogged.
 export type SharedMicStatus={recording:boolean;transcribing:boolean;queued:number};
@@ -174,9 +174,9 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  const clearTrace=useRef("");
  const capture=useVoiceCapture(locale,enqueue,true);
  const voice={...capture,...sharedVoice};
- useImperativeHandle(control,()=>({submit:enqueue,hasPending:()=>Boolean(dataTurns.current.length||inbox.current.length||draftRef.current),isSaving:()=>phaseRef.current==="saving",requestReview:()=>{showReview();},suspend:()=>{
+ useImperativeHandle(control,()=>({submit:enqueue,hasPending:()=>Boolean(dataTurns.current.length||inbox.current.length||draftRef.current),isSaving:()=>phaseRef.current==="saving",requestReview:()=>{showReview();},suspend:(resume=false)=>{
   if(phaseRef.current==="saving")return;
-  if(draftRef.current||dataTurns.current.length)saveEpochFloor.current=voice.markReview();reviewed.current=null;inbox.current=inbox.current.filter(input=>input.command==="data");setStage("dictating");
+  if(!resume&&(draftRef.current||dataTurns.current.length))saveEpochFloor.current=voice.markReview();reviewed.current=null;inbox.current=inbox.current.filter(input=>input.command==="data");setStage("dictating");
  }}));
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;semanticAbort.current?.abort();priceAbort.current?.abort();photoAbort.current?.abort();dishAbort.current?.abort();inbox.current=[];};},[]);
  // Restore only working data, never approval or saving state. A restored draft
@@ -515,7 +515,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    const payload=savePayload(d);
    if(payload.materials.some(m=>m.quantity===null||m.price_jpy===null))mode="unconfirmed";
    const result=await request<MasterReview>("/api/recipes/full/review",{method:"POST",body:JSON.stringify(payload)});
-   if(!alive.current)return;
+   if(!alive.current||phaseRef.current==="saving")return;
    if(epoch.current!==reviewEpoch||revision.current!==reviewRevision||!draftRef.current||contentKey(draftRef.current)!==key||requestId.current!==payload.request_id){say(ja?"照合中に下書きが変更されました。最新の内容を再レビューしてください。":"Draft changed during review. Review the latest content.");return;}
    setMasterReview(result);
   }catch(error){say(registrationError(error,ja));return;}
@@ -534,7 +534,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   if(!draftRef.current){say(ja?"保存する内容がまだありません。解析できた内容は下書きに保持しています。":"No parsed content to save yet. Your draft is retained.");return;}
   if(!draftRef.current.title.trim()){
    const next={...draftRef.current,title:ja?"無題のレシピ":"Untitled recipe"};
-   draftRef.current=next;parseBase.current=next;setDraft(next);reviewed.current=null;registrationPayload.current=null;requestId.current=null;
+   draftRef.current=next;parseBase.current=next;setDraft(next);reviewed.current=null;
   }
   if(parsedTurns.current!==dataTurns.current.length||inbox.current.some(i=>i.command==="data")){say(ja?"未解析の発話があります。最新の内容の解析後に保存してください。":"Unparsed speech remains. Save after parsing finishes.");return;}
   // Save the current facts without waiting for price research or adopting its

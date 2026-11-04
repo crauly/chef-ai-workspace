@@ -43,3 +43,16 @@ test('save does not wait for price research or adopt its late candidate',async({
  await page.route('**/api/voice-recipe/prices',async r=>{researching=true;await pending;try{await r.fulfill({json:{research_status:[],price_references:[],provisional_prices:[]}});}catch{}});
  await input(page,'しめじ20g、価格を調べて');await expect.poll(()=>researching).toBe(true);await expect(saveButton(page)).toBeEnabled();await input(page,'保存');await expect(page).toHaveURL(/\/recipes\/[0-9a-f-]+$/);release();expect(state.bodies).toHaveLength(1);expect(state.bodies[0].materials[0].price_jpy).toBeNull();
 });
+test('review: a retained draft saves with one fresh request from browse',async({page})=>{
+ const state=await setup(page);await input(page,'しめじ20g');await expect(saveButton(page)).toBeEnabled();await input(page,'片栗粉のレシピを開いて');await expect(page.getByRole('heading',{name:'片栗粉のレシピ',exact:true})).toBeVisible();await voiceInput(page,'保存');await expect.poll(()=>state.bodies.length).toBe(1);
+});
+test('review: unnamed draft preserves selected master payload and request id',async({page})=>{
+ const state=await setup(page,{...draft,title:''});let reviewed:any;
+ await page.route('**/api/recipes/full/review',r=>{reviewed=r.request().postDataJSON();return r.fulfill({json:{ingredients:[{name:'しめじ',action:reviewed.materials[0].ingredient_id?'reuse':'choose',candidates:[{id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',name:'しめじ'}]}],units:[],suppliers:[]}});});
+ await input(page,'しめじ20g');await input(page,'内容を確認');await expect(page.getByLabel('正式登録の確認')).toBeVisible();await page.getByLabel('しめじの食材マスター').selectOption('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');await page.getByRole('button',{name:'選択して再照合',exact:true}).click();await expect.poll(()=>reviewed.materials[0].ingredient_id).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');await saveButton(page).click();await expect.poll(()=>state.bodies.length).toBe(1);expect(state.bodies[0]).toEqual(reviewed);
+});
+test('review: late preflight cannot unlock an active formal save',async({page})=>{
+ await setup(page);let releaseReview!:()=>void,releaseSave!:()=>void;const reviewHeld=new Promise<void>(r=>releaseReview=r),saveHeld=new Promise<void>(r=>releaseSave=r);let saving=false;
+ await page.route('**/api/recipes/full/review',async r=>{await reviewHeld;await r.fulfill({json:{ingredients:[],units:[],suppliers:[]}});});await page.route('**/api/recipes/full',async r=>{saving=true;await saveHeld;await r.fallback();});
+ await input(page,'しめじ20g');await expect(saveButton(page)).toBeEnabled();await input(page,'片栗粉のレシピを開いて');await expect(page.getByRole('heading',{name:'片栗粉のレシピ',exact:true})).toBeVisible();await page.getByRole('button',{name:'下書きに戻る',exact:true}).click();await input(page,'保存');await expect.poll(()=>saving).toBe(true);const reviewed=page.waitForResponse(r=>r.url().endsWith('/recipes/full/review'));releaseReview();await reviewed;await page.evaluate(()=>new Promise(requestAnimationFrame));await expect(page.getByRole('button',{name:'下書きを破棄',exact:true})).toBeDisabled();releaseSave();await expect(page).toHaveURL(/\/recipes\/[0-9a-f-]+$/);
+});

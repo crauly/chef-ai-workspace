@@ -109,12 +109,12 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
  },[editRequest]);
  const labels={idle:"待機",create:"登録",browse:"参照",edit:"編集"};
  function feedback(text:string,error=false){setFeedbackError(error);setMessage(locale==="ja"?text:(voiceMessagesEn[text]??text));if(error&&volume>0)playVoiceCue("error",volume);}
- function transition(next:VoiceMode,traceId=""){
+ function transition(next:VoiceMode,traceId="",resumeDraft=false){
   if(currentMode.current===next)return;
   if(next==="create")setSupplierMemo("");
   logVoiceEvent("mode.transition",`${currentMode.current}->${next}`,traceId);
   const firstCreate=currentMode.current==="idle"&&next==="create";
-  registration.current?.suspend();editor.current?.invalidate();
+  registration.current?.suspend(resumeDraft);editor.current?.invalidate();
   const nextBoundary=mark();if(!firstCreate)modeBoundary.current=nextBoundary;currentMode.current=next;setMode(next);
   if(next!=="idle"&&volume>0)playVoiceCue(next,volume);
  }
@@ -219,7 +219,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
    // of starting a new search. Navigation-shaped requests keep normal routing so
    // a mode change never presents an approval the user did not ask for.
    if((control==="review"||control==="save")&&!voiceNavigation(input.text)&&registration.current?.hasPending()&&currentMode.current!=="create"&&currentMode.current!=="edit"){
-    transition("create",input.meta.traceId??"");feedback("保持していた下書きを確認します。");
+    transition("create",input.meta.traceId??"",true);feedback("保持していた下書きを確認します。");
     registration.current?.submit(input.text,input.meta);
     setDraftPending(Boolean(registration.current?.hasPending()));
     continue;
