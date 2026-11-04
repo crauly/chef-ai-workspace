@@ -326,6 +326,30 @@ test("detail voice edit with multiple matches lets the user choose a target", as
   await expect(page.locator("#voice-controls")).toContainText("きのこのクリームスープ");
 });
 
+test("detail candidates cannot discard a pending proposal on the displayed recipe",async({page,request})=>{
+ await page.setViewportSize({width:390,height:844});
+ await microphone(page);
+ await page.route("**/api/voice/transcribe",route=>route.fulfill({json:{transcript:"スを編集して"}}));
+ const detail=await openDetail(page);
+ const url=page.url();
+ await page.getByRole("button",{name:"下部の音声操作"}).click();
+ await expect(page.getByRole("button",{name:/マイクを停止/}).first()).toBeVisible();
+ await page.waitForTimeout(2500);
+ await page.getByRole("button",{name:/マイクを停止/}).first().click();
+ const results=page.getByRole("region",{name:"レシピ検索結果"});
+ await expect(results).toBeVisible();
+ await detail.getByRole("button",{name:"◇ AIに変更相談"}).click();
+ await page.locator("#ai-instruction").fill("片栗粉を15gに変更");
+ await page.locator(".instruction-form button").last().click();
+ await expect(page.getByLabel("提案の差分")).toBeVisible();
+ await results.getByRole("button",{name:"ミートソースパスタの詳細を開く"}).click();
+ await expect(detail.getByRole("alert")).toContainText("未保存の変更案があります");
+ await expect(page).toHaveURL(url);
+ await expect(page.getByLabel("提案の差分")).toBeVisible();
+ const state=await (await request.get("http://127.0.0.1:8100/test/state")).json();
+ expect(state.confirms).toHaveLength(0);
+});
+
 test("detail voice edit candidates paginate beyond the first 20 results",async({page,request})=>{
  await request.post("http://127.0.0.1:8100/test/search-fixtures");
  await page.setViewportSize({width:390,height:844});

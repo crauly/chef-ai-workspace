@@ -215,7 +215,13 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  async function create(e:React.FormEvent){e.preventDefault();if(!draft.trim()||guardCaptureActive())return;setBusy(true);
  try{const recipe=await request<Recipe>("/api/recipes",{method:"POST",body:JSON.stringify({title:draft.trim()})});setDraft("");if(page===1){await reload();}else{setPage(1);}showDetail(recipe);}
  catch(e){setError(String(e));}finally{setBusy(false);}}
- async function open(id:string,openAiEditor=false){if(busy||guardCaptureActive())return;setBusy(true);try{const recipe=await request<Recipe>(`/api/recipes/${id}`);const openVoiceEdit=editSelectionPending.current;editSelectionPending.current=false;showDetail(recipe,openVoiceEdit,openAiEditor);setError("");}catch(e){setError(String(e));}finally{setBusy(false);}}
+ async function open(id:string,openAiEditor=false){
+  if(busy||guardCaptureActive())return;
+  if(editor.current?.hasPending()){
+   setError(locale==="ja"?"未保存の変更案があります。保存するか、変更案を破棄してからレシピを選択してください。":"Save or discard the pending proposal before selecting another recipe.");return;
+  }
+  setBusy(true);try{const recipe=await request<Recipe>(`/api/recipes/${id}`);const openVoiceEdit=editSelectionPending.current;editSelectionPending.current=false;showDetail(recipe,openVoiceEdit,openAiEditor);setError("");}catch(e){setError(String(e));}finally{setBusy(false);}
+ }
  async function change(e:React.FormEvent){e.preventDefault();if(!selected||!rename.trim())return;setBusy(true);
  try{const result=await request<{recipe:Recipe}>(`/api/recipes/${selected.id}/confirm`,{method:"POST",body:JSON.stringify({base_revision:selected.revision,request_id:crypto.randomUUID(),operations:[{op:"set_title",value:rename.trim()}],save_version:true})});setSelected(result.recipe);await reload();}
  catch(e){setError(String(e));}finally{setBusy(false);}}
