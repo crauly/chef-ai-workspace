@@ -157,6 +157,11 @@ test("settings section is reachable from the settings route and starts empty", a
   await page.goto("/settings");
   await page.getByRole("navigation",{name:"設定項目"}).getByRole("button",{name:"盛り付け用の皿"}).click();
   await expect(page.getByText("新しい皿を登録")).toBeVisible();
+  const create=page.locator(".plate-register");
+  const gallery=page.locator(".plate-registered-section");
+  await expect(create).toBeVisible();
+  await expect(gallery).toBeVisible();
+  expect(await create.evaluate(el=>el.getBoundingClientRect().top)).toBeLessThan(await gallery.evaluate(el=>el.getBoundingClientRect().top));
   await expect(page.getByRole("button", {name: "この皿を登録"})).toBeDisabled();
 });
 
