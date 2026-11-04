@@ -109,8 +109,17 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
             if entry["current_price"] is not None and entry["current_price"] != value:
                 raise MutationError("Conflicting prices for shared ingredient")
             entry["current_price"] = value
-        normalized.append(replace(line, ingredient_id=ingredient_id,
-                                  price_mode="inherit", price_override=None))
+        # Renaming can resolve to a different ingredient master. Purchase
+        # terms belong to the old ingredient and must not travel with it.
+        purchase_identity_changed = (
+            line.ingredient_id is not None and line.ingredient_id != ingredient_id
+        )
+        normalized.append(replace(
+            line, ingredient_id=ingredient_id, price_mode="inherit",
+            price_override=None,
+            supplier_id=None if purchase_identity_changed else line.supplier_id,
+            offer_id=None if purchase_identity_changed else line.offer_id,
+        ))
     candidate = replace(candidate, materials=tuple(normalized))
     for item in prepared_ledger:
         if item["kind"] == "new" and not any(
