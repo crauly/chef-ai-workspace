@@ -44,9 +44,11 @@ operations must be split explicitly and are never truncated.
 Results include candidate operations, per-row status, ledger/Web outcome, observation
 IDs/times, and available source URLs, seller/package quotes and tax/shipping terms.
 Linked Ingredient IDs select only their own ledger evidence; repeated ingredient
-IDs share one researched quote. Ledger evidence wins before actual grounded Web
-search. Supplier/offer-linked rows require the existing offer-price adoption path
-and produce no direct master-price operation. Unknown units, unapproved conversion
+IDs share one researched quote. Usable JPY ledger evidence wins before actual grounded Web
+search; history with incompatible currency, numeric values or units triggers Web
+fallback and remains separately identified in the research status. Supplier/offer-linked rows require the existing offer-price adoption path
+and produce no direct master-price operation; their research evidence is still
+returned for comparison instead of silently excluding the selected row. Unknown units, unapproved conversion
 ratios, unsupported currencies and failed retrievals remain unresolved without zero
 substitution. Web package normalization is checked against approved owner factors.
 

@@ -102,7 +102,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
         }
         const skipped=result.results.filter(item=>item.status!=="candidate");
         researchNotice=(locale==="ja"?`調査対象${result.indices.length}品・仮単価候補${result.operations.length}品。`:`Researched ${result.indices.length} ingredients; ${result.operations.length} provisional candidates.`)+
-          (skipped.length?(locale==="ja"?" 候補未取得："+skipped.map(item=>item.name).join("、"):" No usable quote: "+skipped.map(item=>item.name).join(", ")):"");
+          (skipped.length?(locale==="ja"?" 適用候補なし："+skipped.map(item=>item.name).join("、"):" No directly applicable quote: "+skipped.map(item=>item.name).join(", ")):"");
         const edit=result.edit_instruction?.trim()?await request<AIProposal>(`/api/recipes/${base.id}/propose`,{
           method:"POST",body:JSON.stringify({instruction:result.edit_instruction})}):undefined;
         proposal=combineResearch(base,result,edit);

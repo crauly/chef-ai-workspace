@@ -156,11 +156,12 @@ export function assembleEntries(materials:DraftMaterial[],
 // are reported in research_status, so the draft never fails and the
 // failure reason is never lost. Entries run concurrently (cap 3 bounds
 // the fan-out); result order follows entry order, never completion order.
-export async function enrichEntries(apiKey:string,entries:ResearchEntry[]){
+export async function enrichEntries(apiKey:string,entries:ResearchEntry[],
+ usableLedger?:(ref:PriceReferenceEntry,entry:ResearchEntry)=>boolean){
  const settled=await Promise.all(entries.map(async entry=>{
   const row=entry.material_index;
   const ledgerEntry=selectReference(entry.material_name,row,await lookupCandidates(entry.material_name,entry.ingredient_id),entry.ingredient_id);
-  if(ledgerEntry.status==="available"){
+  if(ledgerEntry.status==="available"&&(!usableLedger||usableLedger(ledgerEntry,entry))){
    // Owned ledger wins: no web search when usable history exists.
    return {ref:ledgerEntry,
     status:{material_name:entry.material_name,material_index:row,request:entry.request,

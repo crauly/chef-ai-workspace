@@ -77,7 +77,8 @@ test('failed grounding and incompatible/unknown units never become zero-valued m
 test('supplier/offer identity is loaded from the owned recipe, never browser flags',async()=>{
  selection.indices=[0,1];recipe.materials[0].supplier_id='supplier';recipe.materials[1].offer_id='offer';
  const result=await run({...body(),materials:[{id:'row-0',supplier_id:null}]});
- assert.equal(result.operations.length,0);assert(result.results.every(r=>r.status==='linked_supplier'));assert.equal(calls.filter(c=>c.url.includes('price-reference')||c.url.includes('/responses')).length,0);
+ assert.equal(result.operations.length,0);assert(result.results.every(r=>r.status==='linked_supplier'));
+ assert(result.results.every(r=>r.reference.status==='available'));assert.equal(calls.filter(c=>c.url.includes('price-reference')).length,2);
 });
 test('auth, origin and stale revision fail before any model call',async()=>{
  assert.equal((await POST(req(body(),{authorization:'wrong'}))).status,403);
@@ -140,4 +141,12 @@ test('repeated ingredient IDs share a single researched master price across reci
  const result=await run();assert.equal(result.operations.length,2);assert.equal(result.results.length,2);
  assert.deepEqual(result.operations.map(op=>op.material_id),['row-0','row-1']);assert.equal(result.operations[0].price_jpy,result.operations[1].price_jpy);
  assert.equal(calls.filter(call=>call.url.includes('/demo/price-reference')).length,1);
+});
+
+test('a ledger quote unusable for JPY costing falls back to actual grounded research',async()=>{
+ selection.indices=[0];ledger=name=>({candidates:[{ingredient_id:recipe.materials[0].ingredient_id,ingredient_name:name,
+  reference:{available:true,currency:'USD',unit_basis:'g',average_unit_price:'1',observation_count:1}}]});
+ global.fetch=((base)=>async(url,init)=>String(url).endsWith('/v1/responses')?Response.json(webResult()):base(url,init))(global.fetch);
+ const result=await run();assert.equal(result.operations.length,1);assert.equal(result.results[0].reference.origin,'external');
+ assert.equal(result.results[0].research_status.ledger,'available');assert.equal(result.results[0].research_status.web,'available');
 });

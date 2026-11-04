@@ -93,12 +93,7 @@ export async function POST(req:NextRequest){
   const units=unitBody.items;
   const results:ResearchResult[]=[];
   const operations:RecipeResearch["operations"]=[];
-  const entries=unique.filter(i=>{
-   const row=materials[i];
-   if(!row.supplier_id&&!row.offer_id)return true;
-   results.push({index:i,name:row.name,status:"linked_supplier",description:"仕入先・購入条件が指定されています。食材管理の価格採用経路で確認してください。既存価格は変更しません。"});
-   return false;
-  }).map(i=>({material_name:materials[i].name,material_index:i,ingredient_id:materials[i].ingredient_id??undefined,request:input.instruction as string,trigger:"muse" as const}));
+  const entries=unique.map(i=>({material_name:materials[i].name,material_index:i,ingredient_id:materials[i].ingredient_id??undefined,request:input.instruction as string,trigger:"muse" as const}));
   // Three concurrent searches, not three selected ingredients. Every selected
   // row gets a result and source evidence; failures never become zero prices.
   // Repeated recipe lines share one Ingredient price. Research it once so
@@ -108,7 +103,12 @@ export async function POST(req:NextRequest){
   const groups=[...grouped.values()];
   for(let offset=0;offset<groups.length;offset+=3){
    const batch=groups.slice(offset,offset+3);
-   const {priceReferences,researchStatus}=await enrichEntries(apiKey,batch.map(group=>group[0]));
+   const {priceReferences,researchStatus}=await enrichEntries(apiKey,batch.map(group=>group[0]),(ref,entry)=>{
+    const row=materials[entry.material_index],quote=resolveUnit(units,ref.unit_basis),lineUnit=resolveUnit(units,row.unit,row.unit_id);
+    return ref.currency==="JPY"&&typeof ref.average_unit_price==="string"&&
+     /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(ref.average_unit_price)&&positive(ref.average_unit_price)&&
+     !!quote&&!!lineUnit&&(quote.id===lineUnit.id||quote.dimension===lineUnit.dimension&&positive(quote.base_factor)&&positive(lineUnit.base_factor));
+   });
    batch.forEach((group,j)=>{for(const entry of group){
     const ref={...priceReferences[j],material_index:entry.material_index};
     const row=materials[entry.material_index];
@@ -125,8 +125,9 @@ export async function POST(req:NextRequest){
       !quoteUnit?"unknown_unit":!compatible?"incompatible_unit":
       !verifiedExternalBasis(ref,units,quoteUnit)?"unverified_conversion":"candidate";
     }
+    if(row.supplier_id||row.offer_id)status="linked_supplier";
     results.push({index:entry.material_index,name:row.name,status,
-     description:ref.text+(status!=="candidate"?`（候補なし：${status}）`: "（未承認の仮単価。共有食材の採用価格を更新する変更案です。）"),
+     description:ref.text+(status==="linked_supplier"?"（仕入先・購入条件が指定されています。比較参考値のみ。価格採用は既存の仕入条件確認・承認経路で行い、ここでは既存価格を変更しません。）":"")+(ref.origin==="external"&&researchStatus[j].ledger==="available"?"（仕入履歴は通貨・単位等の原価条件に合わないためWeb参考値を取得）":"")+(status!=="candidate"?`（候補なし：${status}）`: "（未承認の仮単価。共有食材の採用価格を更新する変更案です。）"),
      reference:ref,research_status:{...researchStatus[j],material_index:entry.material_index}});
     if(status==="candidate")operations.push({op:"set_material_price",material_id:row.id,
      price_jpy:price!,price_quantity:"1",price_unit:quoteUnit!.symbol});
