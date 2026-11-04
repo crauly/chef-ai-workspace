@@ -22,14 +22,14 @@ class MasterRepo:
     def list_owned_units(self,owner):
         self.calls.append(("list_unit",owner))
         return []
-    def create_owned_ingredient_master(self,owner,name):
-        self.calls.append(("create_ingredient",owner,name))
+    def create_owned_ingredient_master(self,owner,name,spec=None):
+        self.calls.append(("create_ingredient",owner,name,spec))
         return str(uuid4())
     def create_owned_unit_master(self,owner,symbol,dimension):
         self.calls.append(("create_unit",owner,symbol,dimension))
         return str(uuid4())
-    def update_owned_ingredient_master(self,owner,id,name,quote):
-        self.calls.append(("update_ingredient",owner,id,name,quote))
+    def update_owned_ingredient_master(self,owner,id,name,quote,spec=None):
+        self.calls.append(("update_ingredient",owner,id,name,quote,spec))
         return True
     def update_owned_unit(self,owner,id,symbol,dimension,factor,aliases):
         self.calls.append(("update_unit",owner,id,symbol,dimension,factor,aliases))
@@ -99,6 +99,13 @@ class MasterCrudApiTests(unittest.TestCase):
         self.assertEqual(self.client.delete(f"/demo/units/{id}",headers=self.headers).status_code,200)
         self.assertEqual(len(self.repo.calls),9)
         self.assertTrue(all(call[1]==self.owner for call in self.repo.calls))
+
+    def test_specification_is_forwarded_without_becoming_a_price_unit(self):
+        ident=str(uuid4())
+        self.assertEqual(self.client.post("/demo/ingredients",headers=self.headers,json={"name":"トマト水煮","spec":"1号缶"}).status_code,201)
+        self.assertIn(("create_ingredient",self.owner,"トマト水煮","1号缶"),self.repo.calls)
+        self.assertEqual(self.client.put(f"/demo/ingredients/{ident}",headers=self.headers,json={"name":"トマト水煮","spec":"6号缶"}).status_code,200)
+        self.assertIn(("update_ingredient",self.owner,ident,"トマト水煮",None,"6号缶"),self.repo.calls)
 
     def test_invalid_payloads_do_not_write(self):
         id=str(uuid4())
