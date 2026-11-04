@@ -1,6 +1,8 @@
 -- Explicitly approved price per offer. No observation automatically changes costing.
 -- Applies to the dedicated Chef AI Workspace database only.
 alter table public.offers
+  add column package_unit_id uuid references public.units(id);
+alter table public.offers
   add column adopted_observation_id uuid
   references public.price_observations(id) on delete set null;
 
@@ -42,10 +44,12 @@ begin
   if v_count>1 then raise exception 'Ambiguous purchase offer'; end if;
   if v_offer is null then
     insert into public.offers(owner_id,ingredient_id,supplier_id,
-                              package_quantity,package_unit)
-    values(p_owner_id,p_ingredient_id,p_supplier_id,p_quantity::text,btrim(p_unit))
+                              package_quantity,package_unit,package_unit_id)
+    values(p_owner_id,p_ingredient_id,p_supplier_id,p_quantity::text,btrim(p_unit),v_unit_id)
     returning id into v_offer;
   end if;
+  update public.offers set package_unit_id=v_unit_id
+    where id=v_offer and owner_id=p_owner_id;
   insert into public.price_observations(
     owner_id,offer_id,amount_jpy,currency,source,confirmed)
   values(p_owner_id,v_offer,p_amount_jpy,'JPY','manual_entry',true)
