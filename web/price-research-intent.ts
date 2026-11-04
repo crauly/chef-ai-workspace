@@ -42,14 +42,14 @@ const JA_RECIPE_WIDE = ["全食材", "すべての食材", "全ての食材", "�
 const EN_RECIPE_WIDE = ["all ingredients", "every ingredient", "all of them",
   "whole recipe", "entire recipe"];
 
-function turnIsRecipeWide(turn: string): boolean {
-  if (JA_RECIPE_WIDE.some(k => turn.includes(k))) return true;
-  return EN_RECIPE_WIDE.some(k => turn.toLowerCase().includes(k));
+function turnIsRecipeWide(turn: string, explicitOnly = false): boolean {
+  if (JA_RECIPE_WIDE.some(k => (!explicitOnly || k!=="全部") && turn.includes(k))) return true;
+  return EN_RECIPE_WIDE.some(k => (!explicitOnly || k!=="all of them") && turn.toLowerCase().includes(k));
 }
 
 export function detectPriceResearch(turns: string[],
   materials: {name: string; price_jpy: string; price_quantity: string; price_unit: string}[]): ResearchTrigger[] {
-  const hits = turns.filter(t => typeof t === "string" && turnRequestsResearch(t));
+  const hits = turns.filter(t => typeof t === "string").flatMap(t=>t.split(/[。！？!?\n]/)).filter(turnRequestsResearch);
   if (!hits.length) return [];
   // Only unconfirmed lines: never re-search an already priced ingredient.
   const open = materials.filter(m => (m.name || "").trim() &&
@@ -58,15 +58,20 @@ export function detectPriceResearch(turns: string[],
   const lowered = hits.map(t => t.toLowerCase());
   // Named ingredients first: each named line gets the turn that named it.
   if (hits.some(t=>/この.+全部/.test(t))) return [];
-  if (hits.some(turnIsRecipeWide)) {
-    const request = hits.find(turnIsRecipeWide)!.trim().slice(0, 200);
+  if (hits.some(t=>turnIsRecipeWide(t,true))) {
+    const request = hits.find(t=>turnIsRecipeWide(t,true))!.trim().slice(0, 200);
     return open.map(m => ({material_name: m.name.trim(), request,
       material_index: materials.indexOf(m)}));
   }
-  const named = open.filter(m => lowered.some(t => t.includes(m.name.trim().toLowerCase())));
-  if (named.length) return named.map(m => ({material_name:m.name.trim(),
+  const named = materials.filter(m => m.name.trim() && lowered.some(t => t.includes(m.name.trim().toLowerCase())));
+  if (named.length) return named.filter(m=>open.includes(m)).map(m => ({material_name:m.name.trim(),
     request:hits[lowered.findIndex(t=>t.includes(m.name.trim().toLowerCase()))].trim().slice(0,200),
     material_index:materials.indexOf(m)}));
+  // Unqualified "全部" expands only when no explicit named targets exist.
+  if (hits.some(t=>turnIsRecipeWide(t))) {
+    const request=hits.find(t=>turnIsRecipeWide(t))!.trim().slice(0,200);
+    return open.map(m=>({material_name:m.name.trim(),request,material_index:materials.indexOf(m)}));
+  }
   // Deictic ("この食材") with a single open line: that line is unambiguous.
   // With several open lines and no names, guessing would mis-search, so none.
   if (open.length === 1) {

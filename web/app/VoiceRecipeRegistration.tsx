@@ -15,7 +15,7 @@ type Ingredient={name:string;quantity:string;unit:string;price_jpy:string;price_
 type Interpretation={source:string;suggestion:string;reason:string};
 type NameCorrection={material_name:string;heard:string;candidates:{name:string;reason:string}[]};
 type PriceReference={material_name:string;material_index?:number;status:string;origin?:"ledger"|"external";ingredient_name?:string;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null;sources?:{url:string;title:string}[];fetched_at?:string;text:string};
-type ProvisionalPrice={material_index:number;material_name:string;origin:"ledger"|"external";price_jpy:string;price_quantity:string;price_unit:string;currency:string;observation_count:number;sources:{url:string;title:string}[];samples?:{name:string;seller:string;amount:string;package:string;url?:string}[];fetched_at:string|null;status:"provisional";approval:"unapproved";text:string};
+type ProvisionalPrice={auto_apply?:boolean;material_index:number;material_name:string;origin:"ledger"|"external";price_jpy:string;price_quantity:string;price_unit:string;currency:string;observation_count:number;sources:{url:string;title:string}[];samples?:{name:string;seller:string;amount:string;package:string;url?:string}[];fetched_at:string|null;status:"provisional";approval:"unapproved";text:string};
 type ResearchStatus={material_name:string;material_index:number;request:string;trigger:"muse"|"heuristic";ledger:string;web:"not_attempted"|"available"|"empty"|"not_searched"|"provider_error"|"timeout"|"misconfigured";provisional:boolean};
 type PendingResearch={material_name:string;material_index:number;row_name?:string|null;request:string;trigger:"muse"|"heuristic"};
 type UnitProposal={symbol:string;dimension:"mass"|"volume"|"count"|"other"};
@@ -79,7 +79,7 @@ function applyFoundPrices(draft:Draft):Draft{
  const applied=new Set<number>();
  const materials=draft.materials.map((m,index)=>{
   const p=draft.provisional_prices?.[index];
-  if(!p||p.material_index!==index||p.material_name.trim()!==m.name.trim()||
+  if(!p||p.auto_apply===false||p.material_index!==index||p.material_name.trim()!==m.name.trim()||
     p.status!=="provisional"||p.approval!=="unapproved"||p.currency!=="JPY"||
     p.price_quantity!=="1"||!["g","ml"].includes(p.price_unit)||
     !validPrice.test(p.price_jpy)||Number(p.price_jpy)<=0||
@@ -105,7 +105,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   request<{items:Array<{id:string;symbol:string;dimension:string;base_factor:string|null;aliases:string[]}>}>("/api/units").then(result=>{if(!cancelled)setUnitCatalog(result.items);}).catch(()=>{if(!cancelled)setUnitCatalog(null);});
   return ()=>{cancelled=true;};
  },[]);
- type MasterReview={ingredients:{name:string;action:string;price_action?:string}[];units:{symbol:string;dimension:string}[];suppliers:{name:string;action:string}[]};
+ type MasterReview={already_saved?:boolean;ingredients:{name:string;action:string;price_action?:string}[];units:{symbol:string;dimension:string}[];suppliers:{name:string;action:string}[]};
  const [masterReview,setMasterReview]=useState<MasterReview|null>(null);
  const reviewFlight=useRef(false);
  const [phase,setPhase]=useState<"dictating"|"review"|"saving">("dictating");
@@ -144,6 +144,8 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  const reviewMode=useRef<SaveMode|null>(null);
  const inbox=useRef<Input[]>([]),draining=useRef(false),revision=useRef(0),epoch=useRef(0);
  const requestId=useRef<string|null>(null),semanticAbort=useRef<AbortController|null>(null),priceAbort=useRef<AbortController|null>(null),priceEpoch=useRef(0),alive=useRef(true);
+ type RegistrationPayload={request_id:string;title:string;materials:ReturnType<typeof toSaveMaterials>;unit_candidates:{symbol:string;dimension:string}[];selling_price_jpy:string|null};
+ const registrationPayload=useRef<RegistrationPayload|null>(null);
  const priceFlight=useRef<{key:string;rows:string[]} | null>(null);
  type DonePrices=Pick<Draft,"price_references"|"research_status"|"provisional_prices"|"research_state">;
  // Completed searches: fullKey -> response. A repeated identical request
@@ -175,6 +177,9 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    setTurns(snapshot.turns.slice(-30));setDraft(snapshot.draft);
    dishPreviewRef.current=snapshot.image;setDishImageUrl(snapshot.image);
    requestId.current=snapshot.requestId??null;
+   const payload=snapshot.registrationPayload as RegistrationPayload|undefined;
+   if(payload&&typeof payload.request_id==='string'&&payload.request_id===requestId.current&&typeof payload.title==='string'&&
+      Array.isArray(payload.materials)&&Array.isArray(payload.unit_candidates))registrationPayload.current=payload;
    if(draftRef.current&&snapshot.draft?.research_state==="deferred"&&snapshot.draft.pending_research?.length){
     void enrichPrices(snapshot.draft,revision.current,epoch.current,"restored-draft");
    }
@@ -183,7 +188,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  },[]);
  useEffect(()=>{
   if(!restored||prefixPreview)return;
-  const snapshot:WorkingDraftSnapshot<Draft>|null=(draft||dataTurns.current.length)?{draft,parsedTurnCount:parsedTurns.current,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current}:null;
+  const snapshot:WorkingDraftSnapshot<Draft>|null=(draft||dataTurns.current.length)?{draft,parsedTurnCount:parsedTurns.current,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current,registrationPayload:registrationPayload.current}:null;
   void saveWorkingDraft(snapshot).catch(()=>{if(alive.current)say(ja?"下書きを端末に保存できませんでした。":"Could not persist the working draft on this device.");});
  },[draft,restored,dishImageUrl,prefixPreview]);
 
@@ -196,7 +201,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   if(phaseRef.current==="saving")return;
   setRecoveredPending(false);
   epoch.current++;revision.current++;semanticAbort.current?.abort();priceAbort.current?.abort();photoAbort.current?.abort();priceEpoch.current++;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);setParsing(false);setParseFailed(false);setPriceFailed(false);setPhotoAnalyzing(false);setPhotoFailed(false);dishAbort.current?.abort();setDishGenerating(false);setDishFailed(false);dishPreviewRef.current=null;setDishImageUrl(null);voice.cancel();inbox.current=[];
-  setCorrectionIndex(null);setPriceDetailIndex(null);setUnmatchedDetailIndex(null);dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);setPrefixPreview(false);requestId.current=null;
+  setCorrectionIndex(null);setPriceDetailIndex(null);setUnmatchedDetailIndex(null);dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);setPrefixPreview(false);requestId.current=null;registrationPayload.current=null;
   // Speech-only snapshots do not change the persistence effect's dependencies.
   // Queue deletion after outstanding writes, even when draft/image were null.
   void saveWorkingDraft(null).catch(()=>{if(alive.current)say(ja?"端末の下書きを削除できませんでした。もう一度「破棄」と指示してください。":"Could not delete the device draft. Request discarding again.");});
@@ -267,12 +272,20 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
      (out.materials[index]?.supplier??"")===(previous.materials[index]?.supplier??"");
     out.price_references=[...(previous.price_references??[]).filter(r=>typeof r.material_index==='number'&&kept(r.material_index,previous.materials[r.material_index]?.name)),...(out.price_references??[])];
     out.research_status=[...(previous.research_status??[]).filter(r=>kept(r.material_index,previous.materials[r.material_index]?.name)),...(out.research_status??[])];
-    out.provisional_prices=out.materials.map((m,index)=>out.provisional_prices?.[index]??(kept(index,previous.materials[index]?.name)?previous.provisional_prices?.[index]??null:null));
+    out.provisional_prices=out.materials.map((m,index)=>{
+     const prior=previous.materials[index];
+     const candidate=out.provisional_prices?.[index]??(kept(index,prior?.name)?previous.provisional_prices?.[index]??null:null);
+     // A cleared price is a revision, not permission to apply the old candidate
+     // again. Keep it available for the chef's explicit manual adoption.
+     const cleared=prior?.price_jpy&&prior.price_quantity&&prior.price_unit&&
+      !(m.price_jpy&&m.price_quantity&&m.price_unit)&&!out.pending_research?.some(e=>e.material_index===index);
+     return candidate&&cleared?{...candidate,auto_apply:false}:candidate;
+    });
    }
    const enriched=applyFoundPrices(out);
    parseBase.current=enriched;
    logVoiceEvent(draftRef.current?"draft.updated":"draft.created", "voice-recipe",traceId);
-   setCorrectionIndex(null);setPriceDetailIndex(null);setUnmatchedDetailIndex(null);draftRef.current=enriched;setDraft(enriched);reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
+   setCorrectionIndex(null);setPriceDetailIndex(null);setUnmatchedDetailIndex(null);draftRef.current=enriched;setDraft(enriched);reviewed.current=null;reviewMode.current=null;requestId.current=null;registrationPayload.current=null;setStage("dictating");
    const pending=enriched.pending_research??[];
    if(out.research_state==="deferred"&&pending.length){
     const key=researchKey(pending);
@@ -285,7 +298,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
      priceStash.current=null;priceFlight.current=null;priceAbort.current=null;setPriceLoading(false);
      priceDone.current.set(key+"@"+rows.join("|"),stash.response);
      draftRef.current=merged;parseBase.current=merged;setDraft(merged);
-     reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
+     reviewed.current=null;reviewMode.current=null;requestId.current=null;registrationPayload.current=null;setStage("dictating");
      logVoiceEvent("price.ok","stashed research applied",traceId);
     }else{
      priceStash.current=null;
@@ -297,7 +310,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
       // the row is never left pending with no search running.
       const merged=applyFoundPrices({...enriched,...cached,pending_research:[]});
       draftRef.current=merged;parseBase.current=merged;setDraft(merged);
-      reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
+      reviewed.current=null;reviewMode.current=null;requestId.current=null;registrationPayload.current=null;setStage("dictating");
       logVoiceEvent("price.ok","cached research reapplied",traceId);
      }else if(flight&&flightMatches(flight,pending,enriched)&&priceAbort.current&&!priceAbort.current.signal.aborted){
       // Unchanged ingredients: keep the running search, rebase its guard to
@@ -336,7 +349,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
      const merged=applyFoundPrices({...candidate,...stash.response,pending_research:[]});
      priceDone.current.set(stash.key+"@"+rowNamesOf(candidate).join("|"),stash.response);
      draftRef.current=merged;parseBase.current=merged;setDraft(merged);
-     reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
+     reviewed.current=null;reviewMode.current=null;requestId.current=null;registrationPayload.current=null;setStage("dictating");
      logVoiceEvent("price.ok","stashed research applied after parse failure",traceId);
     }
     if(stash||!(priceAbort.current&&!priceAbort.current.signal.aborted)){
@@ -384,7 +397,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
        !controller.signal.aborted&&phaseRef.current!=="saving"&&live&&rows.every((name,index)=>rowNamesOf(live)[index]===name)){
      const partial=applyFoundPrices({...live,...response,research_state:"deferred",pending_research:entries});
      draftRef.current=partial;parseBase.current=partial;setDraft(partial);
-     reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
+     reviewed.current=null;reviewMode.current=null;requestId.current=null;registrationPayload.current=null;setStage("dictating");
     }
    }
    if(!alive.current||controller.signal.aborted||priceEpoch.current!==sequence||epoch.current!==requestEpoch)return;
@@ -412,7 +425,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     const merged=applyFoundPrices({...current,...response,pending_research:[]});
     priceDone.current.set(key+"@"+currentRows.join("|"),response);
     draftRef.current=merged;parseBase.current=merged;setDraft(merged);
-    reviewed.current=null;reviewMode.current=null;requestId.current=null;
+    reviewed.current=null;reviewMode.current=null;requestId.current=null;registrationPayload.current=null;
     setStage("dictating");logVoiceEvent("price.ok","research returned",traceId);
    }
   }catch{
@@ -434,7 +447,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
     // The approved content changed, so the old approval must not survive:
     // same invalidation as the success path, otherwise save() would
     // silently no-op with the approval button still enabled.
-    reviewed.current=null;reviewMode.current=null;requestId.current=null;
+    reviewed.current=null;reviewMode.current=null;requestId.current=null;registrationPayload.current=null;
     setStage("dictating");setPriceFailed(true);
     logVoiceEvent("price.fail","price research failed; draft retained",traceId);
    }
@@ -447,14 +460,16 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    if(alive.current&&priceEpoch.current===sequence){setPriceLoading(false);priceAbort.current=null;priceFlight.current=null;}
   }
  }
- function savePayload(d:Draft){
+ function savePayload(d:Draft):RegistrationPayload{
+  if(registrationPayload.current?.request_id===requestId.current)return registrationPayload.current;
   const materials=toSaveMaterials(d);
   const symbols=[...new Set(materials.flatMap(m=>[m.unit,m.price_unit]).filter((x):x is string=>Boolean(x)))];
   const unit_candidates=symbols.filter(symbol=>!unitCatalog?.some(u=>[u.symbol,...(u.aliases||[])].some(a=>a.toLocaleLowerCase()===symbol.toLocaleLowerCase())))
    .map(symbol=>({symbol,dimension:unitDimensionChoices[symbol]??d.unitProposals?.find(item=>item.symbol===symbol)?.dimension??standardDimension(symbol)}));
   if(unit_candidates.some(c=>!["mass","volume","count","other"].includes(c.dimension)))throw new Error('unresolved_unit');
   if(!requestId.current)requestId.current=crypto.randomUUID();
-  return {request_id:requestId.current,title:d.title,materials,unit_candidates,selling_price_jpy:d.selling_price_jpy||null};
+  const payload={request_id:requestId.current,title:d.title,materials,unit_candidates,selling_price_jpy:d.selling_price_jpy||null};
+  registrationPayload.current=payload;return payload;
  }
  async function showReview(traceId=""){
   if(priceLoading){say(ja?"価格調査中ですが、下書きの確認は先にできます。検索結果は確定後に反映されます。":"Price research is running; you can still review the draft now.")} 
@@ -470,8 +485,9 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   reviewFlight.current=true;setMasterReview(null);
   say(ja?"保存内容と食材・単位・仕入先マスターを照合しています…":"Checking recipe and master records…");
   try{
-   const result=await request<MasterReview>("/api/recipes/full/review",{method:"POST",body:JSON.stringify(savePayload(d))});
-   if(!alive.current||epoch.current!==reviewEpoch||revision.current!==reviewRevision||draftRef.current!==d)return;
+   const payload=savePayload(d);
+   const result=await request<MasterReview>("/api/recipes/full/review",{method:"POST",body:JSON.stringify(payload)});
+   if(!alive.current||epoch.current!==reviewEpoch||revision.current!==reviewRevision||draftRef.current!==d||requestId.current!==payload.request_id)return;
    setMasterReview(result);
   }catch{say(ja?"保存前の照合を完了できません。数量・価格・新規単位の分類、重複候補を確認して再試行してください。下書きは保持しています。":"Could not validate registration. Check values and master candidates, then retry. Draft retained.");return;}
   finally{reviewFlight.current=false;}
@@ -502,7 +518,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   voice.cancel();setStage("saving");if(!draining.current)setBusy(true);say("承認された内容を保存しています…");
   if(!requestId.current)requestId.current=crypto.randomUUID();
   // Persist the stable idempotency key before invoking the remote mutation.
-  try{await saveWorkingDraft({draft:d,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current});}
+  try{await saveWorkingDraft({draft:d,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current,registrationPayload:registrationPayload.current});}
   catch{setStage("dictating");say("保存IDを端末に保持できません。安全のため登録を中止しました。");return;}
   try{
    const recipe=await request<Recipe>("/api/recipes/full",{method:"POST",body:JSON.stringify(payload)});
@@ -519,7 +535,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    }
    if(!alive.current)return;
    epoch.current++;revision.current++;inbox.current=[];
-   dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);setPrefixPreview(false);requestId.current=null;setStage("dictating");
+   dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);setPrefixPreview(false);requestId.current=null;registrationPayload.current=null;setStage("dictating");
    // Spoken purchase sources travel with the save callback: the workspace
    // announces them after its browse transition (this panel hides then).
    const suppliers=[...new Set(d.materials.map(m=>(m.supplier||"").trim()).filter(Boolean))];
@@ -547,7 +563,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
      // Only the on-screen transcript is capped (see enqueue).
      dataTurns.current=[...dataTurns.current,...batch.map(item=>item.text)];
      const sourceEpoch=epoch.current;const sourceTurns=[...dataTurns.current];
-     try{await saveWorkingDraft({draft:parseBase.current,parsedTurnCount:parsedTurns.current,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current});}
+     try{await saveWorkingDraft({draft:parseBase.current,parsedTurnCount:parsedTurns.current,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current,registrationPayload:registrationPayload.current});}
      catch{say(ja?"発話を端末に保持できません。画面の入力内容を確認してください。":"Could not retain speech on this device. Check the transcript.");}
      if(!alive.current||epoch.current!==sourceEpoch)continue;
      await parse(sourceTurns,batch[batch.length-1].revision,batch[batch.length-1].traceId);
@@ -574,7 +590,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    // Keep a running price search alive across follow-up utterances; parse()
    // adopts it when the searched rows are unchanged, or restarts it when the
    // condition changed. Never abort here (avoids cancelling unchanged rows).
-   revision.current++;reviewed.current=null;reviewMode.current=null;draftRef.current=null;requestId.current=null;setStage("dictating");
+   revision.current++;reviewed.current=null;reviewMode.current=null;draftRef.current=null;requestId.current=null;registrationPayload.current=null;setStage("dictating");
   }
   const afterReview=!meta||meta.reviewEpoch===approvalEpoch.current;
   // A microphone turn captured before the current review predates the presented draft.
@@ -583,7 +599,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   inbox.current.push({text,command,revision:revision.current,approval:afterReview&&phaseRef.current==="review"?reviewed.current:null,staleVoice,traceId:meta?.traceId??""});
   if(command==="data")void saveWorkingDraft({draft:parseBase.current,parsedTurnCount:parsedTurns.current,
    turns:[...dataTurns.current,...inbox.current.filter(item=>item.command==="data").map(item=>item.text)],
-   image:dishPreviewRef.current,requestId:requestId.current}).catch(()=>say(ja?"発話を端末に保持できません。画面の入力内容を確認してください。":"Could not retain speech on this device. Check the transcript."));
+   image:dishPreviewRef.current,requestId:requestId.current,registrationPayload:registrationPayload.current}).catch(()=>say(ja?"発話を端末に保持できません。画面の入力内容を確認してください。":"Could not retain speech on this device. Check the transcript."));
   void drain();
  }
  function retry(){
@@ -642,7 +658,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    const enriched=applyFoundPrices(out);
    parseBase.current=enriched;
    logVoiceEvent("draft.created","image-recipe",traceId);
-   setCorrectionIndex(null);setPriceDetailIndex(null);setUnmatchedDetailIndex(null);draftRef.current=enriched;setDraft(enriched);reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
+   setCorrectionIndex(null);setPriceDetailIndex(null);setUnmatchedDetailIndex(null);draftRef.current=enriched;setDraft(enriched);reviewed.current=null;reviewMode.current=null;requestId.current=null;registrationPayload.current=null;setStage("dictating");
    say(enriched.missing.length||enriched.notes.length?(ja?"写真から下書きを作りました。確認が必要です："+[...enriched.missing,...enriched.notes].join("、"):"Photo draft created. Needs review: "+[...enriched.missing,...enriched.notes].join(", ")):(ja?"写真から下書きを作りました。内容を確認してください。":"Photo draft created. Review it."));
    const pending=enriched.pending_research??[];
    if(out.research_state==="deferred"&&pending.length)void enrichPrices(enriched,version,current,traceId);
@@ -707,7 +723,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   const next={...current,materials,missing,nameCorrections,price_references,provisional_prices,research_status,pending_research};
   setPriceDetailIndex(null);setUnmatchedDetailIndex(null);
   draftRef.current=next;parseBase.current=next;setDraft(next);
-  reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");setCorrectionIndex(null);
+  reviewed.current=null;reviewMode.current=null;requestId.current=null;registrationPayload.current=null;setStage("dictating");setCorrectionIndex(null);
   if(pending_research.length)void enrichPrices(next,revision.current,epoch.current,"");
  }
  function adoptProvisional(index:number){
@@ -724,7 +740,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   const missing=current.missing.filter(item=>item!==material.name+PRICE_SUFFIX);
   const next={...current,materials,missing};
   draftRef.current=next;parseBase.current=next;setDraft(next);
-  reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");
+  reviewed.current=null;reviewMode.current=null;requestId.current=null;registrationPayload.current=null;setStage("dictating");
   say(ja?"参考価格を下書きに採用しました。内容を確認してから保存してください。":"Reference price applied to the draft. Review before saving.");
  }
  const eligible=draftRef.current&&parsedTurns.current===dataTurns.current.length?saveModeFor(draftRef.current):null;
@@ -774,7 +790,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
        {unknown.map(symbol=><label key={symbol}>{symbol}
         <select aria-label={ja?symbol+"の単位分類":symbol+" unit dimension"}
          value={unitDimensionChoices[symbol]??draft.unitProposals?.find(item=>item.symbol===symbol)?.dimension??standardDimension(symbol)}
-         onChange={e=>{setUnitDimensionChoices(state=>({...state,[symbol]:e.target.value}));reviewed.current=null;reviewMode.current=null;requestId.current=null;setStage("dictating");}}>
+         onChange={e=>{setUnitDimensionChoices(state=>({...state,[symbol]:e.target.value}));reviewed.current=null;reviewMode.current=null;requestId.current=null;registrationPayload.current=null;setStage("dictating");}}>
          <option value="">{ja?"分類を選択":"Select dimension"}</option>
          <option value="mass">{ja?"質量":"Mass"}</option><option value="volume">{ja?"体積":"Volume"}</option>
          <option value="count">{ja?"個数":"Count"}</option><option value="other">{ja?"その他":"Other"}</option>
@@ -900,6 +916,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    <p>{ja?"下書きは自動保存されています。正式登録は「登録」または「保存」で行います。":"Draft is auto-saved. Say register or save to publish it as a recipe."}</p>
    {sharedVoice&&<><p role="status">{sharedVoice.captureMessage}</p><a href="#voice-controls">音声操作・再開へ戻る</a></>}
    {phase==="review"&&masterReview&&<div aria-label={ja?"正式登録の確認":"Registration review"}>
+    {masterReview.already_saved&&<p>{ja?"この登録は保存済みです。承認後に同じ登録IDで保存結果を再取得します。":"This registration is already saved. Approval retrieves its result with the same request ID."}</p>}
     <p>{ja?"以下のマスター変更と上のレシピ内容を確認して承認してください。価格候補の採用も承認に含まれます。":"Review these master changes and the recipe above before approving, including any selected price candidates."}</p>
     <ul>{masterReview.ingredients.map((m,i)=><li key={i}>{m.name}：{m.action==="reuse"?(ja?"既存食材を使用":"Use existing ingredient"):(ja?"食材を新規登録":"Create ingredient")}{m.price_action==="reviewed_quote"&&(ja?"（表示価格を共通の採用価格として登録）":" (adopt displayed shared price)")}</li>)}</ul>
     <ul>{masterReview.suppliers.map((m,i)=><li key={i}>{m.name}：{m.action==="reuse"?(ja?"既存仕入先を使用":"Use existing supplier"):(ja?"仕入先を新規登録":"Create supplier")}</li>)}</ul>

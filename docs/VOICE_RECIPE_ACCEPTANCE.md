@@ -29,7 +29,7 @@ node --test tests/*.node.cjs
 npx playwright test --config playwright.unit.config.ts
 npm run typecheck
 npm run build
-npx playwright test tests/voice-ten-ingredients.spec.ts tests/voice-price-lifecycle.spec.ts tests/voice-rapid-turns.spec.ts tests/voice-status-ux.spec.ts tests/voice-full.spec.ts tests/voice-unconfirmed.spec.ts tests/unit-master.spec.ts tests/voice-recovery.spec.ts tests/voice-draft-harness.spec.ts tests/price-provisional.spec.ts
+npx playwright test tests/voice-review-followup.spec.ts tests/voice-ten-ingredients.spec.ts tests/voice-price-lifecycle.spec.ts tests/voice-rapid-turns.spec.ts tests/voice-status-ux.spec.ts tests/voice-full.spec.ts tests/voice-unconfirmed.spec.ts tests/unit-master.spec.ts tests/voice-recovery.spec.ts tests/voice-draft-harness.spec.ts tests/price-provisional.spec.ts
 ```
 
 実Muse・Grounding・実Supabaseのブラウザ検証は明示opt-in。ルート `.env` の既存キーを使い、専用Chefプロジェクトだけに新規一時ユーザーを作る。既存ユーザーのレシピをテストに使わない。バックエンドはテスト専用ループバック・トークンを使い、終了時に一時ユーザーと関連データの削除を確認する。DBマイグレーションは不要。
@@ -68,3 +68,18 @@ curl -X POST http://127.0.0.1:8102/test/stop
 物理マイクでの10材料の認識品質・スマートフォン実機・公開環境は未検証。文字起こしは既知の発話を注入したブラウザ検証であり、この範囲を実機成功とは記録しない。既存の短い日本語WAVでは実Muse Voiceの文字起こし応答も個別確認したが、10材料の実音声認識の代用にはしない。ローカル実装・本番ビルド・実API検証までで、マージ・デプロイは実施していない。Web/API双方へ同じ変更を反映する必要がある。新規DB migrationはない。
 
 一時テストユーザーを削除し、recipes・保存版・食材・単位・仕入先・Offer・価格観測を含む10テーブルの対象ユーザー行が0件であることを確認した。
+
+
+## PR #139 レビュー対応
+
+5件の指摘について、修正前の失敗を回帰テストで確認した。
+
+- 名前を挙げた「全部」の価格依頼が無関係な行へ拡大しないこと。既知価格の名前付き対象でも別行へ依頼を流用しない。
+- 単位分類を確認処理中に変更すると古い確認結果を破棄し、新しい分類で再確認した内容だけを保存すること。
+- AIが価格一式を空にした訂正を、過去の候補の自動適用で取り消さないこと。残した候補は明示操作で再採用できること。
+- 保存成功後の応答消失→再読込→単位マスター追加済みの状態でも、新規単位候補を含む元の正確な送信内容と登録IDを再利用し、再確認・承認後の再送が二重登録にならないこと。サーバーの作成内容照合は不一致を409で拒否する。
+- 同じ食材・仕入先でも購入パッケージが異なれば確認でき、同じ購入数量・単位に異なる金額があれば拒否すること。数値の末尾ゼロの違いだけでは別条件にしない。
+
+追加テスト: `web/tests/voice-review-followup.spec.ts`、`web/tests/voice-flow.node.cjs`、`tests/test_voice_full_recipe.py`。今回のレビュー対応はfixtureによる障害・競合・復旧検証であり、上記の実API通し検証を再実行したという意味ではない。
+
+レビュー修正後の検証: 関連Playwright 58ケースを一括実行して全件成功。送信内容キャッシュを破棄時にも消去する最終調整後、復旧・単位分類競合・価格削除の6ケースも再実行成功。Python全体477成功・33skip、Node45成功・実API opt-in 1skip、構造化／価格API26成功、型チェック・本番ビルド・差分チェック成功。新しい外部API呼び出し・DB変更・デプロイは行っていない。

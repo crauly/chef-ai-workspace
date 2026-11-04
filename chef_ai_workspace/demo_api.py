@@ -551,6 +551,7 @@ def _complete_demo_recipe(body: CompleteRecipeBody, ctx, review_only=False):
     """Validate every field before a single durable create. Idempotent recipe UUID."""
     from .mutations import prepare_mutation
     from dataclasses import replace
+    from decimal import Decimal
     owner, repository = ctx
     title = body.title.strip()
     if not title:
@@ -561,13 +562,21 @@ def _complete_demo_recipe(body: CompleteRecipeBody, ctx, review_only=False):
     except ValueError:
         existing = None
     if existing is not None:
-        if review_only:
-            raise HTTPException(409,"Recipe already saved; reload the saved recipe")
         # An uncertain retry must not create suppliers/offers or adopt twice.
         verifier = getattr(repository, "verify_owned_creation_payload", None)
         if callable(verifier):
             try: verifier(owner, recipe_id, body.model_dump(mode="json"))
             except ValueError as exc: raise HTTPException(409, "Creation request conflict") from exc
+        if review_only:
+            if not callable(verifier):
+                raise HTTPException(503,"Creation payload verification unavailable")
+            return {"already_saved":True,"title":existing.title.value,
+                    "ingredients":[{"name":line.material_name.value,"ingredient_id":line.ingredient_id,
+                                    "action":"reuse"} for line in existing.materials],
+                    "units":[],"suppliers":[{"name":name,"action":"reuse"} for name in dict.fromkeys(
+                        m.supplier.strip() for m in body.materials if m.supplier and m.supplier.strip())],
+                    "materials":[m.model_dump() for m in body.materials],
+                    "selling_price_jpy":body.selling_price_jpy}
         return _displayed_recipe(owner, repository, existing)
     # The explicit recipe-save action is the only approval gate for new units.
     # Candidates are checked against the owned catalog; unknown spelling may
@@ -679,12 +688,12 @@ def _complete_demo_recipe(body: CompleteRecipeBody, ctx, review_only=False):
         ing_id=entry["id"]
         quote=line.price_override
         supplier_key=(material.supplier or "").strip().casefold()
-        quote_key=(ing_id,supplier_key)
+        quote_key=(ing_id,supplier_key,Decimal(quote.per_quantity),quote.per_unit) if quote is not None else None
         if quote is not None:
-            serialized_quote=asdict(quote)
-            if quote_key in quotes_by_product_supplier and quotes_by_product_supplier[quote_key]!=serialized_quote:
+            amount=Decimal(quote.amount_jpy.value)
+            if quote_key in quotes_by_product_supplier and quotes_by_product_supplier[quote_key]!=amount:
                 raise HTTPException(422,"Conflicting quotes for one ingredient and supplier")
-            quotes_by_product_supplier[quote_key]=serialized_quote
+            quotes_by_product_supplier[quote_key]=amount
         procurement.append({"material_id":line.id,"supplier":material.supplier.strip() if material.supplier else None,
                             "quote":asdict(quote) if quote is not None else None})
         if quote is not None and not procured:

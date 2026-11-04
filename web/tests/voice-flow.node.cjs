@@ -26,3 +26,12 @@ test('a schema-valid empty shell cannot erase an existing recipe revision',async
  const old=global.fetch;let calls=0;global.fetch=async()=>{calls++;return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify({title:'',materials:[],notes:[],selling_price_jpy:''})}}]});};
  try{await assert.rejects(voiceRecipeModel('x','x',{previous_draft:{title:'パスタ',materials}},new AbortController().signal,{}),e=>e.code==='invalid_response');assert.equal(calls,2);}finally{global.fetch=old;}
 });
+test('all named mushrooms never expands a correct Muse subset to unrelated rows',()=>{
+ const rows=['しめじ','えのき','パスタ'].map(name=>({...materials[0],name}));
+ const request='しめじとえのきの価格を全部調べて';
+ const entries=assembleEntries(rows,[{material_name:'しめじ',material_index:0,request},{material_name:'えのき',material_index:1,request}],[request]);
+ assert.deepEqual(entries.map(e=>e.material_index),[0,1]);
+ const priced=rows.map((m,i)=>i===0?{...m,price_jpy:'100',price_quantity:'100',price_unit:'g'}:m);
+ assert.deepEqual(assembleEntries(priced,[{material_name:'しめじ',material_index:0,request:'しめじの価格を全部調べて'}],['しめじの価格を全部調べて']).map(e=>e.material_index),[0]);
+ assert.equal(assembleEntries(rows,[],['しめじ20g。全部の食材の価格を調べて']).length,3);
+});
