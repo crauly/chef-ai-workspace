@@ -36,4 +36,9 @@ def fault(enabled:int):
         begin if new.owner_id={literal(fixture.owner)} then raise exception 'private browser test failure'; end if;return new;end $$;
         create trigger ingredient_browser_failure before insert on public.price_observations for each row execute function public.ingredient_browser_failure();""")
     return {'ok':True}
+@app.post('/test/seed-recipe-master')
+def seed_recipe_master():
+    master=fixture.repo.create_owned_ingredient_master(fixture.owner,'ペコリーノロマーノ','1kg')
+    sql(f"insert into public.units(owner_id,symbol,dimension) values({literal(fixture.owner)},'個','count') on conflict do nothing;")
+    return {'pecorino':master}
 app.mount('/',chef_app)

@@ -705,3 +705,6 @@ main.recipe-detail-page #voice-controls[hidden]{display:none!important}
  .settings-main-panel .settings-manager-unit .unit-card-actions{width:100%;justify-content:flex-start}
  .settings-main-panel .unit-create-actions button{padding:9px 10px}
 }
+
+.master-match-review li{overflow-wrap:anywhere}
+.master-match-review select,.master-match-review input{max-width:100%;min-width:0}

@@ -203,3 +203,10 @@ unchanged prices create no observation history. Units come from the existing uni
 catalog. Local PostgreSQL and browser verification, retry semantics and the required
 migration are documented in [ADR-017](docs/ADR_017_INGREDIENT_ATOMIC_EDIT.md).
 Production migration/deployment remains a separate operation.
+
+Recipe creation and editing share ingredient master matching and explicit reuse
+choices. Recipe confirmation adopts supplier prices through the existing Offer
+transaction, preserves history and updates costs for matching purchase terms.
+Unpriced additions are supported. See [ADR-018](docs/ADR_018_RECIPE_MASTER_PROCUREMENT.md)
+for required migrations, the real PostgreSQL flow and live Muse
+verification limits.

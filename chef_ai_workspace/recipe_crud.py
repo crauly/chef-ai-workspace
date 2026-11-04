@@ -9,7 +9,7 @@ from .mutations import MutationError, prepare_mutation
 from .persistence_service import SavedMutation, canonical_json, _json, _validate_ledger
 
 
-def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledger=()):
+def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledger=(), review_only=False):
     """Called exclusively after the authenticated HTTP confirmation boundary.
 
     All master writes and recipe revision CAS are committed by one database RPC.
@@ -20,7 +20,7 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
         "save_version": save_version,
         "ledger": [asdict(entry) for entry in ledger],
     }).encode("utf-8")).hexdigest()
-    receipt = repository.get_mutation_receipt(owner_id, proposal.request_id)
+    receipt = repository.get_mutation_receipt(owner_id, proposal.request_id) if not review_only else None
     if receipt is not None:
         if receipt[0] != receipt_hash:
             raise MutationError("Request ID reused with different payload")
@@ -48,13 +48,14 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
         # Value-model validation errors are invalid confirmed edits (409),
         # not missing recipe/owner lookups (404). No DB write has happened.
         raise MutationError(str(exc)) from exc
-    finder = repository.find_owned_ingredients_exact
     loader = repository.load_owned_ingredients
     entries = {}
     name_to_new_id = {}
     ledger_by_id = {item["id"]: item for item in prepared_ledger if item["kind"] == "new"}
     effective = dict(catalog)
     normalized = []
+    master_review=[]
+    candidate_rows=None
     for line in candidate.materials:
         name = (line.material_name.value or "").strip()
         if not name:
@@ -63,26 +64,29 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
         renamed = any(op.get("op") == "set_material_name"
                       and op.get("material_id") == line.id
                       for op in proposal.operations)
-        if line.ingredient_id and line.ingredient_id in effective and not renamed:
+        explicit_link=any(op.get("op")=="link_ingredient" and op.get("material_id")==line.id for op in proposal.operations)
+        if line.ingredient_id and line.ingredient_id in effective and (not renamed or explicit_link):
             ingredient_id = line.ingredient_id
             ingredient = effective[ingredient_id]
         elif key in name_to_new_id:
             ingredient_id = name_to_new_id[key]
             ingredient = effective[ingredient_id]
         else:
-            matches = finder(owner_id, name)
-            if len(matches) > 1:
-                raise MutationError("Ambiguous ingredient identity")
-            if matches:
-                ingredient_id = str(matches[0]["id"])
-                owned = loader(owner_id, [ingredient_id])
-                ingredient = owned.get(ingredient_id)
-                if ingredient is None:
-                    raise MutationError("Ingredient not owned")
+            from .ingredient_assist import match_recipe_master
+            if candidate_rows is None:
+                candidate_loader=getattr(repository,"list_owned_ingredient_master",None)
+                candidate_rows=candidate_loader(owner_id) if callable(candidate_loader) else []
+            plan=match_recipe_master(owner_id,repository,name,candidate_rows=candidate_rows)
+            if plan["action"]=="choose" and not review_only:
+                raise MutationError("Choose an ingredient master before saving")
+            if plan["action"]=="reuse":
+                ingredient_id=plan["ingredient_id"]
+                ingredient=loader(owner_id,[ingredient_id]).get(ingredient_id)
+                if ingredient is None: raise MutationError("Ingredient not owned")
             else:
-                ingredient_id = str(uuid5(NAMESPACE_URL,
-                    f"chef-ai-crud:{owner_id}:{proposal.request_id}:{key}"))
-                ingredient = Ingredient(ingredient_id, name, None)
+                ingredient_id=str(uuid5(NAMESPACE_URL,f"chef-ai-crud:{owner_id}:{proposal.request_id}:{key}"))
+                ingredient=Ingredient(ingredient_id,name,None)
+            master_review.append({**plan,"material_id":line.id})
             effective[ingredient_id] = ingredient
             if ingredient_id not in catalog:
                 name_to_new_id[key] = ingredient_id
@@ -93,22 +97,20 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
             (op.get("op") in ("set_material_price", "add_material")
              or (op.get("op") == "link_ingredient" and op.get("price_mode") == "override"))
             and op.get("material_id") == line.id for op in proposal.operations)
-        if price_edited and quote is not None and (line.supplier_id or line.offer_id):
-            raise MutationError(
-                "Supplier offer price must be adopted through the explicit offer-price approval route")
-        if price_edited and quote is not None:
+        if not any(p["material_id"]==line.id for p in master_review):
+            master_review.append({"material_id":line.id,"name":name,"master_name":ingredient.name,
+                                 "ingredient_id":ingredient_id if ingredient_id in catalog and ingredient_id not in ledger_by_id else None,
+                                 "action":"reuse" if ingredient_id in catalog and ingredient_id not in ledger_by_id else "create","candidates":[]})
+        if price_edited and quote is not None and not (line.supplier_id or line.offer_id):
             effective[ingredient_id] = Ingredient(ingredient_id, ingredient.name, quote)
         metadata = ledger_by_id.get(ingredient_id, {})
         entry = entries.setdefault(ingredient_id, {
             "id": ingredient_id, "name": ingredient.name,
             "brand": metadata.get("brand"), "spec": metadata.get("spec"),
-            "current_price": None,
+            "purchases":[],
         })
         if price_edited and quote is not None:
-            value = asdict(quote)
-            if entry["current_price"] is not None and entry["current_price"] != value:
-                raise MutationError("Conflicting prices for shared ingredient")
-            entry["current_price"] = value
+            entry["purchases"].append({"material_id":line.id,"supplier_id":line.supplier_id,"quote":asdict(quote)})
         # Renaming can resolve to a different ingredient master. Purchase
         # terms belong to the old ingredient and must not travel with it.
         purchase_identity_changed = (
@@ -117,7 +119,7 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
         normalized.append(replace(
             line, ingredient_id=ingredient_id, price_mode="inherit",
             price_override=None,
-            supplier_id=None if purchase_identity_changed else line.supplier_id,
+            supplier_id=None if purchase_identity_changed and not any(op.get("op")=="set_material_supplier" and op.get("material_id")==line.id for op in proposal.operations) else line.supplier_id,
             offer_id=None if purchase_identity_changed else line.offer_id,
         ))
     candidate = replace(candidate, materials=tuple(normalized))
@@ -125,7 +127,28 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
         if item["kind"] == "new" and not any(
                 line.ingredient_id == item["id"] for line in candidate.materials):
             raise MutationError("New ledger ingredient must be linked to a recipe material")
-    units = unit_factor_catalog(repository.list_owned_units(owner_id))
+    from decimal import Decimal
+    unit_rows=repository.list_owned_units(owner_id)
+    unit_ids={}
+    for row in unit_rows:
+        for term in [row["symbol"],*(row.get("aliases") or [])]:
+            token=term.strip().casefold()
+            if token in unit_ids and unit_ids[token]!=row["id"]: raise MutationError("Unknown or ambiguous unit")
+            unit_ids[token]=row["id"]
+    seen={}
+    for entry in entries.values():
+        for purchase in entry["purchases"]:
+            q=purchase["quote"];unit=unit_ids.get(q["per_unit"].strip().casefold())
+            if unit is None: raise MutationError("Unknown or ambiguous unit")
+            key=(entry["id"],purchase["supplier_id"],Decimal(q["per_quantity"]),unit)
+            amount=Decimal(q["amount_jpy"]["value"])
+            if key in seen and seen[key]!=amount: raise MutationError("Conflicting purchase prices")
+            seen[key]=amount
+    if review_only:
+        return {"ingredients":master_review,"materials":[asdict(line) for line in candidate.materials],
+                "purchases":[purchase for entry in entries.values() for purchase in entry["purchases"]],
+                "requires_selection":any(p["action"]=="choose" for p in master_review)}
+    units = unit_factor_catalog(unit_rows)
     price_loader = getattr(repository, "load_owned_supplier_prices", None)
     supplier_prices = price_loader(owner_id, candidate) if callable(price_loader) else {}
     try:

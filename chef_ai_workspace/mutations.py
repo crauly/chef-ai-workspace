@@ -104,8 +104,6 @@ def prepare_mutation(recipe: Recipe, proposal: Proposal, *, user_confirmed: bool
             matching = [m for m in candidate.materials if m.id == op["material_id"]]
             if not matching:
                 raise MutationError("Unknown material ID")
-            if matching[0].supplier_id or matching[0].offer_id:
-                raise MutationError("Supplier pricing must be adopted through the offer approval route")
             try:
                 quote = PriceQuote(amount_jpy=_value(op["price_jpy"], user_confirmed),
                                    per_quantity=op["price_quantity"], per_unit=op["price_unit"],

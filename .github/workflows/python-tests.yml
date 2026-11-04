@@ -66,4 +66,5 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_procurement_postgres.py' -v
           python -m unittest discover -s tests -p 'test_ingredient_edit_postgres.py' -v
+          python -m unittest discover -s tests -p 'test_recipe_master_integration_postgres.py' -v
           python -m unittest discover -s tests -p 'test_scheduled_research_postgres.py' -v

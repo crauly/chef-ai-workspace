@@ -27,6 +27,7 @@ VOICE_RECIPE_SCHEMA_PY = {
             "required": ["name", "quantity", "unit", "price_jpy",
                          "price_quantity", "price_unit", "supplier"],
             "additionalProperties": False}},
+        "material_changes": {"type":"array","items":{"type":"object","properties":{"previous_name":{"type":"string"},"action":{"type":"string","enum":["remove","rename"]},"replacement_name":{"type":"string"}},"required":["previous_name","action","replacement_name"],"additionalProperties":False}},
         "unit_proposals": {"type": "array", "items": {
             "type": "object",
             "properties": {
@@ -73,7 +74,7 @@ VOICE_RECIPE_SCHEMA_PY = {
                     "additionalProperties": False}}},
             "required": ["material_name", "heard", "candidates"],
             "additionalProperties": False}}},
-    "required": ["title", "materials", "unit_proposals", "selling_price_jpy",
+    "required": ["title", "materials", "material_changes", "unit_proposals", "selling_price_jpy",
                  "notes", "interpretations", "price_research",
                  "name_corrections"],
     "additionalProperties": False}
@@ -144,7 +145,7 @@ class LiveStructuredOutputTests(unittest.TestCase):
         self.assertEqual(set(parsed),
                          {"title", "materials", "unit_proposals", "selling_price_jpy",
                           "notes", "interpretations", "price_research",
-                          "name_corrections"})
+                          "name_corrections","material_changes"})
         self.assertIsInstance(parsed["title"], str)
         self.assertIsInstance(parsed["notes"], list)
         self.assertTrue(all(isinstance(n, str) for n in parsed["notes"]))

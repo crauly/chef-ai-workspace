@@ -1,5 +1,6 @@
 "use client";
 import {useEffect,useImperativeHandle,useRef,useState,type Ref} from "react";
+import MasterMatchReview,{withMasterChoice,type MasterMatch,type EditRequest} from "./MasterMatchReview";
 import {label, type Locale} from "./i18n";
 import {useVoiceProcessingStatus,type VoiceStatusKey} from "./VoiceProcessingStatus";
 import EditProposalDialog,{type MicControl} from "./EditProposalDialog";
@@ -10,7 +11,7 @@ import {request, type AIProposal, type Operation, type Recipe} from "./types";
 import {editVoiceCommand} from "./voice-commands";
 import type {VoiceCaptureMeta} from "./useVoiceCapture";
 
-type Review = {proposal: AIProposal; instruction: string; requestId: string;modal:boolean};
+type Review = {proposal: AIProposal; instruction: string; requestId: string;modal:boolean;masters?:{ingredients:MasterMatch[];requires_selection:boolean};ledger?:EditRequest["ledger"]};
 export function describe(recipe: Recipe, operations: Operation[], locale: Locale) {
   const ja = locale === "ja";
   const lines = new Map(recipe.materials.map(line => [line.id, {...line}]));
@@ -31,7 +32,7 @@ export function describe(recipe: Recipe, operations: Operation[], locale: Locale
         if (!line) return null;
         const p = line.effective_price??line.price_override;
         const before = line.price_mode === "inherit" && !p ? (ja ? "共通食材の単価" : "Shared ingredient price") : p ? `¥${p.amount_jpy.value ?? "—"} / ${p.per_quantity} ${p.per_unit}` : "—";
-        changes.push(`${line.material_name.value || label(locale, "unnamed")} · ${ja ? "単価" : "Price"}: ${before} → ¥${op.price_jpy} / ${op.price_quantity} ${op.price_unit}`);
+        changes.push(`${line.material_name.value || label(locale, "unnamed")} · ${line.supplier_name??(ja?"相場参考価格":"Market reference")} · ${ja ? "単価" : "Price"}: ${before} → ¥${op.price_jpy} / ${op.price_quantity} ${op.price_unit}`);
         const quote={amount_jpy:{value:op.price_jpy,status:"assumed"},per_quantity:op.price_quantity,per_unit:op.price_unit};
         lines.set(line.id, {...line, price_mode: "override", price_override:quote,effective_price:quote}); break;
       }
@@ -43,6 +44,16 @@ export function describe(recipe: Recipe, operations: Operation[], locale: Locale
         if(!line)return null;
         changes.push(`${ja?"削除":"Remove"}: ${line.material_name.value??label(locale,"unnamed")} (${line.quantity.value??"—"} ${line.unit??""})`);
         lines.delete(line.id);break;
+      case "link_ingredient":
+        if(!line)return null;
+        changes.push(`${line.material_name.value} · ${ja?"食材マスターを選択":"Select ingredient master"}`);break;
+      case "set_material_supplier":
+        if(!line)return null;
+        changes.push(`${line.material_name.value} · ${ja?"仕入条件を変更":"Change supplier terms"}`);break;
+      case "add_unpriced_material":
+        if(lines.has(op.material_id))return null;
+        addedIds.add(op.material_id);changes.push(`${ja?"食材を追加":"Add ingredient"}: ${op.name} ${op.quantity??"—"} ${op.unit??""} (${ja?"価格未確定":"unpriced"})`);
+        lines.set(op.material_id,{id:op.material_id,material_name:{value:op.name,status:"assumed"},quantity:{value:op.quantity??null,status:op.quantity?"assumed":"unresolved"},unit:op.unit??null,price_mode:"inherit"});break;
       case "add_material":
         if (lines.has(op.material_id)) return null;
         addedIds.add(op.material_id);
@@ -140,7 +151,10 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
       if (proposal.recipe_id !== base.id) throw new Error("invalid");
       if (proposal.base_revision !== base.revision) {await refreshAfterConflict(); return;}
       if (describe(base, proposal.operations, locale) === null) throw new Error("invalid");
-      const next:Review={proposal,instruction:text,requestId:crypto.randomUUID(),modal:showConfirmation};reviewRef.current=next;setReview(next);setReviewOpen(showConfirmation);
+      const requestId=crypto.randomUUID();
+      const masters=await request<NonNullable<Review['masters']>>(`/api/recipes/${base.id}/confirm/review`,{method:'POST',body:JSON.stringify({base_revision:proposal.base_revision,request_id:requestId,operations:proposal.operations,save_version:true})});
+      if(!alive.current||token!==generation.current||latestRecipe.current.revision!==base.revision)return;
+      const next:Review={proposal,instruction:text,requestId,modal:showConfirmation,masters};reviewRef.current=next;setReview(next);setReviewOpen(showConfirmation);
       reviewEpoch.current=showConfirmation?-1:markReview?.()??-1;
       setNotice(researchNotice+" "+(locale==="ja"?"変更案を表示しました。差分を確認後、もう一度「保存してください」と明示するか、確認チェックと保存ボタンを操作してください。":"Review the proposal, then explicitly request saving or use the approval controls."));
     } catch (e) {
@@ -150,13 +164,24 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
       }
     } finally {setProcessing(null);working(false);}
   }
+  async function chooseMaster(match:MasterMatch,choice:string,spec:string){
+   const current=reviewRef.current;if(!current||lock.current)return;
+   working(true);setError("");setApproved(false);reviewEpoch.current=-1;
+   try{
+    const body=withMasterChoice({base_revision:current.proposal.base_revision,request_id:current.requestId,operations:current.proposal.operations,save_version:true,ledger:current.ledger},match,choice,spec);
+    const masters=await request<NonNullable<Review['masters']>>(`/api/recipes/${recipe.id}/confirm/review`,{method:'POST',body:JSON.stringify(body)});
+    if(reviewRef.current!==current)return;
+    const next={...current,masters,ledger:body.ledger,proposal:{...current.proposal,operations:body.operations}};
+    reviewRef.current=next;setReview(next);reviewEpoch.current=markReview?.()??-1;
+   }catch(e){report(e);}finally{working(false);}
+  }
   async function confirm(voiceApproval?:Review) {
     const current=voiceApproval??review;
-    if (lock.current || !current || current!==reviewRef.current || (!voiceApproval&&!approved) ||
+    if (lock.current || !current || current.masters?.requires_selection || current!==reviewRef.current || (!voiceApproval&&!approved) ||
       current.proposal.recipe_id!==recipe.id||current.proposal.base_revision!==recipe.revision||!describe(recipe,current.proposal.operations,locale)?.changes.length) return;
     working(true); setError("");setProcessing("save");
     try {
-      const result = await request<{recipe: Recipe}>(`/api/recipes/${recipe.id}/confirm`, {method: "POST", body: JSON.stringify({base_revision: current.proposal.base_revision, request_id: current.requestId, operations: current.proposal.operations, save_version: true})});
+      const result = await request<{recipe: Recipe}>(`/api/recipes/${recipe.id}/confirm`, {method: "POST", body: JSON.stringify({base_revision: current.proposal.base_revision, request_id: current.requestId, operations: current.proposal.operations, save_version: true,ledger:current.ledger??[]})});
       latestRecipe.current=result.recipe;invalidate();voiceHistory.current=[];setInstruction("");setNotice(t("savedRecalculated")); onSaved(result.recipe);
     } catch (e) {
       report(e, true);
@@ -197,9 +222,10 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
       {!valid ? <p role="alert">{t("staleProposal")}</p> : changes?.length ? <>
         <ol>{changes.map((change, i) => <li key={i}>{change}</li>)}</ol>
         {preview&&<section aria-label={locale==="ja"?"更新後の食材構成":"Ingredients after changes"}><h4>{locale==="ja"?"更新後の食材構成":"Ingredients after changes"}</h4><ul>{preview.materials.map(line=><li key={line.id} className={preview.addedIds.has(line.id)?"font-bold text-emerald-300":""}>{preview.addedIds.has(line.id)&&<strong>{locale==="ja"?"追加：":"Added: "}</strong>}{line.material_name.value} · {line.quantity.value??"—"} {line.unit??""}</li>)}</ul></section>}
+        {review.masters&&<MasterMatchReview items={review.masters.ingredients} ja={locale==="ja"} disabled={busy} onChoose={(m,c,s)=>void chooseMaster(m,c,s)}/>}
         <p>{t("proposalOnly")}</p>
         <label className="approval"><input type="checkbox" checked={approved} disabled={busy} onChange={e => setApproved(e.target.checked)}/>{t("approveValues")}</label>
-        <div className="actions"><button type="button" disabled={busy || !approved} onClick={() => void confirm()}>{t("confirmSave")}</button>
+        <div className="actions"><button type="button" disabled={busy || !approved || review.masters?.requires_selection} onClick={() => void confirm()}>{t("confirmSave")}</button>
         <button className="secondary" type="button" disabled={busy} onClick={() => {invalidate();voiceHistory.current=[];setInstruction("");}}>{t("discard")}</button></div>
       </> : <p>{t("noProposal")}</p>}
     </section>;

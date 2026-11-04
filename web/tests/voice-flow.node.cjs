@@ -35,3 +35,13 @@ test('all named mushrooms never expands a correct Muse subset to unrelated rows'
  assert.deepEqual(assembleEntries(priced,[{material_name:'しめじ',material_index:0,request:'しめじの価格を全部調べて'}],['しめじの価格を全部調べて']).map(e=>e.material_index),[0]);
  assert.equal(assembleEntries(rows,[],['しめじ20g。全部の食材の価格を調べて']).length,3);
 });
+test('partial model omission cannot silently drop eggs from a populated draft',async()=>{
+ const old=global.fetch;let calls=0;const rows=['自家製グアンチャーレ','ペコリーノロマーノ','乾燥パスタ 1.9ミリ ディチェコ','鶏卵'].map(name=>({...materials[0],name}));
+ global.fetch=async()=>{calls++;return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify({title:'カルボナーラ',materials:calls===1?rows.slice(0,3):rows,notes:[],selling_price_jpy:'',material_changes:[]})}}]});};
+ try{const result=await voiceRecipeModel('x','x',{previous_draft:{title:'カルボナーラ',materials:rows},new_turns:['パスタを120gにしてください']},new AbortController().signal,{});assert.equal(calls,2);assert.equal(result.materials.length,4);assert.equal(result.materials[3].name,'鶏卵');}finally{global.fetch=old;}
+});
+test('intentional removals and renames must be declared and visible for review',async()=>{
+ const old=global.fetch;const rows=[{...materials[0],name:'鶏卵'},{...materials[0],name:'パスタ'}];
+ global.fetch=async()=>Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify({title:'カルボナーラ',materials:[{...rows[1],name:'乾燥パスタ'}],notes:[],selling_price_jpy:'',material_changes:[{previous_name:'鶏卵',action:'remove',replacement_name:''},{previous_name:'パスタ',action:'rename',replacement_name:'乾燥パスタ'}]})}}]});
+ try{const result=await voiceRecipeModel('x','x',{previous_draft:{title:'カルボナーラ',materials:rows}},new AbortController().signal,{});assert.equal(result.materials.length,1);assert.equal(result.interpretations[0].source,'鶏卵');assert.equal(result.interpretations[0].suggestion,'削除');}finally{global.fetch=old;}
+});

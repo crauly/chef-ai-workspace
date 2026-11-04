@@ -106,6 +106,7 @@ export const VOICE_RECIPE_SCHEMA = {
   properties: {
     title: { type: "string" },
     materials: { type: "array", items: MATERIAL_SCHEMA },
+    material_changes: {type:"array",items:{type:"object",properties:{previous_name:{type:"string"},action:{type:"string",enum:["remove","rename"]},replacement_name:{type:"string"}},required:["previous_name","action","replacement_name"],additionalProperties:false}},
     unit_proposals: {type:"array",items:UNIT_PROPOSAL_SCHEMA},
     selling_price_jpy: { type: "string" },
     notes: { type: "array", items: { type: "string" } },
@@ -119,9 +120,14 @@ export const VOICE_RECIPE_SCHEMA = {
     // [] when confident. Informational only, never auto-applied.
     name_corrections: { type: "array", items: NAME_CORRECTION_SCHEMA },
   },
-  required: ["title", "materials", "unit_proposals", "selling_price_jpy", "notes", "interpretations", "price_research", "name_corrections"],
+  required: ["title", "materials", "material_changes", "unit_proposals", "selling_price_jpy", "notes", "interpretations", "price_research", "name_corrections"],
   additionalProperties: false,
 } as const;
+
+// Photo imports have no prior draft to remove/rename; keep their established contract.
+const {material_changes: _voiceChanges,...imageProperties}=VOICE_RECIPE_SCHEMA.properties;
+export const IMAGE_RECIPE_SCHEMA={...VOICE_RECIPE_SCHEMA,properties:imageProperties,
+ required:VOICE_RECIPE_SCHEMA.required.filter(key=>key!=="material_changes")};
 
 export function chatResponseFormat(schemaName: string, schema: unknown) {
   // Verified Chat Completions shape only. Responses API text.format is

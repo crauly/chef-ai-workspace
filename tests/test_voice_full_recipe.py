@@ -184,7 +184,8 @@ class VoiceFullRecipeTests(unittest.TestCase):
         body=self.payload()
         self.repo.find_owned_ingredients_exact=lambda owner,name:[{'id':'a'},{'id':'b'}]
         response=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
-        self.assertEqual(response.status_code,409,response.text)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertTrue(all(m["action"]=="choose" for m in response.json()["ingredients"]))
         self.assertEqual(self.repo.writes,0)
         body['materials'][0]['quantity']='NaN'
         response=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
