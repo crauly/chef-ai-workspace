@@ -55,7 +55,8 @@ class CostResult:
 
 
 def calculate_cost(recipe: Recipe, ingredients: Mapping[str, Ingredient] | None = None,
-                   units: Mapping[str, tuple[str, Decimal | None]] | None = None) -> CostResult:
+                   units: Mapping[str, tuple[str, Decimal | None]] | None = None,
+                   supplier_prices: Mapping[tuple[str, str], PriceQuote] | None = None) -> CostResult:
     catalog = ingredients or {}
     costs: dict[str, Decimal] = {}
     price_sources: dict[str, str] = {}
@@ -65,7 +66,12 @@ def calculate_cost(recipe: Recipe, ingredients: Mapping[str, Ingredient] | None 
         quote: PriceQuote | None = line.price_override if line.price_mode == "override" else None
         if line.price_mode == "inherit":
             ingredient = catalog.get(line.ingredient_id or "")
-            quote = ingredient.current_price if ingredient else None
+            # A recipe-selected supplier MUST have its own approved quote.
+            # Never silently fall back to another supplier or a market average.
+            if line.supplier_id:
+                quote = (supplier_prices or {}).get((line.ingredient_id or "", line.supplier_id))
+            else:
+                quote = ingredient.current_price if ingredient else None
         q = line.quantity
         if q.value is None or line.unit is None or quote is None or quote.amount_jpy.value is None:
             unresolved.append(line.id)
