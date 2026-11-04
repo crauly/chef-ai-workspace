@@ -42,7 +42,12 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
                       if op.get("op") == "link_ingredient" and op.get("ingredient_id")]
     if explicit_links:
         catalog = {**catalog, **repository.load_owned_ingredients(owner_id, explicit_links)}
-    candidate = prepare_mutation(recipe, proposal, user_confirmed=True, catalog=catalog)
+    try:
+        candidate = prepare_mutation(recipe, proposal, user_confirmed=True, catalog=catalog)
+    except (ValueError, ArithmeticError) as exc:
+        # Value-model validation errors are invalid confirmed edits (409),
+        # not missing recipe/owner lookups (404). No DB write has happened.
+        raise MutationError(str(exc)) from exc
     finder = repository.find_owned_ingredients_exact
     loader = repository.load_owned_ingredients
     entries = {}
