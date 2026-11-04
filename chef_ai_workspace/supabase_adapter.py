@@ -72,10 +72,21 @@ class SupabasePersistence:
         Recipe versions and mutation receipts have ON DELETE CASCADE
         constraints; unrelated ingredient master records are preserved.
         """
+        image_rows = (self.client.table("recipe_dish_images")
+                      .select("storage_path").eq("owner_id",owner_id)
+                      .eq("recipe_id",recipe_id).limit(1).execute()).data or []
         rows = (self.client.table("recipes").delete()
                 .eq("owner_id", owner_id)
                 .eq("id", recipe_id)
                 .execute()).data or []
+        if rows and image_rows:
+            # Metadata is cascaded by SQL; delete the private object via the
+            # Storage API, never by directly removing storage.objects rows.
+            try:
+                self.client.storage.from_("chef-recipe-dishes").remove(
+                    [image_rows[0]["storage_path"]])
+            except Exception:
+                pass
         return bool(rows)
 
     def load_owned_recipe(self, owner_id, recipe_id):
