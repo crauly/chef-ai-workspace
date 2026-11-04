@@ -60,6 +60,13 @@ class DishImageTests(unittest.TestCase):
         self.assertEqual(get.status_code, 200)
         self.assertEqual(get.json()["image"], DATA)
 
+    def test_accept_valid_jpeg_signature(self):
+        jpeg = b"\\xff\\xd8\\xff" + b"test-jpeg"
+        data = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()
+        response = self.client.post(self.path, json={"image": data}, headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.repo.saved[1:], ("image/jpeg", jpeg))
+
     def test_reject_invalid_image_payload_and_type(self):
         bad = "data:image/jpeg;base64," + base64.b64encode(PNG).decode()
         self.assertEqual(self.client.post(self.path, json={"image": bad}, headers=self.headers).status_code, 422)
