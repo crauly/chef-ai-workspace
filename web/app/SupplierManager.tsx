@@ -1,7 +1,9 @@
 "use client";
 import {useEffect,useRef,useState} from "react";
+import VoiceFieldInput from "./VoiceFieldInput";
+import {type Locale} from "./i18n";
 type Supplier={id:string;name:string;note:string|null};
-export default function SupplierManager({locale}:{locale:string}){
+export default function SupplierManager({locale}:{locale:Locale}){
  const ja=locale==="ja";
  const [items,setItems]=useState<Supplier[]>([]);
  const [name,setName]=useState(""),[note,setNote]=useState("");
@@ -56,6 +58,7 @@ export default function SupplierManager({locale}:{locale:string}){
   {error&&<p role="alert">{error}</p>}
   <form onSubmit={save}>
    <label>{ja?"仕入先名":"Supplier name"}<input value={name} maxLength={200} onChange={e=>setName(e.target.value)} required/></label>
+   <VoiceFieldInput locale={locale} label={ja?"仕入先名":"supplier name"} disabled={busy} onTranscript={value=>setName(value.slice(0,200))}/>
    <label>{ja?"メモ（任意）":"Notes (optional)"}<input value={note} maxLength={1000} onChange={e=>setNote(e.target.value)}/></label>
    <div className="toolbar"><button disabled={busy||!name.trim()}>{editing?(ja?"変更を保存":"Save changes"):(ja?"仕入先を登録":"Add supplier")}</button>{editing&&<button type="button" onClick={reset}>{ja?"キャンセル":"Cancel"}</button>}</div>
   </form>
