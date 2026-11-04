@@ -178,13 +178,14 @@ def _displayed_recipe(owner, repository, found):
     else:
         catalog = {}
     out = asdict(found)
+    price_loader = getattr(repository, "load_owned_supplier_prices", None)
+    supplier_prices = price_loader(owner, found) if callable(price_loader) else {}
     for line in out["materials"]:
         ingredient = catalog.get(line.get("ingredient_id"))
-        line["effective_price"] = (
-            asdict(ingredient.current_price)
-            if ingredient is not None and ingredient.current_price is not None
-            else line.get("price_override")
-        )
+        quote = (supplier_prices.get((line.get("ingredient_id"), line["supplier_id"]))
+                 if line.get("supplier_id") else
+                 ingredient.current_price if ingredient is not None else None)
+        line["effective_price"] = asdict(quote) if quote is not None else None
     out["display_names"] = resolve_display_names(found, catalog)
     return out
 
@@ -671,7 +672,9 @@ def get_demo_recipe_cost(recipe_id: UUID, ctx=Depends(demo_context)):
                if any(m.price_mode == "inherit" for m in recipe.materials) else {})
     unit_loader = getattr(repository, "list_owned_units", None)
     units = unit_factor_catalog(unit_loader(owner)) if callable(unit_loader) else {}
-    return _json(asdict(calculate_cost(recipe, catalog, units)))
+    price_loader = getattr(repository, "load_owned_supplier_prices", None)
+    supplier_prices = price_loader(owner, recipe) if callable(price_loader) else {}
+    return _json(asdict(calculate_cost(recipe, catalog, units, supplier_prices)))
 
 
 class AIProposalBody(BaseModel):
