@@ -278,7 +278,12 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
   <div><span>{locale==="ja"?"材料原価":"Food cost"}</span><strong>{cost?.total_cost_jpy!=null?`¥${cost.total_cost_jpy}`:cost?.partial?`¥${cost.subtotal_jpy} (${locale==="ja"?"部分原価":"partial"})`:"—"}</strong></div>
   <div><span>{locale==="ja"?"原価率":"Cost rate"}</span><strong>{cost?.cost_rate_pct==null?"—":`${cost.cost_rate_pct}%`}</strong></div>
  </div>
- {cost?.partial&&<p className="detail-estimate" role="status">{locale==="ja"?`未確定の材料 ${cost.unresolved_line_ids.length}件。合計原価と原価率は全材料の価格・単位換算が確定するまで表示されません。`:`${cost.unresolved_line_ids.length} unresolved lines. Total cost and cost rate require all prices and units to be resolved.`}</p>}
+ {cost?.partial&&<div className="detail-estimate" role="status">
+  <p>{locale==="ja"?`未確定の材料 ${cost.unresolved_line_ids.length}件。合計原価と原価率は全材料の価格・単位換算が確定するまで表示されません。`:`${cost.unresolved_line_ids.length} unresolved lines. Total cost and cost rate require all prices and units to be resolved.`}</p>
+  <ul>{selected.materials.filter(line=>cost.unresolved_line_ids.includes(line.id)).map(line=><li key={line.id}>
+   {line.material_name.value||line.id}：{!line.effective_price?.amount_jpy.value?(locale==="ja"?"採用価格が未設定":"No adopted price"):line.quantity.value==null?(locale==="ja"?"使用量が未設定":"No quantity"):(locale==="ja"?"単位換算を確認":"Verify unit conversion")}
+  </li>)}</ul>
+ </div>}
 
  <details className="detail-action"><summary>{locale==="ja"?"✎ 販売価格を変更":"✎ Edit selling price"}</summary>
  <form onSubmit={async e=>{e.preventDefault();if(!selected||!sellingPriceEdit.trim())return;const saved=await saveOperations([{op:"set_selling_price",value_jpy:sellingPriceEdit.trim()}]);if(saved)setSellingPriceEdit("");}}>
