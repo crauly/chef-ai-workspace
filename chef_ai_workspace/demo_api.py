@@ -370,6 +370,18 @@ def edit_demo_ingredient_master(ingredient_id:UUID, body:IngredientMasterEditBod
     return {"id":str(ingredient_id),"name":body.name.strip(),"updated":True}
 
 
+@router.get("/ingredients/{ingredient_id}/offer-prices")
+def list_demo_approved_prices(ingredient_id: UUID, ctx=Depends(demo_context)):
+    owner, repository=ctx
+    loader=getattr(repository, "list_owned_approved_prices", None)
+    if not callable(loader):
+        raise HTTPException(503, "Supplier price comparison unavailable")
+    try:
+        return {"items": loader(owner, str(ingredient_id))}
+    except ValueError as exc:
+        raise HTTPException(404, "Ingredient not owned") from exc
+
+
 class ApprovedOfferPriceBody(BaseModel):
     """An explicit user-approved quote, never an AI or search observation."""
     model_config=ConfigDict(extra="forbid")
