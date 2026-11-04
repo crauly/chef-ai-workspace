@@ -318,6 +318,80 @@ class SupabasePersistence:
                 raise ValueError("Supplier is used by recipe materials") from exc
             raise
 
+    def set_owned_offer_price(self, owner_id, ingredient_id, supplier_id,
+                              amount_jpy, quantity, unit):
+        """Explicit chef approval: store and adopt a JPY quote atomically.
+
+        Only the SQL RPC writes the adoption pointer. An ordinary observation
+        is never adopted by sorting, guessing or reading the newest row.
+        """
+        from .models import decimal as parse_decimal
+        price, qty = parse_decimal(amount_jpy), parse_decimal(quantity)
+        if not price.is_finite() or price < 0 or not qty.is_finite() or qty <= 0:
+            raise ValueError("Invalid offer price")
+        if not isinstance(unit, str) or not 1 <= len(unit.strip()) <= 32:
+            raise ValueError("Invalid offer unit")
+        result = self.client.rpc("set_owned_offer_price", {
+            "p_owner_id": owner_id, "p_ingredient_id": ingredient_id,
+            "p_supplier_id": supplier_id, "p_amount_jpy": str(price),
+            "p_quantity": str(qty), "p_unit": unit.strip(),
+        }).execute()
+        if not result.data:
+            raise RuntimeError("Price adoption did not produce an observation")
+        return str(result.data)
+
+    def load_owned_supplier_prices(self, owner_id, recipe):
+        """Approved JPY quotes keyed by (ingredient_id, supplier_id).
+
+        Only recipe-selected supplier pairs are fetched. Multiple adopted
+        purchase terms for the same pair remain unresolved rather than
+        selecting an arbitrary package or newest observation.
+        """
+        pairs = {(m.ingredient_id, m.supplier_id) for m in recipe.materials
+                 if m.price_mode == "inherit" and m.ingredient_id and m.supplier_id}
+        if not pairs:
+            return {}
+        ingredient_ids = sorted({i for i, _ in pairs})
+        offers = (self.client.table("offers")
+                  .select("id,ingredient_id,supplier_id,package_quantity,"
+                          "package_unit,adopted_observation_id")
+                  .eq("owner_id", owner_id)
+                  .in_("ingredient_id", ingredient_ids).execute()).data or []
+        selected = [o for o in offers
+                    if (o["ingredient_id"], o.get("supplier_id")) in pairs
+                    and o.get("adopted_observation_id")]
+        ids = sorted({o["adopted_observation_id"] for o in selected})
+        if not ids:
+            return {}
+        observations = (self.client.table("price_observations")
+                        .select("id,offer_id,amount_jpy,currency,confirmed")
+                        .eq("owner_id", owner_id).in_("id", ids).execute()).data or []
+        by_obs = {o["id"]: o for o in observations}
+        from .models import PriceQuote, TrackedValue
+        out = {}
+        ambiguous = set()
+        for offer in selected:
+            key = (offer["ingredient_id"], offer["supplier_id"])
+            obs = by_obs.get(offer["adopted_observation_id"])
+            if (not obs or obs["offer_id"] != offer["id"]
+                    or obs["currency"] != "JPY" or not obs["confirmed"]
+                    or not offer.get("package_quantity")
+                    or not offer.get("package_unit")):
+                continue
+            if key in out:
+                ambiguous.add(key)
+                continue
+            try:
+                out[key] = PriceQuote(
+                    amount_jpy=TrackedValue(str(obs["amount_jpy"]), "confirmed", "user"),
+                    per_quantity=str(offer["package_quantity"]),
+                    per_unit=str(offer["package_unit"]), source="manual")
+            except (ValueError, TypeError):
+                continue
+        for key in ambiguous:
+            out.pop(key, None)
+        return out
+
     def create_owned_offer(self, owner_id, ingredient_id, supplier_id=None,
                            product_url=None, package_quantity=None,
                            package_unit=None, shipping_note=None):
