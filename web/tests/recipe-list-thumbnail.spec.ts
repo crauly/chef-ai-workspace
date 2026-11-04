@@ -12,6 +12,8 @@ test("generated image appears in recipe list on the same origin, survives reload
  const named="片栗粉のレシピ";
  const recipe=page.getByRole("button",{name:`${named}の詳細を開く`});
  await expect(recipe.locator(".recipe-list-thumbnail img")).toHaveCount(0);
+ await expect(recipe.locator(".recipe-list-thumbnail svg")).toHaveCount(1);
+ await expect(recipe.locator(".recipe-list-thumbnail")).not.toContainText("♨");
  await recipe.click();
  const detail=page.getByRole("region",{name:"料理イメージ"});
  await detail.getByRole("button",{name:"✦ 料理画像を生成"}).click();
@@ -19,6 +21,7 @@ test("generated image appears in recipe list on the same origin, survives reload
  await page.getByRole("button",{name:"← ホーム"}).click();
  await expect(page.getByRole("button",{name:`${named}の詳細を開く`}).locator(".recipe-list-thumbnail img")).toHaveAttribute("src",IMG);
  await expect(page.getByRole("button",{name:"ミートソースパスタの詳細を開く"}).locator(".recipe-list-thumbnail img")).toHaveCount(0);
+ await expect(page.getByRole("button",{name:"ミートソースパスタの詳細を開く"}).locator(".recipe-list-thumbnail svg")).toHaveCount(1);
  await page.reload();
  await expect(page.getByRole("button",{name:`${named}の詳細を開く`}).locator(".recipe-list-thumbnail img")).toHaveAttribute("src",IMG);
 });
