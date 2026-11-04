@@ -61,7 +61,7 @@ test("rapid command + 5 ingredients keep every turn in order", async ({page}) =>
   await expect(items.nth(4)).toContainText("イタリア産ホールトマト");
   // Status follows reality: analyzing ends, completion shows.
   await expect(page.getByText("レシピ解析中")).toBeHidden({timeout: 8000});
-  await expect(page.getByText("処理完了")).toBeVisible();
+  await expect(page.locator(".voice-status-list [data-stage=parse]")).toHaveCount(0);
 });
 
 test("parse failure is visible and keeps every turn for retry", async ({page}) => {
@@ -74,7 +74,7 @@ test("parse failure is visible and keeps every turn for retry", async ({page}) =
   await page.goto("/");
   await submit(page, COMMAND);
   await submit(page, INGREDIENTS[0]);
-  await expect(page.getByText("解析に失敗しました")).toBeVisible({timeout: 8000});
+  await expect(page.getByText("レシピ解析に失敗")).toBeVisible({timeout: 8000});
   await page.getByText("処理メッセージ").click();
   await expect(page.getByText("料理の解釈に失敗しました")).toBeVisible();
   // Nothing silently vanished: the turns stay listed and retry is offered.
@@ -82,8 +82,8 @@ test("parse failure is visible and keeps every turn for retry", async ({page}) =
   await expect(page.getByRole("button", {name: "解析を再試行"})).toBeEnabled();
   await submit(page, INGREDIENTS[1]);
   await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("ペペロンチーノ", {timeout: 8000});
-  await expect(page.getByText("解析に失敗しました")).toBeHidden();
-  await expect(page.getByText("処理完了")).toBeVisible();
+  await expect(page.getByText("レシピ解析に失敗")).toBeHidden();
+  await expect(page.locator(".voice-status-list [data-stage=parse]")).toHaveCount(0);
 });
 
 test("price search runs independently of voice analysis", async ({page}) => {

@@ -206,6 +206,7 @@ export function useRealtimeVoiceCapture(
             setState("ready");
             logVoiceEvent("transcribe.ok", "realtime relay ready", current.trace);
           } else if (next === "draining") {
+            setState("draining");
             if (mounted.current) setNotice(locale === "ja"
               ? "最終の認識結果を待っています。下書きは保持しています。"
               : "Waiting for the final transcript; the draft is retained.");

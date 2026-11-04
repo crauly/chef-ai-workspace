@@ -14,7 +14,7 @@ export type VoiceDiagKind =
   | "dish-image.start" | "dish-image.ok" | "dish-image.fail" | "dish-image.persisted" | "dish-image.persist.fail"
   | "price.start" | "price.ok" | "price.fail"
   | "mode.transition" | "mode.transition.rejected"
-  | "draft.created" | "draft.updated" | "draft.kept" | "draft.discarded.explicit"
+  | "transcript.received" | "draft.preview" | "draft.created" | "draft.updated" | "draft.kept" | "draft.discarded.explicit"
   | "intent.fallback" | "queue.dropped";
 export type VoiceDiagEvent = {seq:number;at:number;kind:VoiceDiagKind;detail:string;trace:string};
 const MAX_EVENTS = 60;

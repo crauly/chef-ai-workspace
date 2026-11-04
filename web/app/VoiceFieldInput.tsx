@@ -1,6 +1,7 @@
 "use client";
 import {useState} from "react";
 import {type Locale} from "./i18n";
+import {useVoiceProcessingStatus} from "./VoiceProcessingStatus";
 import {useVoiceCapture} from "./useVoiceCapture";
 
 /**
@@ -20,6 +21,7 @@ export default function VoiceFieldInput({locale,label,onTranscript,disabled=fals
   setAcknowledged(false);
   onTranscript(value);
  },false);
+ useVoiceProcessingStatus(locale,[...(mic.recording?[{key:"listen" as const}]:[]),...(mic.busy?[{key:"transcribe" as const}]:[]),...(mic.error?[{key:"transcribe" as const,error:true}]:[])]);
  const inactive=disabled||(!mic.recording&&(mic.supported===false||mic.busy));
  return <div className="voice-field-input">
   <button type="button" disabled={inactive} aria-pressed={mic.recording}
@@ -28,8 +30,6 @@ export default function VoiceFieldInput({locale,label,onTranscript,disabled=fals
   </button>
   {lastHeard&&!acknowledged&&<p role="status">{ja?"認識結果を入力欄に反映しました。内容を確認してから登録してください。":"Transcribed into the form. Review before saving."} <button type="button" onClick={()=>setAcknowledged(true)}>{ja?"確認":"OK"}</button></p>}
   {mic.error&&<p role="alert">{mic.error}</p>}
-  {(mic.recording||mic.busy)&&<ul className="voice-status-list" role="status" aria-live="polite">
-   <li className="status-voice"><span className="status-symbol" aria-hidden="true">♩</span><span className="status-detail"><span className="status-label">{mic.busy?(ja?"文字起こし中…":"Transcribing…"):(ja?"音声受付中…":"Listening…")}</span><span className="status-track" aria-hidden="true"><span/></span></span></li>
-  </ul>}
+
  </div>;
 }

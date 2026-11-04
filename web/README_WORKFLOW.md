@@ -126,3 +126,7 @@ pauses, a stop/error cue and capture status explain it. Accepted queued audio
 finishes before “音声操作を再開” becomes available. The draft remains in the
 page; do not reload to resume. A failed ASR segment is identified as failed
 and may need repeating; other accepted segments are not discarded with it.
+
+Voice draft latency, the single shared status panel, provider streaming boundaries,
+fixture commands and production verification limits are documented in
+[Voice UX pipeline](../docs/VOICE_UX_PIPELINE.md).

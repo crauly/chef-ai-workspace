@@ -1,5 +1,6 @@
 "use client";
 import {isPriceResearchRequest} from "../recipe-price-research";
+import {useVoiceProcessingStatus} from "./VoiceProcessingStatus";
 import NavIcon from "./NavIcon";
 
 import {useEffect,useRef,useState,type RefObject} from "react";
@@ -26,6 +27,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  const [mode,setMode]=useState<VoiceMode>(selected?"browse":"idle"),[volume,setVolume]=useState(.5),[manual,setManual]=useState("");
  const [message,setMessage]=useState(locale==="ja"?"登録・呼び出し・修正を一つのマイクで続けられます。":"Create, browse and edit with one microphone."),[heard,setHeard]=useState("");
  const [routing,setRouting]=useState(false);
+ const [checkingIntent,setCheckingIntent]=useState(false);
  const [feedbackError,setFeedbackError]=useState(false);
  const [supplierMemo,setSupplierMemo]=useState("");
  const [settingsOpen,setSettingsOpen]=useState(false);
@@ -52,7 +54,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  const [realtimeFailed,setRealtimeFailed]=useState(false);
  const realtimeActive=resolveTransport(realtimeConfigured,realtimeFailed)==="realtime";
  const micRecording=realtimeActive?realtime.recording:voice.recording;
- const micBusy=!realtimeActive&&voice.busy;
+ const micBusy=realtimeActive?realtime.state==="draining":voice.busy;
  // A real route change unmounts the capture, so the controller must not
  // navigate away while audio is being recorded or processed. The ref lets
  // tap-driven navigation refuse safely instead of silently killing speech.
@@ -145,7 +147,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  }
  // One mic state drives both the panel button and the fixed bottom control,
  // so recording/stop/processing can never disagree between the two.
- const micDisabled=!realtimeActive&&!voice.recording&&(voice.supported===false||voice.busy);
+ const micDisabled=realtimeActive?realtime.state==="draining":!voice.recording&&(voice.supported===false||voice.busy);
  function toggleMic(){
   if(micRecording){if(realtimeActive)realtime.stop();else voice.stop();}
   else void (realtimeActive?realtime.start():voice.start());
@@ -176,6 +178,8 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
 
  function receive(text:string,meta?:VoiceCaptureMeta){
   if(!text.trim())return;
+  setHeard(text);
+  logVoiceEvent("transcript.received","queued for interpretation",meta?.traceId??"");
   if(registration.current?.isSaving()){feedback("承認された下書きを保存中です。完了後に続きをお願いします。",true);return;}
   const captured:VoiceCaptureMeta={reviewEpoch:meta?.reviewEpoch??boundary.current,traceId:meta?.traceId??newTrace(),source:meta?.source};
   // Approval/navigation from an earlier mode must never affect a new target.
@@ -184,12 +188,16 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
   if(queue.current.length>=30){logVoiceEvent("queue.dropped","30 utterances pending",captured.traceId??"");feedback("処理待ちの発話が多すぎます。処理完了後に再度お願いします。",true);return;}
   queue.current.push({text,meta:captured});void drain();
  }
+ async function checkIntent(utterance:string,current_mode:VoiceMode){
+  setCheckingIntent(true);
+  try{return await request<{intent:string;target:string}>("/api/intent",{method:"POST",body:JSON.stringify({utterance,current_mode})});}
+  finally{if(alive.current)setCheckingIntent(false);}
+ }
  async function drain(){
   if(running.current)return;running.current=true;setRouting(true);
   try{while(alive.current&&queue.current.length){
    const input=queue.current.shift()!;
    if(input.meta.reviewEpoch<modeBoundary.current&&voiceCommand(input.text)!=="data"){feedback("切り替え前の承認は適用していません。もう一度お願いします。",true);continue;}
-   setHeard(input.text);
    const control=voiceCommand(input.text);
    // A pending registration draft stays reachable from idle/browse: an explicit
    // review/save request with no navigation meaning routes to the draft instead
@@ -217,7 +225,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    // approval controls stay on their existing paths without another model hop.
    if(!nav&&!isPriceResearchRequest(input.text)&&voiceCommand(input.text)==="data"&&/(?:モード|レシピ.*(?:登録|参照|呼び出|検索|見たい|編集)|メニュー.*(?:登録|作成)|探したい|呼び出したい)/.test(input.text)&&!/[0-9０-９]/.test(input.text)){
     if(/しない|しません|ではなく|じゃなく|やめ/.test(input.text)){feedback("切り替えずに現在の内容を保持しています。希望する操作をもう一度教えてください。",true);continue;}
-    const result=await request<{intent:string;target:string}>("/api/intent",{method:"POST",body:JSON.stringify({utterance:input.text,current_mode:currentMode.current})});
+    const result=await checkIntent(input.text,currentMode.current);
     if(!["create","browse","edit"].includes(result.intent)||typeof result.target!=="string"){
      feedback("切り替え先を確認できませんでした。登録・参照・編集のどれかを教えてください。",true);continue;
     }
@@ -236,7 +244,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
      if(voiceCommand(input.text)!=="data"){feedback("参照中です。変更内容を話すと編集へ進みます。保存はしません。");continue;}
      if(!explicitEditRequest(input.text)){
       if(/(?:変更|修正|訂正|追加)(?:は)?(?:しない|しません)/.test(input.text)){feedback("変更せず、参照モードのままです。");continue;}
-      const intent=await request<{intent:string;target:string}>("/api/intent",{method:"POST",body:JSON.stringify({utterance:input.text,current_mode:"browse"})});
+      const intent=await checkIntent(input.text,"browse");
       if(intent.intent!=="edit"||intent.target){feedback("参照モードのままです。変更する場合は、対象と変更内容を教えてください。");continue;}
      }
      transition("edit");feedback("編集モードです。変更案を作成します。");
@@ -246,18 +254,24 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
   }}catch{feedback("操作を完了できませんでした。現在の内容を確認して、もう一度お願いします。",true);}
   finally{running.current=false;if(alive.current)setRouting(false);}
  }
+ useVoiceProcessingStatus(locale,[
+  ...(micRecording?[{key:"listen" as const}]:[]),
+  ...(micBusy||(realtimeActive&&Boolean(realtime.partial))?[{key:"transcribe" as const}]:[]),
+  ...(checkingIntent?[{key:"intent" as const}]:[]),
+ ]);
  const detachedFeedback=detailOnly&&Boolean(selected)&&mode!=="edit"&&feedbackError;
  return <>
   {/* Detail hides browse controls; failed lookup feedback must remain visible
       without switching the user into editing a different, unresolved target. */}
   {detachedFeedback&&<p role="alert">{message}</p>}
-  {/* No role=status here: the floating voice-status-list below is the single
+  {/* No role=status here: the root floating status panel is the single
    announcer for the same recording/processing state. This block keeps only
    the stop control to avoid double announcements. */}
   {selected&&(micRecording||micBusy)&&mode!=="edit"&&<div className="recipe-voice-capture-status">
     <span>{micRecording?(locale==="ja"?"音声録音中":"Microphone recording"):(locale==="ja"?"音声処理中":"Processing audio")}</span>
     {micRecording&&<button type="button" onClick={toggleMic}>{locale==="ja"?"マイクを停止":"Stop microphone"}</button>}
    </div>}
+  {(heard||(realtimeActive&&realtime.partial))&&<p aria-live="polite" aria-label={locale==="ja"?"認識した発話":"Recognized speech"} className="mx-0 my-2 line-clamp-2 break-words text-sm text-inherit">{realtimeActive&&realtime.partial?<><span>{locale==="ja"?"認識中：":"Recognizing: "}</span>{realtime.partial}</>:heard}</p>}
   <section id="voice-controls" hidden={Boolean(selected)&&mode!=="edit"} aria-label={locale==="ja"?"音声操作モード":"Voice operation mode"} className="voice-mode-panel">
    <div className="voice-heading"><h2>{locale==="ja"?"音声操作":"Voice control"}</h2><button type="button" className="voice-settings-button" aria-label={locale==="ja"?"設定を開く":"Open settings"} aria-expanded={settingsOpen} onClick={()=>setSettingsOpen(v=>!v)}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M10 2h4l.7 2.5 2 1.1 2.5-.6 2 3.5-1.8 1.9v2.2l1.8 1.9-2 3.5-2.5-.6-2 1.1L14 22h-4l-.7-2.5-2-1.1-2.5.6-2-3.5 1.8-1.9v-2.2L2.8 9.5l2-3.5 2.5.6 2-1.1L10 2z"/></svg></button></div>
    <p>{locale==="ja"?"現在のモード: ":"Current mode: "}<strong>{locale==="ja"?labels[mode]:({idle:"Idle",create:"Create",browse:"Browse",edit:"Edit"} as const)[mode]}</strong>{mode==="edit"&&selected?` — ${selected.title.value}`:""}</p>
@@ -266,7 +280,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    <ListeningWave active={micRecording}/>
    <p role="status">{micRecording?(locale==="ja"?"音声受付中":"Listening"):micBusy?(locale==="ja"?"音声受付は一時停止・受信済みの音声を処理中":"Processing recorded audio; microphone paused"):(micError||micNotice)?(locale==="ja"?"音声受付は停止中・再開できます":"Microphone stopped; you can resume"):(locale==="ja"?"音声受付は停止中":"Microphone stopped")}</p>
    {micNotice&&<p role="status">{micNotice}</p>}
-   {realtimeActive&&realtime.partial&&<p role="status">{locale==="ja"?"認識中：":"Recognizing: "}{realtime.partial}</p>}
+
    {supplierMemo&&<p className="muted">{supplierMemo}</p>}
    {!detachedFeedback&&<p aria-live="polite">{micRecording?(locale==="ja"?"聞き取り中… ":"Listening… "):""}{micBusy?(locale==="ja"?"音声を文字にしています… ":"Transcribing… "):""}{routing?(locale==="ja"?"操作を処理中… ":"Processing… "):""}{message}</p>}
    {micError&&<p role="alert">{micError}</p>}
@@ -295,18 +309,11 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    </section>}
   </section>
   <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} onDiscarded={()=>setDraftPending(false)} sharedVoice={{markReview:mark,cancel:()=>{},mic:realtimeActive?{recording:realtime.recording,transcribing:false,queued:0}:{recording:voice.recording,transcribing:voice.busy||voice.queued>0,queued:voice.queued},captureMessage:micRecording?"音声受付中です。確認後は「登録」「登録してください」でも保存できます。":micBusy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${micError||micNotice||""}`}} onCreated={(recipe,mode,suppliers)=>{
-   // The spoken purchase source survives as a memo in this always-visible
-  // region (the registration panel hides in browse mode). Formal linkage
-  // reuses the ledger path behind the Human Gate; nothing auto-registers.
+   // The formal save has already committed supplier links. Keep their names
+   // for feedback when the registration panel switches back to browse.
   setSupplierMemo(suppliers.length?(locale==="ja"?`保存した仕入れ先：${suppliers.join("／")}`:`Saved suppliers: ${suppliers.join(", ")}`):"");
   setDraftPending(false);transition("browse");feedback(mode==="unconfirmed"?(locale==="ja"?"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"Saved with unconfirmed prices. Only partial food costs are shown."):(locale==="ja"?"レシピを保存しました。":"Recipe saved."));onCreated(recipe);
   }}/></div>
-  {(micRecording||(mode!=="create"&&(micBusy||routing)))&&
-   <ul className="voice-status-list" role="status" aria-live="polite" aria-label={locale==="ja"?"音声処理状況":"Voice processing status"}>
-    <li className="status-voice"><span className="status-symbol" aria-hidden="true">♩</span>
-     <span className="status-detail"><span className="status-label">{micBusy?(locale==="ja"?"文字起こし中…":"Transcribing…"):routing?(locale==="ja"?"音声指示を処理中…":"Processing voice command…"):(locale==="ja"?"音声受付中…":"Listening…")}</span><span className="status-track" aria-hidden="true"><span/></span></span>
-    </li>
-   </ul>}
   <nav aria-label={locale==="ja"?"主要":"Primary"} className="bottom-nav">
    <a href={detailOnly?"/":"#top"}><NavIcon name="home"/><span>{locale==="ja"?"ホーム":"Home"}</span></a>
    <a href={detailOnly?"/":"#recipes"}><NavIcon name="recipes"/><span>{locale==="ja"?"レシピ":"Recipes"}</span></a>

@@ -44,7 +44,7 @@ test("photo analysis reaches the existing unsaved draft path with its gate intac
   await page.getByLabel("解析する写真").setInputFiles(pngFile);
   await page.getByRole("button", {name: "写真を解析", exact: true}).click();
   // Analyzing state is tied to the actual flight, with a spinner row.
-  await expect(page.getByText("写真を解析中…")).toBeVisible();
+  await expect(page.getByText("写真を解析中",{exact:true})).toBeVisible();
   release();
   // Same formal path: the existing unsaved-draft card, not a new save route.
   await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("トマトパスタ");
@@ -89,7 +89,7 @@ test("photo failure creates no draft and keeps the panel usable", async ({page})
   await enterCreate(page);
   await page.getByLabel("解析する写真").setInputFiles(pngFile);
   await page.getByRole("button", {name: "写真を解析", exact: true}).click();
-  await expect(page.getByRole("status", {name: "処理状況"}).getByText("写真の解析に失敗しました")).toBeVisible();
+  await expect(page.getByRole("status", {name: "音声処理状況"}).getByText("写真解析に失敗")).toBeVisible();
   await expect(page.getByLabel("未保存のレシピ下書き")).toHaveCount(0);
   expect(calls).toBe(1);
   // The failure did not poison the flow: retrying the same photo works.
@@ -115,7 +115,7 @@ test("voice draft created during photo analysis wins; photo result is discarded"
   await page.getByLabel("解析する写真").setInputFiles(pngFile);
   // Start photo analysis first (no draft yet, so the request is sent)...
   await page.getByRole("button", {name: "写真を解析", exact: true}).click();
-  await expect(page.getByText("写真を解析中…")).toBeVisible();
+  await expect(page.getByText("写真を解析中",{exact:true})).toBeVisible();
   // ...then a voice turn completes while the photo is still in flight.
   await page.getByLabel("音声認識できない場合の入力").fill("パスタ100g");
   await page.getByRole("button", {name: "反映", exact: true}).click();
