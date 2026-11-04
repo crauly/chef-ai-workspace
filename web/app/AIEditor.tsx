@@ -83,7 +83,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
     try {
       // A price research instruction needs real provenance, not an AI-invented
       // numerical mutation. Scope is resolved dynamically against live rows.
-      const researchRequested=/(調べ|検索|相場|市場価格|参考価格|仮単価|平均価格|最安|価格比較|price research|market price|average price|look up.*price|check.*price|research.*price|compare prices)/i.test(text);
+      const researchRequested=/(?:価格|単価|値段|仕入値|相場).*(?:調べ|検索|調査|探し)|(?:調べ|検索|調査|探し).*(?:価格|単価|値段|仕入値|相場)|市場価格|参考価格|仮単価|平均価格|最安|価格比較|price research|market price|average price|look up.*price|check.*price|research.*price|compare prices/i.test(text);
       let researchNotice="";
       let evidence:string[]|undefined;
       let proposal:AIProposal;
