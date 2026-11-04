@@ -1,0 +1,30 @@
+require('./ts-require.cjs');
+const {test}=require('node:test');const assert=require('node:assert/strict');
+const {NextRequest}=require('next/server');const {POST}=require('../app/api/voice-recipe/route.ts');
+const draft={title:'パスタ',materials:[{name:'パスタ',quantity:'100',unit:'g',price_jpy:'350',price_quantity:'500',price_unit:'g',supplier:''}],selling_price_jpy:'',notes:[],interpretations:[],price_research:[],name_corrections:[],unit_proposals:[]};
+function req(){return new NextRequest('http://localhost/api/voice-recipe',{method:'POST',headers:{origin:'http://localhost',authorization:'Basic '+Buffer.from('chef:'+process.env.DEMO_PREVIEW_PASSWORD).toString('base64')},body:JSON.stringify({turns:['パスタ100g'],defer_prices:true})});}
+test('unit outage does not block the unsaved recipe draft',async()=>{
+ Object.assign(process.env,{MODEL_API_KEY:'fixture',DEMO_ACCESS_TOKEN:'fixture',FASTAPI_BASE_URL:'http://127.0.0.1:8100',DEMO_PREVIEW_PASSWORD:'test-only-preview-password-32-characters'});
+ const original=global.fetch;let calls=0;global.fetch=async url=>{if(String(url).includes('/demo/units'))return new Response('',{status:503});calls++;return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(draft)}}]});};
+ try{const res=await POST(req());assert.equal(res.status,200);assert.equal((await res.json()).materials[0].quantity,'100');assert.equal(calls,1);}finally{global.fetch=original;}
+});
+const {voiceRecipeModel,normalizedDraft,VoiceRecipeFailure}=require('../voice-recipe-provider.ts');
+test('bounded regeneration repairs structure and numeric representations without inventing facts',async()=>{
+ const original=global.fetch;let calls=0;global.fetch=async()=>{calls++;return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(calls===1?{materials:'invalid'}:{...draft,materials:[{...draft.materials[0],quantity:100,price_jpy:null,price_quantity:null,price_unit:null}]})}}]});};
+ try{const out=await voiceRecipeModel('k','system',{},new AbortController().signal,{});assert.equal(calls,2);assert.equal(out.materials[0].quantity,'100');assert.equal(out.materials[0].price_jpy,'');assert.ok(out.missing.length);}finally{global.fetch=original;}
+});
+test('transient transport failure retries once, persistent invalid shape stops after two attempts',async()=>{
+ const original=global.fetch;let calls=0;global.fetch=async()=>{calls++;if(calls===1)throw new TypeError('network');return Response.json({choices:[{message:{content:JSON.stringify(draft)}}]});};
+ try{assert.equal((await voiceRecipeModel('k','s',{},new AbortController().signal,{})).title,'パスタ');assert.equal(calls,2);calls=0;global.fetch=async()=>{calls++;return Response.json({});};await assert.rejects(voiceRecipeModel('k','s',{},new AbortController().signal,{}),e=>e.code==='invalid_response');assert.equal(calls,2);}finally{global.fetch=original;}
+});
+test('user cancellation never retries',async()=>{const c=new AbortController();c.abort();await assert.rejects(voiceRecipeModel('k','s',{},c.signal,{}),e=>e.code==='cancelled');});
+const {prepareRecipeTurns}=require('../recipe-turns.ts');
+test('more than thirty failed initial fragments are packed without losing the first or last turn',()=>{const turns=Array.from({length:50},(_,n)=>'食材'+n);const packed=prepareRecipeTurns(turns);assert.ok(packed.length<=30);assert.equal(packed.join('\n'),turns.join('\n'));});
+test('timeouts are bounded and distinct from user cancellation during a request',async()=>{
+ const original=global.fetch,timeout=AbortSignal.timeout;let calls=0;
+ AbortSignal.timeout=()=>timeout(2);
+ global.fetch=async(_,init)=>{calls++;return new Promise((_,reject)=>{init.signal.addEventListener('abort',()=>reject(init.signal.reason),{once:true});});};
+ const keepAlive=setInterval(()=>{},100);
+ try{await assert.rejects(voiceRecipeModel('k','s',{},new AbortController().signal,{}),e=>e.code==='timeout');assert.equal(calls,2);calls=0;const c=new AbortController();setTimeout(()=>c.abort(),0);await assert.rejects(voiceRecipeModel('k','s',{},c.signal,{}),e=>e.code==='cancelled');assert.equal(calls,1);}finally{clearInterval(keepAlive);global.fetch=original;AbortSignal.timeout=timeout;}
+});
+test('numeric units are regenerated rather than invented as unit symbols',()=>{assert.equal(normalizedDraft({...draft,materials:[{...draft.materials[0],unit:100}]}),null);});

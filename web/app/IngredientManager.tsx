@@ -4,7 +4,7 @@ import {type Locale} from "./i18n";
 import VoiceFieldInput from "./VoiceFieldInput";
 
 type Price={amount_jpy?:{value?:string|null};per_quantity?:string;per_unit?:string};
-type Ingredient={id:string;name:string;spec?:string|null;current_price?:Price|null};
+type Ingredient={price_research_enabled?:boolean;last_research_error?:string|null;id:string;name:string;spec?:string|null;current_price?:Price|null};
 export default function IngredientManager({locale}:{locale:Locale}){
  const ja=locale==="ja";
  const [items,setItems]=useState<Ingredient[]>([]);
@@ -14,6 +14,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
  const [editing,setEditing]=useState<string|null>(null);
  const [newName,setNewName]=useState("");
  const [newSpec,setNewSpec]=useState("");
+ const [newResearch,setNewResearch]=useState(false),[research,setResearch]=useState(false);
  const [spec,setSpec]=useState("");
  const [query,setQuery]=useState("");
  const [supplierFilter,setSupplierFilter]=useState("all");
@@ -50,7 +51,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
  },[ja]);
  useEffect(()=>{void load();},[load]);
  async function begin(item:Ingredient){
-  setEditing(item.id);setName(item.name);setSpec(item.spec??"");setPriceSupplier("");
+  setEditing(item.id);setResearch(item.price_research_enabled??false);setName(item.name);setSpec(item.spec??"");setPriceSupplier("");
   setPrice(item.current_price?.amount_jpy?.value??"");
   setQuantity(item.current_price?.per_quantity??"");
   setUnit(item.current_price?.per_unit??"");
@@ -83,7 +84,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
   setBusy(true);
   try{
    const r=await fetch("/api/ingredients/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({name:name.trim(),spec:spec.trim()||null})});
+    body:JSON.stringify({name:name.trim(),spec:spec.trim()||null,price_research_enabled:research})});
    if(!r.ok)throw new Error("save");
    setEditing(null);await load();
   }catch{setError(ja?"食材を保存できませんでした。":"Could not save ingredient.");}
@@ -113,9 +114,9 @@ export default function IngredientManager({locale}:{locale:Locale}){
   if(busy||!newName.trim())return;
   setBusy(true);
   try{
-   const r=await fetch("/api/ingredients",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:newName.trim(),spec:newSpec.trim()||null})});
+   const r=await fetch("/api/ingredients",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:newName.trim(),spec:newSpec.trim()||null,price_research_enabled:newResearch})});
    if(!r.ok)throw new Error("create");
-   setNewName("");setNewSpec("");setShowCreate(false);await load();
+   setNewName("");setNewSpec("");setNewResearch(false);setShowCreate(false);await load();
   }catch{setError(ja?"食材を登録できませんでした。重複名を確認してください。":"Could not create ingredient. Check for duplicate names.");}
   finally{setBusy(false);}
  }
@@ -158,6 +159,8 @@ export default function IngredientManager({locale}:{locale:Locale}){
   : (supplierMap[item.id]?.join("、")||(ja?"仕入れ先未設定":"Not set"));
  const editor=(item:Ingredient)=><div className="name-choice-overlay ingredient-edit-overlay" key={item.id} onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setEditing(null);}}><section role="dialog" aria-modal="true" aria-label={ja?`${item.name}を編集`:`Edit ${item.name}`} className="name-choice-dialog ingredient-editor">
   <div className="ingredient-editor-head"><h4>{ja?"食材を編集":"Edit Ingredient"} — {item.name}</h4><button type="button" className="secondary" aria-label={ja?"閉じる":"Close"} title={ja?"閉じる":"Close"} disabled={busy} onClick={()=>setEditing(null)}><span aria-hidden="true">×</span></button></div>
+  <label><input type="checkbox" role="switch" checked={research} disabled={busy} onChange={e=>setResearch(e.target.checked)}/>{ja?"この食材を定期価格調査の対象にする":"Research this ingredient periodically"}</label>
+  {item.last_research_error&&<p role="status">{ja?"前回の定期調査で価格を取得できませんでした。次回の調査で再試行します。":"The last scheduled research could not obtain a price. It will retry on the next interval."}</p>}
   <div className="ingredient-editor-fields">
    <label>{ja?"食材名":"Ingredient name"}<input autoFocus value={name} maxLength={200} disabled={busy} onChange={e=>setName(e.target.value)}/></label>
    <label>{ja?"規格（商品の識別用）":"Specification (identity only)"}<input value={spec} maxLength={200} disabled={busy} placeholder={ja?"例：1号缶、10個入り":"e.g. No.1 can, 10-count"} onChange={e=>setSpec(e.target.value)}/></label>
@@ -192,7 +195,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
    <VoiceFieldInput locale={locale} label={ja?"食材名":"ingredient name"} disabled={busy} onTranscript={value=>setNewName(value.slice(0,200))}/>
    <label>{ja?"規格（任意）":"Specification (optional)"}<input value={newSpec} maxLength={200} disabled={busy} onChange={e=>setNewSpec(e.target.value)}/></label>
    <VoiceFieldInput locale={locale} label={ja?"規格":"specification"} disabled={busy} onTranscript={value=>setNewSpec(value.slice(0,200))}/>
-   <button type="button" disabled={busy||!newName.trim()} onClick={()=>void create()}>{ja?"食材を登録":"Add ingredient"}</button>
+   <label><input type="checkbox" role="switch" checked={newResearch} disabled={busy} onChange={e=>setNewResearch(e.target.checked)}/>{ja?"この食材を定期価格調査の対象にする":"Research this ingredient periodically"}</label><button type="button" disabled={busy||!newName.trim()} onClick={()=>void create()}>{ja?"食材を登録":"Add ingredient"}</button>
   </div>}
   {error&&<p role="alert" className="error">{error}</p>}
   {loading?<p>{ja?"読み込み中":"Loading"}</p>:items.length===0?<p>{ja?"登録済み食材はありません。":"No ingredients registered."}</p>:<>
@@ -203,7 +206,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
      <td><strong>{item.name}</strong>{item.spec&&<div className="ingredient-muted">{item.spec}</div>}</td>
      <td><span className={item.current_price?.amount_jpy?.value==null?"ingredient-unset":""}>{priceLabel(item)}</span></td>
      <td><span className={supplierMap&&!(supplierMap[item.id]?.length)?"ingredient-muted":""}>{suppliers(item)}</span></td>
-     <td className="ingredient-muted">—</td>
+     <td className="ingredient-muted">{item.price_research_enabled?(ja?"定期調査ON":"Research ON"):"—"}{item.last_research_error&&<span>{ja?" · 前回調査失敗":" · Last research failed"}</span>}</td>
      <td><div className="ingredient-actions"><button type="button" className="secondary" disabled={busy} onClick={()=>void begin(item)}>{ja?"編集":"Edit"}</button><button type="button" className="secondary ingredient-delete" disabled={busy} onClick={()=>void remove(item)}>{ja?"削除":"Delete"}</button></div></td>
     </tr>)}</tbody>
    </table></div>

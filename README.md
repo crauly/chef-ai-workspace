@@ -133,19 +133,20 @@ Fixture layers are verified; live-DB, live-inference and live-retrieval runs
 are explicitly unverified. Voice transcription alone does not satisfy them.
 
 The Web UI exposes voice registration, the proposal diff, the cost view,
-the notification bell and sourcing suggestions. Ingredient reuse assistance
-(search + ingredient-assist + ledger confirm) is a demo-API flow and is not
-wired into the voice registration UI: saving from voice creates unlinked
-material lines, and linking needs the explicit assist + confirm steps
-(see the demo script).
+the notification bell and sourcing suggestions. Approved voice registration
+links ingredient masters, spoken suppliers and adopted offer prices through
+the formal atomic save path. Research results remain proposals until approved.
 
 See [ADR-009](docs/ADR_009_INGREDIENT_PROCUREMENT_ASSISTANCE.md),
 [detailed design](docs/INGREDIENT_PRICE_DESIGN.md),
 [implementation checklist](docs/IMPLEMENTATION_PLAN_MASTER_PRICE.md), and
 [alternating Muse/Codex handoff](docs/MUSE_CODEX_HANDOFF.md).
-Price-check scheduling, thresholds and external retrieval choices still require
-explicit design decisions; no automatic monitoring or purchasing is enabled by
-these documents.
+Scheduled market research uses global and ingredient switches (both OFF by
+default), Supabase Cron, and the existing grounded search. Results remain
+unadopted until explicit approval; existing offer rules determine recipe costs.
+See [ADR-016](docs/ADR_016_SCHEDULED_PRICE_RESEARCH.md) for migrations, secrets,
+scheduler activation, voice recovery, and verification limits. Production
+activation is required separately; automatic purchasing is not implemented.
 
 ## Setup & run (local development)
 

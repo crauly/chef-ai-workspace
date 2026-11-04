@@ -1,5 +1,5 @@
 // Device-local working recipe only: never a backend recipe or Human Gate approval.
-export type WorkingDraftSnapshot<T>={draft:T;turns:string[];image:string|null;requestId?:string|null};
+export type WorkingDraftSnapshot<T>={draft:T|null;parsedTurnCount?:number;turns:string[];image:string|null;requestId?:string|null};
 const DB="chef-ai-working-draft",STORE="draft",KEY="current";
 function open():Promise<IDBDatabase>{return new Promise((resolve,reject)=>{const r=indexedDB.open(DB,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
 export async function loadWorkingDraft<T>():Promise<WorkingDraftSnapshot<T>|null>{

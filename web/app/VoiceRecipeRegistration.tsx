@@ -8,6 +8,7 @@ import {voiceCommand,type VoiceCommand} from "./voice-commands";
 import {logVoiceEvent} from "./voice-diagnostics";
 import {dishImagePrompt,isAbortError,dishCompletionKept} from "./dish-image";
 import {storeDishPreview} from "./dish-image-cache";
+import {prepareRecipeTurns} from "../recipe-turns";
 import {loadWorkingDraft,saveWorkingDraft,type WorkingDraftSnapshot} from "./working-draft-cache";
 
 type Ingredient={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string;supplier:string};
@@ -132,6 +133,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  // parsing = Muse voice-recipe in flight, parseFailed = last parse failed,
  // priceFailed = last price research failed while the draft was retained.
  const [parsing,setParsing]=useState(false),[parseFailed,setParseFailed]=useState(false),[priceFailed,setPriceFailed]=useState(false);
+ const [recoveredPending,setRecoveredPending]=useState(false);
  const dataTurns=useRef<string[]>([]),draftRef=useRef<Draft|null>(null),reviewed=useRef<Draft|null>(null);
  const phaseRef=useRef<"dictating"|"review"|"saving">("dictating");
  const approvalEpoch=useRef(0);
@@ -160,12 +162,16 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   let cancelled=false;
   void loadWorkingDraft<Draft>().then(snapshot=>{
    if(cancelled||!alive.current||!snapshot||draftRef.current||dataTurns.current.length)return;
-   draftRef.current=snapshot.draft;parseBase.current=snapshot.draft;
-   dataTurns.current=snapshot.turns;parsedTurns.current=snapshot.turns.length;
+   const count=Number.isInteger(snapshot.parsedTurnCount)?Math.max(0,Math.min(snapshot.parsedTurnCount!,snapshot.turns.length)):snapshot.turns.length;
+   draftRef.current=count===snapshot.turns.length?snapshot.draft:null;parseBase.current=snapshot.draft;
+   dataTurns.current=snapshot.turns;parsedTurns.current=count;
+   // A pending snapshot may come from an interrupted or superseded parse.
+   // Offer recovery without claiming that a request actually failed.
+   setRecoveredPending(count<snapshot.turns.length);
    setTurns(snapshot.turns.slice(-30));setDraft(snapshot.draft);
    dishPreviewRef.current=snapshot.image;setDishImageUrl(snapshot.image);
    requestId.current=snapshot.requestId??null;
-   if(snapshot.draft.research_state==="deferred"&&snapshot.draft.pending_research?.length){
+   if(draftRef.current&&snapshot.draft?.research_state==="deferred"&&snapshot.draft.pending_research?.length){
     void enrichPrices(snapshot.draft,revision.current,epoch.current,"restored-draft");
    }
   }).catch(()=>{}).finally(()=>{if(!cancelled)setRestored(true);});
@@ -173,7 +179,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  },[]);
  useEffect(()=>{
   if(!restored||prefixPreview)return;
-  const snapshot:WorkingDraftSnapshot<Draft>|null=draft?{draft,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current}:null;
+  const snapshot:WorkingDraftSnapshot<Draft>|null=(draft||dataTurns.current.length)?{draft,parsedTurnCount:parsedTurns.current,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current}:null;
   void saveWorkingDraft(snapshot).catch(()=>{if(alive.current)say(ja?"下書きを端末に保存できませんでした。":"Could not persist the working draft on this device.");});
  },[draft,restored,dishImageUrl,prefixPreview]);
 
@@ -184,6 +190,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  function sayPhoto(text:string){if(alive.current)setMessage(ja?text:(photoMessages[text]??text));}
  function clear(){
   if(phaseRef.current==="saving")return;
+  setRecoveredPending(false);
   epoch.current++;revision.current++;semanticAbort.current?.abort();priceAbort.current?.abort();photoAbort.current?.abort();priceEpoch.current++;priceFlight.current=null;priceStash.current=null;priceDone.current.clear();setPriceLoading(false);setParsing(false);setParseFailed(false);setPriceFailed(false);setPhotoAnalyzing(false);setPhotoFailed(false);dishAbort.current?.abort();setDishGenerating(false);setDishFailed(false);dishPreviewRef.current=null;setDishImageUrl(null);voice.cancel();inbox.current=[];
   setCorrectionIndex(null);setPriceDetailIndex(null);setUnmatchedDetailIndex(null);dataTurns.current=[];setTurns([]);parsedTurns.current=0;parseBase.current=null;draftRef.current=null;reviewed.current=null;reviewMode.current=null;setDraft(null);setPrefixPreview(false);requestId.current=null;
   setStage("dictating");logVoiceEvent("draft.discarded.explicit","explicit cancel",clearTrace.current);clearTrace.current="";onDiscarded?.();say("下書きを破棄しました。新しいレシピを話してください。");
@@ -207,6 +214,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   return flight.rows.every((name,index)=>rows[index]===name);
  }
  async function parse(next:string[],version:number,traceId=""){
+  setRecoveredPending(false);
   const current=epoch.current,aborter=new AbortController();semanticAbort.current=aborter;
   // Incremental revision: resend only turns not yet parsed, with the last
   // successfully parsed draft as context, instead of reprocessing history.
@@ -216,12 +224,13 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   // follow-up that arrived mid-parse must resend full history (up to the
   // 30-turn window), never just its own delta. Otherwise the earlier
   // utterance is never interpreted at all.
-  const turnsToSend=fresh.length&&previous?fresh:next.slice(-30);
+  const turnsToSend=fresh.length&&previous?fresh:next;
   const usePrevious=previous&&fresh.length?previous:null;
   logVoiceEvent("muse.start",`${turnsToSend.length} new turns${usePrevious?"+draft":""}`,traceId);if(alive.current){setParseFailed(false);setParsing(true);}say(ja?"レシピを解析中です。価格調査を依頼した場合は続けて検索します…":"Interpreting recipe and checking requested prices…");
   const parseStarted=performance.now();
   try{
-   const out=await request<Draft>("/api/voice-recipe",{method:"POST",body:JSON.stringify(usePrevious?{turns:turnsToSend,previous:usePrevious,defer_prices:true}:{turns:next,defer_prices:true}),signal:aborter.signal});
+   const packedTurns=prepareRecipeTurns(turnsToSend);
+   const out=await request<Draft>("/api/voice-recipe",{method:"POST",body:JSON.stringify(usePrevious?{turns:packedTurns,previous:usePrevious,defer_prices:true}:{turns:packedTurns,defer_prices:true}),signal:aborter.signal});
    logVoiceEvent("muse.ok",`${Math.round(performance.now()-parseStarted)}ms; structured response`,traceId);
    if(!alive.current||epoch.current!==current){logVoiceEvent("muse.ok","discarded session ignored",traceId);return;}
    if(revision.current!==version){
@@ -479,7 +488,11 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
      // so turns past #30 keep their context and incremental parsing resumes.
      // Only the on-screen transcript is capped (see enqueue).
      dataTurns.current=[...dataTurns.current,...batch.map(item=>item.text)];
-     await parse(dataTurns.current,batch[batch.length-1].revision,batch[batch.length-1].traceId);
+     const sourceEpoch=epoch.current;const sourceTurns=[...dataTurns.current];
+     try{await saveWorkingDraft({draft:parseBase.current,parsedTurnCount:parsedTurns.current,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current});}
+     catch{say(ja?"発話を端末に保持できません。画面の入力内容を確認してください。":"Could not retain speech on this device. Check the transcript.");}
+     if(!alive.current||epoch.current!==sourceEpoch)continue;
+     await parse(sourceTurns,batch[batch.length-1].revision,batch[batch.length-1].traceId);
     }else if(input.revision===revision.current){
      if(input.command==="review")showReview(input.traceId);
      else if(input.command==="save"){
@@ -679,7 +692,9 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    <input aria-label={ja?"音声認識できない場合の入力":"Manual input when voice recognition is unavailable"} value={manual} onChange={event=>setManual(event.target.value)} placeholder={ja?"音声認識できないときの補助入力":"Type when voice recognition is unavailable"} disabled={phase==="saving"}/>
    <button type="submit" disabled={!manual.trim()||phase==="saving"}>{ja?"反映":"Apply"}</button>
   </form>}
-  {parseFailed&&<button type="button" disabled={busy||!dataTurns.current.length||phase==="saving"} onClick={retry}>{ja?"解析を再試行":"Retry analysis"}</button>}
+  {!unitCatalog&&<button type="button" disabled={busy} onClick={()=>void request<{items:Array<{id:string;symbol:string;dimension:string;base_factor:string|null;aliases:string[]}>}>("/api/units").then(result=>{setUnitCatalog(result.items);say(ja?"単位マスターを再取得しました。内容を確認してください。":"Unit catalog reloaded. Review the draft.");}).catch(()=>say(ja?"単位マスターを取得できません。下書きは保持しています。":"Unit catalog unavailable. Draft retained."))}>{ja?"単位マスターを再取得":"Reload unit catalog"}</button>}
+  {recoveredPending&&<p>{ja?"未解析の発話を復元しました。再解析してから内容を確認してください。":"Restored pending dictation. Retry analysis before reviewing."}</p>}
+  {(parseFailed||recoveredPending)&&<button type="button" disabled={busy||!dataTurns.current.length||phase==="saving"} onClick={retry}>{ja?"解析を再試行":"Retry analysis"}</button>}
 
 
   {draft&&<div id="draft" aria-label="未保存のレシピ下書き">
