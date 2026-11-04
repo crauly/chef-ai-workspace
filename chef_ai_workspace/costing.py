@@ -71,7 +71,7 @@ def calculate_cost(recipe: Recipe, ingredients: Mapping[str, Ingredient] | None 
             if line.offer_id:
                 # The repository verifies offer ownership and parent identity.
                 # An explicit offer must never fall back to a different purchase term.
-                quote = (supplier_prices or {}).get((line.ingredient_id or "", line.offer_id))
+                quote = (supplier_prices or {}).get((line.ingredient_id or "", f"offer:{line.offer_id}"))
             elif line.supplier_id:
                 quote = (supplier_prices or {}).get((line.ingredient_id or "", line.supplier_id))
             else:
