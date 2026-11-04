@@ -35,7 +35,7 @@ begin
   then raise exception 'Supplier not owned'; end if;
   v_unit_id:=public.resolve_owned_unit_id(p_owner_id,btrim(p_unit));
   -- A purchase term is only reusable if its package quantity and unit agree.
-  select count(*),min(o.id) into v_count,v_offer
+  select count(*),min(o.id::text)::uuid into v_count,v_offer
   from public.offers o
   where o.owner_id=p_owner_id and o.ingredient_id=p_ingredient_id
     and o.supplier_id is not distinct from p_supplier_id
