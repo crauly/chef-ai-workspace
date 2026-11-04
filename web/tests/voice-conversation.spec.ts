@@ -106,7 +106,7 @@ test("queued fragments coalesce and a save queued before review commits the arri
  expect(submitted[1].turns).not.toContain("保存してください");
  expect(submitted[1].previous).toBeUndefined();
  // Return from the saved detail to the manual voice fallback.
- await page.getByRole("button", {name: "← レシピ一覧"}).click();
+ await page.getByRole("button", {name: "← ホーム"}).click();
  // A later negative request saves nothing more; the commit happened once.
  await input(page,"保存しないでください");
  expect(saves).toBe(1);expect(parses).toBe(2);
