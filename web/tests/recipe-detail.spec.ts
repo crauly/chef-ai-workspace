@@ -83,7 +83,7 @@ test("recipe detail has standalone URL, clean top viewport, and supports reload 
  await expect(page.locator("img[src='/chef-ai-mark.svg']")).toBeVisible();
  await page.reload();
  await expect(page.getByRole("heading",{name:"片栗粉のレシピ"})).toBeVisible();
- await page.getByRole("button",{name:"← レシピ一覧"}).click();
+ await page.getByRole("button",{name:"← ホーム"}).click();
  await expect(page).toHaveURL("/");
  await expect(page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"})).toBeVisible();
 });
@@ -277,8 +277,8 @@ test("detail voice edit with multiple matches keeps the current recipe", async (
 test("missing detail recipe shows an error and a usable return path",async({page})=>{
  await page.goto("/recipes/99999999-9999-4999-8999-999999999999");
  await expect(page.getByRole("alert")).toBeVisible();
- await expect(page.getByRole("button",{name:"← レシピ一覧"})).toBeVisible();
- await page.getByRole("button",{name:"← レシピ一覧"}).click();
+ await expect(page.getByRole("button",{name:"← ホーム"})).toBeVisible();
+ await page.getByRole("button",{name:"← ホーム"}).click();
  await expect(page).toHaveURL("/");
  await expect(page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"})).toBeVisible();
 });
