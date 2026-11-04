@@ -11,10 +11,10 @@ test('unit dimension change during preflight invalidates the response and requir
  await page.route('**/api/recipes/full/review',async route=>{const body=route.request().postDataJSON();reviews.push(body);if(reviews.length===1)await gate;await route.fulfill({json:plan(body)});});
  await page.route('**/api/recipes/full',async route=>{saved=route.request().postDataJSON();await route.fulfill({status:201,json:{id:saved.request_id,title:{value:saved.title},revision:0,materials:[],selling_price_jpy:{value:null}}});});
  await page.goto('/');await input(page,'青菜2束、1束300円');await expect(page.getByLabel('束の単位分類')).toHaveValue('count');
- await page.getByRole('button',{name:'レシピを登録',exact:true}).click();await expect.poll(()=>reviews.length).toBe(1);
+ await input(page,'内容を確認');await expect.poll(()=>reviews.length).toBe(1);
  await page.getByLabel('束の単位分類').selectOption('mass');const replied=page.waitForResponse(r=>r.url().endsWith('/api/recipes/full/review'));release();await replied;await page.waitForTimeout(100);
  await expect(page.getByLabel('正式登録の確認')).toHaveCount(0);expect(saved).toBeNull();
- await page.getByRole('button',{name:'レシピを登録',exact:true}).click();await expect(page.getByLabel('正式登録の確認')).toContainText('mass');
+ await input(page,'内容を確認');await expect(page.getByLabel('正式登録の確認')).toContainText('mass');
  expect(reviews).toHaveLength(2);expect(reviews[1].unit_candidates).toEqual([{symbol:'束',dimension:'mass'}]);
  await page.getByRole('button',{name:'承認して保存',exact:true}).click();await expect.poll(()=>saved).not.toBeNull();expect(saved).toEqual(reviews[1]);
 });
@@ -40,11 +40,10 @@ test('reload after a lost committed response retains the exact payload and reque
  await page.route(/\/api\/voice-recipe$/,route=>route.fulfill({json:draft}));
  await page.route('**/api/recipes/full/review',route=>{const body=route.request().postDataJSON();reviews.push(body);if(committed)expect(body).toEqual(committed);return route.fulfill({json:plan(body,Boolean(committed))});});
  await page.route('**/api/recipes/full',async route=>{saveCalls++;const body=route.request().postDataJSON();if(saveCalls===1){committed=body;await route.fetch();await route.abort('failed');}else{expect(body).toEqual(committed);await route.continue();}});
- await page.goto('/');await input(page,'青菜2束、1束300円');await page.getByRole('button',{name:'レシピを登録',exact:true}).click();await page.getByRole('button',{name:'承認して保存',exact:true}).click();
- await expect(page.getByText('保存結果を確認できませんでした。',{exact:false})).toBeAttached();expect(saveCalls).toBe(1);
+ await page.goto('/');await input(page,'青菜2束、1束300円');await page.getByRole('button',{name:'レシピを登録',exact:true}).click();
+ await expect(page.getByText('通信失敗により結果未確認です。',{exact:false})).toBeAttached();expect(saveCalls).toBe(1);
  await page.reload();await page.getByRole('group',{name:'操作モード'}).getByRole('button',{name:'登録',exact:true}).click();await expect(page.getByLabel('未保存のレシピ下書き')).toBeVisible();
- await page.getByRole('button',{name:'レシピを登録',exact:true}).click();await expect(page.getByLabel('正式登録の確認')).toBeVisible();
- await page.getByRole('button',{name:'承認して保存',exact:true}).click();await expect(page.getByRole('region',{name:'レシピ詳細'})).toBeVisible();
- expect(saveCalls).toBe(2);expect(reviews[1]).toEqual(committed);
+ await page.getByRole('button',{name:'レシピを登録',exact:true}).click();await expect(page.getByRole('region',{name:'レシピ詳細'})).toBeVisible();
+ expect(saveCalls).toBe(2);expect(reviews).toHaveLength(0);
  const list=await (await request.get('/api/recipes?q='+encodeURIComponent(draft.title))).json();expect(list.items.filter((r:any)=>r.id===committed.request_id)).toHaveLength(1);
 });

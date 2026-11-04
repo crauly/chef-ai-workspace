@@ -115,8 +115,9 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
   if(currentMode.current===next)return;
   if(next==="create")setSupplierMemo("");
   logVoiceEvent("mode.transition",`${currentMode.current}->${next}`,traceId);
+  const firstCreate=currentMode.current==="idle"&&next==="create";
   registration.current?.suspend();editor.current?.invalidate();
-  modeBoundary.current=mark();currentMode.current=next;setMode(next);
+  const nextBoundary=mark();if(!firstCreate)modeBoundary.current=nextBoundary;currentMode.current=next;setMode(next);
   if(next!=="idle"&&volume>0)playVoiceCue(next,volume);
  }
  async function navigate(nav:Navigation,source?:string,traceId=""){
@@ -322,7 +323,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
     </details>
    </section>}
   </section>
-  <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} onDiscarded={()=>setDraftPending(false)} sharedVoice={{markReview:mark,cancel:()=>{},mic:realtimeActive?{recording:realtime.recording,transcribing:false,queued:0}:{recording:voice.recording,transcribing:voice.busy||voice.queued>0,queued:voice.queued},captureMessage:micRecording?"音声受付中です。確認後は「保存」と話すと承認・保存へ進めます。":micBusy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${micError||micNotice||""}`}} onCreated={(recipe,mode,suppliers)=>{
+  <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} onDiscarded={()=>setDraftPending(false)} sharedVoice={{markReview:mark,cancel:()=>{},mic:realtimeActive?{recording:realtime.recording,transcribing:false,queued:0}:{recording:voice.recording,transcribing:voice.busy||voice.queued>0,queued:voice.queued},captureMessage:micRecording?"音声受付中です。「保存」と話すと、数量・価格などが未確定でも現在の内容を保存します。":micBusy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${micError||micNotice||""}`}} onCreated={(recipe,mode,suppliers)=>{
    // The formal save has already committed supplier links. Keep their names
    // for feedback when the registration panel switches back to browse.
   setSupplierMemo(suppliers.length?(locale==="ja"?`保存した仕入れ先：${suppliers.join("／")}`:`Saved suppliers: ${suppliers.join(", ")}`):"");

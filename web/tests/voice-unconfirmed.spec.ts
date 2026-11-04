@@ -25,9 +25,8 @@ test("voice recipe with unknown prices saves explicitly as price-unconfirmed",as
  // The unknown price stays unconfirmed, yet the draft is explicitly registrable.
  await expect(page.getByRole("button",{name:"レシピを登録"})).toBeEnabled();
  expect(saved).toBe(0);
- // Review first, then explicitly approve unknown prices.
+ // One explicit save authorizes unresolved prices.
  await entry.fill("保存してください");await page.getByRole("button",{name:"反映"}).click();
- await page.getByRole("button",{name:"承認して保存",exact:true}).click();
  await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
  await expect(page.getByRole("heading",{name:"カルボナーラ",exact:true})).toBeVisible();
  await page.reload();
@@ -53,9 +52,8 @@ test("a confirmed voice recipe forwards its approved supplier and survives reloa
  await expect(page.getByText("未保存の下書き：ペペロンチーノ")).toBeVisible();
  await expect(page.getByText("仕入先: 築地場外")).toBeVisible();
  expect(saved).toBe(0);
- // Review first, then explicitly approve the purchase source.
+ // One explicit save approves the spoken purchase source.
  await entry.fill("保存してください"); await page.getByRole("button", {name: "反映"}).click();
- await page.getByRole("button",{name:"承認して保存",exact:true}).click();
  await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
  await expect(page.getByRole("heading",{name:"ペペロンチーノ",exact:true})).toBeVisible();
  await page.reload();

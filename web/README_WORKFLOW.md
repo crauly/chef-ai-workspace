@@ -63,9 +63,9 @@ HTTPS (or localhost), microphone permission and AudioWorklet support are
 required; typed input remains available. Audio is sent to Meta through the
 protected server-only `/api/voice/transcribe` route. The app does not retain
 recordings. Pause for about one second between turns. A save request such as
-「保存してください」first presents the current draft for review; a later explicit
-request approves that reviewed draft. A combined review/save sentence is one
-request and cannot approve a draft that was not already presented. The stop
+「保存してください」approves and saves the current recipe in one request.
+Unknown optional facts remain unresolved and can be edited later.
+“内容を確認” opens an optional read-only preflight without saving. The stop
 button flushes the last voiced segment. Changing
 microphones, discarding a draft, navigation or a transcription error cancels
 pending audio. On failure, review the visible draft before restarting.
@@ -122,8 +122,8 @@ for routing, capture epochs and voice/manual confirmation boundaries.
 Registration treats every transcript containing “保存” as a save request,
 including “保存して”, “レシピを保存します” and “承認して保存”. This is a literal
 substring rule, including negated phrases; “登録” alone never authorizes saving.
-The first request opens review; only a new request received after that review
-can approve it. During an active task these controls precede navigation. If capture
+One save request is explicit human approval; a prior review is optional.
+A request queued during parsing saves after that parse; old-draft audio is rejected. During an active task these controls precede navigation. If capture
 pauses, a stop/error cue and capture status explain it. Accepted queued audio
 finishes before “音声操作を再開” becomes available. The draft remains in the
 page; do not reload to resume. A failed ASR segment is identified as failed
@@ -214,9 +214,9 @@ production limitations: [ADR-016](../docs/ADR_016_SCHEDULED_PRICE_RESEARCH.md).
 
 1. 登録モードで料理名・材料・数量を話す。訂正・メーカー・仕入先の追加は同じ下書きへ反映する。
 2. 「全部の平均価格を調べて」などで全対象の調査を開始。検索中も訂正でき、結果と失敗は行ごとに表示される。出典と購入単位は価格詳細で確認する。
-3. 最初の「保存」でマスター照合結果を表示する。数量・価格・再利用食材・新規食材・単位・仕入先と、共通採用価格への変更を確認する。
-4. その後にもう一度「保存」または「承認して保存」で登録する。確認前の録音・未解析の追加入力は承認にならない。価格不明は未確定として保存する。
-5. 保存後の詳細表示と再読込で内容を確認する。
+3. 「保存」を一度伝えるか保存ボタンを押すと、現在の内容を正式保存する。価格調査の終了や二度目の承認は要求しない。「内容を確認」で任意の事前照合もできる。
+4. 数量・価格などは未確定でも保存し、料理名がなければ「無題のレシピ」とする。分類不明の単位に依存する数量・価格は未確定の組として保存する。
+5. 詳細の未確定情報を確認し、後から編集する。別の下書きの音声は適用しない。同一性の競合・サービス障害は既存の保存APIで拒否し、理由と下書きを保持する。
 
 実行手順・実APIの検証範囲は `docs/VOICE_RECIPE_ACCEPTANCE.md` を参照。
 
