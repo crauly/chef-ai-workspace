@@ -322,6 +322,7 @@ def link_demo_ingredient_supplier(ingredient_id:UUID, body:IngredientSupplierLin
 class IngredientMasterCreateBody(BaseModel):
     model_config=ConfigDict(extra="forbid")
     name: str=Field(min_length=1,max_length=200)
+    spec: str | None=Field(default=None,max_length=200)
 
 
 @router.post("/ingredients",status_code=201)
@@ -330,7 +331,7 @@ def create_demo_ingredient_master(body:IngredientMasterCreateBody,ctx=Depends(de
     if not body.name.strip(): raise HTTPException(422,"Ingredient name required")
     create=getattr(repo,"create_owned_ingredient_master",None)
     if not callable(create): raise HTTPException(503,"Ingredient master unavailable")
-    return {"id":str(create(owner,body.name.strip()))}
+    return {"id":str(create(owner,body.name.strip(),body.spec.strip() or None if body.spec is not None else None))}
 
 
 @router.delete("/ingredients/{ingredient_id}")
@@ -345,6 +346,7 @@ def delete_demo_ingredient_master(ingredient_id:UUID,ctx=Depends(demo_context)):
 class IngredientMasterEditBody(BaseModel):
     model_config=ConfigDict(extra="forbid")
     name: str=Field(min_length=1,max_length=200)
+    spec: str | None=Field(default=None,max_length=200)
     price_jpy: str | None=None
     price_quantity: str | None=None
     price_unit: str | None=Field(default=None,min_length=1,max_length=32)
@@ -370,7 +372,8 @@ def edit_demo_ingredient_master(ingredient_id:UUID, body:IngredientMasterEditBod
     if not callable(editor):
         raise HTTPException(503,"Ingredient master unavailable")
     if not editor(owner,str(ingredient_id),body.name.strip(),
-                  asdict(quote) if quote is not None else None):
+                  asdict(quote) if quote is not None else None,
+                  body.spec.strip() or None if body.spec is not None else None):
         raise HTTPException(404,"Ingredient not found")
     return {"id":str(ingredient_id),"name":body.name.strip(),"updated":True}
 
