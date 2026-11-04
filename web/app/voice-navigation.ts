@@ -2,6 +2,9 @@ import type {VoiceMode} from "./VoiceModePanel";
 export type Navigation={mode:Exclude<VoiceMode,"idle">;target:string};
 export function explicitEditRequest(text:string):boolean{
  if(/(?:変更|修正|訂正|追加)(?:は)?(?:しない|しません)/.test(text))return false;
+ // Research requests against a selected recipe are edit proposals, even if
+ // the chef asks to "調べて" without repeating "入れて". They never auto-save.
+ if(/(?:価格|単価|相場|仕入値|値段).*(?:調べ|検索|探し|見積)|(?:平均価格|参考価格|市場価格|仮単価|最安)|\b(?:market price|average price|reference price|research prices|compare prices)\b/i.test(text))return true;
  return /(?:変更|修正|訂正|追加)(?:して|します|する|したい|[。.!！]?$)|差し替|増や|減ら|にして|にする|に変え|を抜いて|を入れて|\b(?:change|set|increase|decrease|replace|add)\b/i.test(text);
 }
 
