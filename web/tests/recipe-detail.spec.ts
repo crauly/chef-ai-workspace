@@ -293,3 +293,20 @@ test("partial-cost diagnostics honor a stored material price override",async({pa
  await expect(detail.getByText("単位換算を確認")).toBeVisible();
  await expect(detail.getByText("採用価格が未設定")).toHaveCount(0);
 });
+
+test("detail opens in browse mode before any voice edit request",async({page})=>{
+ const detail=await openDetail(page);
+ await expect(detail.getByRole("heading",{name:"片栗粉のレシピ"})).toBeVisible();
+ await expect(page.locator("#voice-controls")).toContainText("現在のモード: 参照");
+ await expect(page.locator("#voice-controls")).toBeHidden();
+});
+
+test("long-press edit action opens the actual detail editor",async({page})=>{
+ await page.goto("/");
+ const recipe=page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"});
+ await recipe.click({button:"right"});
+ await page.getByRole("dialog",{name:"レシピの操作"}).getByRole("button",{name:"編集"}).click();
+ await expect(page).toHaveURL(/\/recipes\/[^/?]+$/);
+ await expect(page.getByRole("heading",{name:"片栗粉のレシピ"})).toBeVisible();
+ await expect(page.getByLabel("料理人の指示",{exact:true})).toBeVisible();
+});
