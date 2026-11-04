@@ -1,9 +1,9 @@
+import {isRecipeId} from "../recipe-id";
 // Supabase Storage (through trusted backend) is the authoritative recipe
 // illustration SSOT. The old IndexedDB cache is read-only except when a
 // server upload fails, so previously generated art is never lost.
 const DATABASE="chef-ai-recipe-image-cache",STORE="images";
 const IMAGE=/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/;
-const UUID=/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function openDB():Promise<IDBDatabase>{return new Promise((resolve,reject)=>{
  const req=indexedDB.open(DATABASE,1);
  req.onupgradeneeded=()=>req.result.createObjectStore(STORE);
@@ -18,13 +18,13 @@ async function access<T>(mode:IDBTransactionMode,fn:(store:IDBObjectStore)=>IDBR
  });}finally{db.close();}
 }
 export async function getLocalDishPreview(id:string):Promise<string|null>{
- if(!UUID.test(id))return null;
+ if(!isRecipeId(id))return null;
  const value=await access<unknown>("readonly",s=>s.get(id));
  return typeof value==="string"&&IMAGE.test(value)?value:null;
 }
 export type DishImageSource="cloud"|"device"|null;
 export async function loadDishImage(id:string):Promise<{image:string|null;source:DishImageSource}>{
- if(!UUID.test(id))return {image:null,source:null};
+ if(!isRecipeId(id))return {image:null,source:null};
  try{
   const result=await fetch("/api/recipe-images/"+encodeURIComponent(id),{cache:"no-store"});
   if(result.ok){
@@ -44,7 +44,7 @@ export async function getDishPreview(id:string):Promise<string|null>{
 // Server save is authoritative. On failure preserve on this device and clearly
 // report unsynchronized state; never describe a local fallback as cloud saved.
 export async function storeDishPreview(id:string,image:string):Promise<boolean>{
- if(!UUID.test(id)||!IMAGE.test(image))return false;
+ if(!isRecipeId(id)||!IMAGE.test(image))return false;
  try{
   const res=await fetch("/api/recipe-images/"+encodeURIComponent(id),{
    method:"POST",headers:{"Content-Type":"application/json"},

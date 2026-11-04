@@ -8,10 +8,12 @@ test.beforeEach(async ({request}) => {
 
 test("generated image appears in recipe list on the same origin, survives reload, and other recipes retain placeholder", async ({page}) => {
  await page.route("**/api/dish-image",route=>route.fulfill({json:{image:IMG,mode:"generate"}}));
- let stored=false;
+ const images=new Map<string,string>();
  await page.route("**/api/recipe-images/*",async route=>{
-  if(route.request().method()==="POST"){stored=true;return route.fulfill({json:{saved:true}});}
-  return stored?route.fulfill({json:{image:IMG}}):route.fulfill({status:404,json:{error:"Not found"}});
+  const id=new URL(route.request().url()).pathname.split("/").pop()!;
+  if(route.request().method()==="POST"){images.set(id,route.request().postDataJSON().image);return route.fulfill({json:{saved:true}});}
+  const image=images.get(id);
+  return image?route.fulfill({json:{image}}):route.fulfill({status:404,json:{error:"Not found"}});
  });
  await page.goto("/");
  const named="片栗粉のレシピ";
@@ -32,10 +34,11 @@ test("generated image appears in recipe list on the same origin, survives reload
 });
 
 
-test("cloud thumbnail follows the recipe to an independent mobile browser",async ({browser})=>{
+test("cloud thumbnail follows the recipe to an independent mobile browser",async ({browser,baseURL},testInfo)=>{
  const images=new Map<string,string>();
- const desktop=await browser.newContext({viewport:{width:1280,height:800}});
- const mobile=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+ const httpCredentials=testInfo.project.use.httpCredentials;
+ const desktop=await browser.newContext({baseURL,httpCredentials,viewport:{width:1280,height:800}});
+ const mobile=await browser.newContext({baseURL,httpCredentials,viewport:{width:390,height:844},isMobile:true,hasTouch:true});
  try{
   for(const context of [desktop,mobile]){
    await context.route("**/api/recipe-images/*",route=>{

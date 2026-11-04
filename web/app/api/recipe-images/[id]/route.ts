@@ -1,14 +1,14 @@
 import {NextRequest,NextResponse} from "next/server";
+import {isRecipeId} from "../../../../recipe-id";
 import {previewAuthorized,sameOrigin} from "../../../../preview-access";
 import {backendUrl} from "../../backend-url";
 export const runtime="nodejs";
-const uuid=/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const fail=(status:number)=>NextResponse.json({error:"Recipe image unavailable"},{status,headers:{"Cache-Control":"no-store"}});
 // Both reads and explicit writes use the same operator-verified backend owner.
 // No browser service-role credentials, public bucket, or client owner IDs.
 async function proxy(req:NextRequest,id:string){
  if(!await previewAuthorized(req))return fail(403);
- if(!uuid.test(id))return fail(400);
+ if(!isRecipeId(id))return fail(400);
  if(req.method==="POST"&&!sameOrigin(req))return fail(403);
  const origin=backendUrl(),token=process.env.DEMO_ACCESS_TOKEN;
  if(!origin||!token)return fail(503);
