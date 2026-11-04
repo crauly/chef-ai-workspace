@@ -129,3 +129,44 @@ test("voice draft created during photo analysis wins; photo result is discarded"
   await expect(page.getByLabel("未保存のレシピ下書き")).not.toContainText("トマトパスタ");
   expect(photoCalls).toBe(1);
 });
+
+for(const prefix of [false,true])test(`accepted photo clears ${prefix?"voice prefix and persists across reload":"invalidated voice processing status"}`,async({page})=>{
+ const gate=()=>{let release!:()=>void;const promise=new Promise<void>(r=>{release=r;});return {promise,release};};
+ const photo=gate(),first=gate(),last=gate();let calls=0,completed=0,saves=0;
+ await page.route("**/api/recipes/full",route=>{saves++;return route.abort();});
+ await page.route("**/api/image-recipe",async route=>{await photo.promise;await route.fulfill({json:photoDraft}).catch(()=>{});});
+ await page.route("**/api/voice-recipe",async route=>{
+  const n=++calls;await(n===1?first:last).promise;
+  await route.fulfill({json:voiceDraft}).catch(()=>{});completed++;
+ });
+ try{
+  await enterCreate(page);await page.getByLabel("解析する写真").setInputFiles(pngFile);
+  await page.getByRole("button",{name:"写真を解析",exact:true}).click();
+  await expect(page.locator('.voice-status-list [data-stage="photo"]')).toBeVisible();
+  const input=page.getByLabel("音声認識できない場合の入力");
+  await input.fill("乾燥パスタ100g");await page.getByRole("button",{name:"反映",exact:true}).click();
+  await expect.poll(()=>calls).toBe(1);
+  if(prefix){
+   await input.fill("トマト20gを追加");await page.getByRole("button",{name:"反映",exact:true}).click();
+   first.release();await expect(page.getByLabel("未反映の発話")).toBeVisible();
+   await expect.poll(()=>calls).toBe(2);
+  }
+  photo.release();await expect(page.getByLabel("未保存のレシピ下書き")).toContainText(photoDraft.title);
+  if(!prefix){first.release();await expect.poll(()=>completed).toBe(1);}
+  await expect(page.getByLabel("未反映の発話")).toHaveCount(0);
+  await expect(page.locator('.voice-status-list [data-stage="parse"]')).toHaveCount(0);
+  // Wait for an actual completed device-cache write, then exercise restoration.
+  await expect.poll(()=>page.evaluate(()=>new Promise<string|null>((resolve,reject)=>{
+   const open=indexedDB.open("chef-ai-working-draft",1);
+   open.onerror=()=>reject(open.error);
+   open.onsuccess=()=>{const db=open.result,r=db.transaction("draft","readonly").objectStore("draft").get("current");
+    r.onsuccess=()=>{resolve(r.result?.draft?.title??null);db.close();};r.onerror=()=>{reject(r.error);db.close();};};
+  }))).toBe(photoDraft.title);
+  await page.reload();last.release();
+  await page.locator(".voice-quick-modes").getByRole("button",{name:"登録",exact:true}).click();
+  await expect(page.getByLabel("未保存のレシピ下書き")).toContainText(photoDraft.title);
+  await expect(page.getByLabel("未保存のレシピ下書き")).not.toContainText(voiceDraft.title);
+  await expect(page.getByLabel("未反映の発話")).toHaveCount(0);
+  await expect(page.locator(".voice-status-list")).toHaveCount(0);expect(saves).toBe(0);
+ }finally{first.release();last.release();photo.release();}
+});

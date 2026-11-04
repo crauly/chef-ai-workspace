@@ -560,6 +560,9 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    // stale voice result can never overwrite the photo draft. Still-unparsed
    // voice turns are not dropped; they re-parse against this draft later.
    revision.current++;epoch.current++;
+   // The accepted photo is authoritative, not a voice prefix. Its epoch
+   // invalidates the old parse, whose finally must not clear newer work.
+   setPrefixPreview(false);setParsing(false);
    const version=revision.current,current=epoch.current;
    const enriched=applyFoundPrices(out);
    parseBase.current=enriched;
