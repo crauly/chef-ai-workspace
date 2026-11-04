@@ -28,6 +28,9 @@ class MasterRepo:
     def create_owned_unit_master(self,owner,symbol,dimension):
         self.calls.append(("create_unit",owner,symbol,dimension))
         return str(uuid4())
+    def set_owned_offer_price(self,owner,ingredient_id,supplier_id,amount,quantity,unit):
+        self.calls.append(("adopt_price",owner,ingredient_id,supplier_id,amount,quantity,unit))
+        return str(uuid4())
     def update_owned_ingredient_master(self,owner,id,name,quote,spec=None):
         self.calls.append(("update_ingredient",owner,id,name,quote,spec))
         return True
@@ -106,6 +109,23 @@ class MasterCrudApiTests(unittest.TestCase):
         self.assertIn(("create_ingredient",self.owner,"トマト水煮","1号缶"),self.repo.calls)
         self.assertEqual(self.client.put(f"/demo/ingredients/{ident}",headers=self.headers,json={"name":"トマト水煮","spec":"6号缶"}).status_code,200)
         self.assertIn(("update_ingredient",self.owner,ident,"トマト水煮",None,"6号缶"),self.repo.calls)
+
+    def test_explicit_supplier_price_adoption_uses_owner_and_no_supplier_fallback(self):
+        ingredient=str(uuid4())
+        supplier=str(uuid4())
+        payload={"ingredient_id":ingredient,"supplier_id":supplier,
+                 "amount_jpy":"1650","quantity":"3500","unit":"g"}
+        denied=self.client.post("/demo/offer-prices",json=payload)
+        self.assertEqual(denied.status_code,403)
+        self.assertNotIn("adopt_price",[call[0] for call in self.repo.calls])
+        response=self.client.post("/demo/offer-prices",headers=self.headers,json=payload)
+        self.assertEqual(response.status_code,201,response.text)
+        self.assertTrue(response.json()["adopted"])
+        self.assertIn(("adopt_price",self.owner,ingredient,supplier,"1650","3500","g"),self.repo.calls)
+        market=self.client.post("/demo/offer-prices",headers=self.headers,
+                                json={**payload,"supplier_id":None})
+        self.assertEqual(market.status_code,201,market.text)
+        self.assertIn(("adopt_price",self.owner,ingredient,None,"1650","3500","g"),self.repo.calls)
 
     def test_invalid_payloads_do_not_write(self):
         id=str(uuid4())
