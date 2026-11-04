@@ -236,7 +236,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
   return new Promise(resolve=>{browseWaiter.current=resolve;search(target,true);});
  }
  return <main id="top" className={pageKind==="detail"?"recipe-detail-page":""}><div><header className="chef-header"><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><PriceBell locale={locale}/><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">Japanese</option><option value="en-US">English</option></select></label></div><div className="chef-brand"><img src="/chef-ai-mark.svg" alt="" width="58" height="58"/><h1>Chef AI</h1></div>{pageKind==="home"&&<p className="muted">{t("intro")}</p>}</header>
- </div>{(pageKind==="home"||selected)&&<div><VoiceWorkspace locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} editRequest={voiceEditRequest} onCreated={recipe=>{showDetail(recipe);setError("");void reload();}}/></div>}
+ </div>{(pageKind==="home"||selected)&&<div><VoiceWorkspace detailOnly={pageKind==="detail"} locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} editRequest={voiceEditRequest} onCreated={recipe=>{showDetail(recipe);setError("");void reload();}}/></div>}
  {pageKind==="home"&&<div>
  <section className="workspace-section recipe-library-section" aria-labelledby="recipe-library-heading">
  <div className="workspace-section-head"><div><h2 id="recipe-library-heading">{locale==="ja"?"レシピ一覧":"Recipes"}</h2><p>{locale==="ja"?"保存したレシピを検索・閲覧":"Search and browse saved recipes"}</p></div></div>
