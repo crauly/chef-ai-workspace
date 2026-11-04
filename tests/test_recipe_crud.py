@@ -104,7 +104,7 @@ class RecipeCrudTests(unittest.TestCase):
 
     def test_purchase_term_id_preserved_and_snapshotted(self):
         supplier, offer = str(uuid4()), str(uuid4())
-        self.repo.supplier_prices[(self.repo.ingredient_id, offer)] = PriceQuote(
+        self.repo.supplier_prices[(self.repo.ingredient_id, f"offer:{offer}")] = PriceQuote(
             tv("1650"), "3500", "g", "manual")
         line = self.repo.recipe.materials[0]
         saved = self.save({"op": "set_material_supplier", "material_id": line.id,
