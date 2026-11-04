@@ -18,9 +18,9 @@ function MicrophoneGlyph(){return <svg width="36" height="36" viewBox="0 0 24 24
 function ListeningWave({active}:{active:boolean}){return <div className={"listening-wave"+(active?" is-active":"")} aria-hidden="true">{[.32,.65,1,.55,.88,.42,.7,.96,.6,.35,.72,.4].map((v,i)=><span key={i} style={{"--bar-scale":v,"--bar-delay":`${i*65}ms`} as React.CSSProperties}/>)}</div>;}
 
 const voiceMessagesEn:Record<string,string> = {"参照モードです。表示中のレシピの変更内容を話すと編集へ進みます。":"Browse mode. Describe a change to edit the displayed recipe.","保存・変更処理中です。完了後に切り替えてください。":"Saving or editing is in progress. Switch modes after it finishes.","未保存の変更案があります。保存するか、「変更案を破棄」と話してから切り替えてください。":"You have unsaved proposed changes. Save or discard them before switching.","編集対象のレシピを検索しています。":"Searching for the recipe to edit.","編集対象を一つに絞れませんでした。検索結果から選んでください。":"Could not identify a unique recipe. Select one from the search results.","編集するレシピを先に呼び出してください。":"Open a recipe before editing.","登録モードです。保持していた下書きを続けます。":"Create mode. Continuing your saved draft.","登録モードです。料理名・食材・分量・仕入単価をどうぞ。":"Create mode. Tell me the dish, ingredients, quantities and purchase prices.","編集モードです。変更内容を話してください。保存には変更案の確認と明示承認が必要です。":"Edit mode. Describe the changes. Review and explicitly approve proposals before saving.","承認された下書きを保存中です。完了後に続きをお願いします。":"Saving the approved draft. Continue after it finishes.","切り替え前の承認は適用していません。現在のモードを確認して、もう一度お願いします。":"Approval from a previous mode was not applied. Check the current mode and try again.","処理待ちの発話が多すぎます。処理完了後に再度お願いします。":"Too many queued utterances. Try again when processing completes.","切り替え前の承認は適用していません。もう一度お願いします。":"An earlier approval was ignored. Please repeat the request.","保持していた下書きを確認します。":"Reviewing your preserved draft.","変更案を破棄しました。レシピ自体は変更していません。":"Proposed changes discarded. The recipe was not changed.","切り替えずに現在の内容を保持しています。希望する操作をもう一度教えてください。":"Kept the current mode and content. Please clarify your request.","切り替え先を確認できませんでした。登録・参照・編集のどれかを教えてください。":"Could not determine the requested mode. Choose create, browse or edit.","登録モードです。料理の内容を下書きにします。":"Create mode. Starting a recipe draft.","対象のレシピを呼び出してください。候補が複数なら画面で選んでください。":"Open the target recipe. If several match, select one on screen.","参照中です。変更内容を話すと編集へ進みます。保存はしません。":"Browsing. Describe a change to enter edit mode; nothing will be saved yet.","変更せず、参照モードのままです。":"No changes made. Staying in browse mode.","参照モードのままです。変更する場合は、対象と変更内容を教えてください。":"Still in browse mode. Specify the target and desired change to edit.","編集モードです。変更案を作成します。":"Edit mode. Preparing a proposed change.","操作を完了できませんでした。現在の内容を確認して、もう一度お願いします。":"Could not complete the operation. Check the current state and try again."};
-export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreated,reviewBoundary,editRequest}:{
+export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreated,reviewBoundary,editRequest,detailOnly=false}:{
  locale:Locale;selected:Recipe|null;editor:RefObject<EditorHandle|null>;onBrowse:(target:string)=>Promise<Recipe|null>;
- onCreated:(recipe:Recipe)=>void;reviewBoundary:RefObject<(()=>number)|null>;editRequest:number;
+ onCreated:(recipe:Recipe)=>void;reviewBoundary:RefObject<(()=>number)|null>;editRequest:number;detailOnly?:boolean;
 }){
  const [mode,setMode]=useState<VoiceMode>("idle"),[volume,setVolume]=useState(.5),[manual,setManual]=useState("");
  const [message,setMessage]=useState(locale==="ja"?"登録・呼び出し・修正を一つのマイクで続けられます。":"Create, browse and edit with one microphone."),[heard,setHeard]=useState("");
@@ -110,6 +110,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
   if(next!=="idle"&&volume>0)playVoiceCue(next,volume);
  }
  async function navigate(nav:Navigation,source?:string,traceId=""){
+  if(detailOnly&&nav.mode!=="edit"){window.location.assign("/");return;}
   if(registration.current?.isSaving()||editor.current?.isBusy()){logVoiceEvent("mode.transition.rejected","busy saving",traceId);feedback("保存・変更処理中です。完了後に切り替えてください。",true);return;}
   if(editor.current?.hasPending()&&(nav.mode!=="edit"||nav.target)){
    logVoiceEvent("mode.transition.rejected","unsaved edit proposal",traceId);feedback("未保存の変更案があります。保存するか、「変更案を破棄」と話してから切り替えてください。",true);return;
@@ -254,8 +255,8 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
     <button type="submit" disabled={!manual.trim()}>{locale==="ja"?"反映":"Apply"}</button>
    </form>
    <div className="voice-quick-modes" role="group" aria-label={locale==="ja"?"操作モード":"Operation mode"}>
-    <button type="button" aria-pressed={mode==="create"} onClick={()=>void navigate({mode:"create",target:""})}>{locale==="ja"?"登録":"Create"}</button>
-    <button type="button" aria-pressed={mode==="browse"} onClick={()=>void navigate({mode:"browse",target:""})}>{locale==="ja"?"参照":"Browse"}</button>
+    {!detailOnly&&<button type="button" aria-pressed={mode==="create"} onClick={()=>void navigate({mode:"create",target:""})}>{locale==="ja"?"登録":"Create"}</button>}
+    {!detailOnly&&<button type="button" aria-pressed={mode==="browse"} onClick={()=>void navigate({mode:"browse",target:""})}>{locale==="ja"?"参照":"Browse"}</button>}
     <button type="button" aria-pressed={mode==="edit"} onClick={()=>void navigate({mode:"edit",target:""})}>{locale==="ja"?"編集":"Edit"}</button>
    </div>
    {settingsOpen&&<section className="voice-settings-panel" aria-label={locale==="ja"?"音声設定":"Voice settings"}>
@@ -287,10 +288,10 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
     </li>
    </ul>}
   <nav aria-label={locale==="ja"?"主要":"Primary"} className="bottom-nav">
-   <a href="#top"><NavIcon name="home"/><span>{locale==="ja"?"ホーム":"Home"}</span></a>
-   <a href="#recipes"><NavIcon name="recipes"/><span>{locale==="ja"?"レシピ":"Recipes"}</span></a>
+   <a href={detailOnly?"/":"#top"}><NavIcon name="home"/><span>{locale==="ja"?"ホーム":"Home"}</span></a>
+   <a href={detailOnly?"/":"#recipes"}><NavIcon name="recipes"/><span>{locale==="ja"?"レシピ":"Recipes"}</span></a>
    <button type="button" className="bottom-nav-mic" aria-label={locale==="ja"?"下部の音声操作":"Bottom voice control"} aria-pressed={micRecording} disabled={micDisabled} onClick={toggleMic}>{micRecording?<span aria-hidden="true" className="stop-glyph"/>:<MicrophoneGlyph/>}</button>
-   <button type="button" onClick={()=>void revealDraft()}><NavIcon name="draft"/><span>{locale==="ja"?"下書き":"Draft"}</span></button>
+   {detailOnly?<a href="/#open-draft"><NavIcon name="draft"/><span>{locale==="ja"?"下書き":"Draft"}</span></a>:<button type="button" onClick={()=>void revealDraft()}><NavIcon name="draft"/><span>{locale==="ja"?"下書き":"Draft"}</span></button>}
    <a href="/settings" aria-label={locale==="ja"?"管理・設定":"Management and settings"}><NavIcon name="settings"/><span>{locale==="ja"?"設定":"Settings"}</span></a>
   </nav>
  </>;
