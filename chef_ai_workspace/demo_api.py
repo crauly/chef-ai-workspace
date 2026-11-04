@@ -379,6 +379,31 @@ def edit_demo_ingredient_master(ingredient_id:UUID, body:IngredientMasterEditBod
     return {"id":str(ingredient_id),"name":body.name.strip(),"updated":True}
 
 
+class ApprovedOfferPriceBody(BaseModel):
+    """An explicit user-approved quote, never an AI or search observation."""
+    model_config=ConfigDict(extra="forbid")
+    ingredient_id: UUID
+    supplier_id: UUID | None=None
+    amount_jpy: str
+    quantity: str
+    unit: str=Field(min_length=1,max_length=32)
+
+
+@router.post("/offer-prices", status_code=201)
+def adopt_demo_offer_price(body: ApprovedOfferPriceBody, ctx=Depends(demo_context)):
+    owner, repository=ctx
+    adopter=getattr(repository, "set_owned_offer_price", None)
+    if not callable(adopter):
+        raise HTTPException(503, "Offer price adoption unavailable")
+    try:
+        observation_id=adopter(owner, str(body.ingredient_id),
+                               str(body.supplier_id) if body.supplier_id else None,
+                               body.amount_jpy, body.quantity, body.unit)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"observation_id": observation_id, "adopted": True}
+
+
 @router.get("/ingredients/search")
 def search_demo_ingredients(q: str = Query(default="", max_length=200),
                             limit: int = Query(default=20, ge=1, le=50),
