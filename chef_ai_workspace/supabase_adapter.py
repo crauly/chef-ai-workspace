@@ -1107,3 +1107,57 @@ class SupabasePersistence:
         if not isinstance(response.data, int):
             raise RuntimeError("Unexpected commit RPC response")
         return response.data
+
+    # Generated dish art: independent of recipe revision/Human Gate. The
+    # server-supplied owner is checked against the actual saved recipe.
+    def _owned_dish_recipe(self, owner_id, recipe_id):
+        rows = (self.client.table("recipes").select("id")
+                .eq("id", recipe_id).eq("owner_id", owner_id)
+                .limit(1).execute()).data or []
+        return bool(rows)
+
+    def load_owned_dish_image(self, owner_id, recipe_id):
+        if not self._owned_dish_recipe(owner_id, recipe_id):
+            raise ValueError("Recipe not found")
+        rows = (self.client.table("recipe_dish_images")
+                .select("storage_path,mime_type")
+                .eq("owner_id", owner_id).eq("recipe_id", recipe_id)
+                .limit(1).execute()).data or []
+        if not rows:
+            return None
+        row = rows[0]
+        data = self.client.storage.from_("chef-recipe-dishes").download(row["storage_path"])
+        return {"bytes": bytes(data), "mime_type": row["mime_type"]}
+
+    def save_owned_dish_image(self, owner_id, recipe_id, mime_type, image_bytes):
+        from uuid import uuid4
+        if not self._owned_dish_recipe(owner_id, recipe_id):
+            raise ValueError("Recipe not found")
+        ext = {"image/png":"png", "image/jpeg":"jpg", "image/webp":"webp"}[mime_type]
+        path = f"{owner_id}/{recipe_id}/{uuid4()}.{ext}"
+        storage = self.client.storage.from_("chef-recipe-dishes")
+        # New immutable object first. Never overwrite existing art before
+        # the metadata points at a successfully uploaded image.
+        storage.upload(path, image_bytes, file_options={"content-type":mime_type,"upsert":"false"})
+        try:
+            previous = (self.client.table("recipe_dish_images")
+                        .select("storage_path").eq("owner_id",owner_id)
+                        .eq("recipe_id",recipe_id).limit(1).execute()).data or []
+            # An ownership check against the recipe is repeated inside the
+            # SQL upsert's FK and owner-path constraints.
+            self.client.table("recipe_dish_images").upsert({
+                "owner_id":owner_id,"recipe_id":recipe_id,
+                "storage_path":path,"mime_type":mime_type,
+                "updated_at":"now()"
+            },on_conflict="recipe_id").execute()
+        except Exception:
+            storage.remove([path])
+            raise
+        # Cleanup is best-effort; never fail the confirmed new image because
+        # obsolete-object cleanup fails.
+        if previous and previous[0]["storage_path"] != path:
+            try:
+                storage.remove([previous[0]["storage_path"]])
+            except Exception:
+                pass
+        return True
