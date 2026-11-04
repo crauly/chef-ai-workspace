@@ -81,3 +81,22 @@ test("supplier creation stays separate from inline supplier editing",async({page
  const market=page.locator(".supplier-manager-list li",{hasText:"相場参考価格"});
  await expect(market.getByRole("button",{name:"編集"})).toBeDisabled();
 });
+
+test("supplier search finds entries beyond the first backend page and edit retains voice input",async({page})=>{
+ const rows=Array.from({length:51},(_,i)=>({id:String(i).padStart(8,"0")+"-0000-4000-8000-000000000000",name:i===50?"最後の仕入れ先":"仕入れ先"+i,note:null}));
+ const requested:number[]=[];
+ await page.route("**/api/suppliers?*",route=>{
+  const url=new URL(route.request().url());
+  const pageNumber=Number(url.searchParams.get("page"));
+  requested.push(pageNumber);
+  return route.fulfill({json:{items:rows.slice((pageNumber-1)*50,pageNumber*50)}});
+ });
+ await page.goto("/settings?section=supplier");
+ await expect.poll(()=>requested).toContain(2);
+ await page.getByRole("searchbox",{name:"仕入れ先を検索"}).fill("最後の仕入れ先");
+ const card=page.locator(".supplier-manager-list li",{hasText:"最後の仕入れ先"});
+ await expect(card).toBeVisible();
+ await card.getByRole("button",{name:"編集"}).click();
+ await expect(card.getByRole("form",{name:"最後の仕入れ先を編集"})).toBeVisible();
+ await expect(card.getByRole("button",{name:/仕入れ先名を音声入力/})).toBeVisible();
+});
