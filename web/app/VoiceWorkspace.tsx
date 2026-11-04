@@ -280,6 +280,12 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
   setSupplierMemo(suppliers.length?(locale==="ja"?`仕入先メモ：${suppliers.join("／")} — 台帳の仕入先連携で登録できます`:`Supplier notes: ${suppliers.join(", ")}`):"");
   setDraftPending(false);transition("browse");feedback(mode==="unconfirmed"?(locale==="ja"?"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"Saved with unconfirmed prices. Only partial food costs are shown."):(locale==="ja"?"レシピを保存しました。":"Recipe saved."));onCreated(recipe);
   }}/></div>
+  {(micRecording||(mode!=="create"&&(micBusy||routing)))&&
+   <ul className="voice-status-list" role="status" aria-live="polite" aria-label={locale==="ja"?"音声処理状況":"Voice processing status"}>
+    <li className="status-voice"><span className="status-symbol" aria-hidden="true">♩</span>
+     <span className="status-detail"><span className="status-label">{micBusy?(locale==="ja"?"文字起こし中…":"Transcribing…"):routing?(locale==="ja"?"音声指示を処理中…":"Processing voice command…"):(locale==="ja"?"音声受付中…":"Listening…")}</span><span className="status-track" aria-hidden="true"><span/></span></span>
+    </li>
+   </ul>}
   <nav aria-label={locale==="ja"?"主要":"Primary"} className="bottom-nav">
    <a href="#top"><NavIcon name="home"/><span>{locale==="ja"?"ホーム":"Home"}</span></a>
    <a href="#recipes"><NavIcon name="recipes"/><span>{locale==="ja"?"レシピ":"Recipes"}</span></a>
