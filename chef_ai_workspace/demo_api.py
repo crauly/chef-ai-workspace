@@ -650,7 +650,10 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
     # The Supabase create_owned_recipe RPC requires initial revision 0.
     recipe = replace(recipe, revision=0)
     try:
-        snapshot = _json(asdict(calculate_cost(recipe, catalog, unit_factor_catalog(known_units))))
+        price_loader = getattr(repository, "load_owned_supplier_prices", None)
+        supplier_prices = price_loader(owner, recipe) if callable(price_loader) else {}
+        snapshot = _json(asdict(calculate_cost(
+            recipe, catalog, unit_factor_catalog(known_units), supplier_prices)))
         repository.create_owned_recipe(owner, recipe, snapshot, unit_candidates=new_units,
                                        ingredient_entries=ingredient_entries)
     except ValueError as exc:
