@@ -6,7 +6,7 @@ import {request, type AIProposal, type Operation, type Recipe} from "./types";
 import {voiceCommand} from "./voice-commands";
 import type {VoiceCaptureMeta} from "./useVoiceCapture";
 
-type Review = {proposal: AIProposal; instruction: string; requestId: string};
+type Review = {proposal: AIProposal; instruction: string; requestId: string; evidence?:string[]};
 function describe(recipe: Recipe, operations: Operation[], locale: Locale): string[] | null {
   const ja = locale === "ja";
   const lines = new Map(recipe.materials.map(line => [line.id, {...line}]));
@@ -85,6 +85,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
       // numerical mutation. Scope is resolved dynamically against live rows.
       const researchRequested=/(調べ|検索|相場|市場価格|参考価格|仮単価|平均価格|最安|価格比較|price research|market price|average price|look up.*price|check.*price|research.*price|compare prices)/i.test(text);
       let researchNotice="";
+      let evidence:string[]|undefined;
       let proposal:AIProposal;
       if(researchRequested){
         const result=await request<{indices:number[];operations:Operation[];results:{name:string;status:string;description:string}[];ambiguous:boolean}>("/api/recipe-price-research",{
@@ -94,6 +95,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
           setNotice(locale==="ja"?"調査対象を特定できませんでした。食材名・範囲、または「すべて」を指定してください。":"Could not determine the target rows. Name ingredients, a range, or all.");
           return;
         }
+        evidence=result.results.map(item=>`${item.name}: ${item.description}`);
         const skipped=result.results.filter(item=>item.status!=="candidate");
         researchNotice=(locale==="ja"?`調査対象${result.indices.length}品・仮単価候補${result.operations.length}品。`:`Researched ${result.indices.length} ingredients; ${result.operations.length} provisional candidates.`)+
           (skipped.length?(locale==="ja"?" 候補未取得："+skipped.map(item=>item.name).join("、"):" No usable quote: "+skipped.map(item=>item.name).join(", ")):"");
@@ -107,7 +109,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
       if (proposal.recipe_id !== base.id) throw new Error("invalid");
       if (proposal.base_revision !== base.revision) {await refreshAfterConflict(); return;}
       if (describe(base, proposal.operations, locale) === null) throw new Error("invalid");
-      const next={proposal,instruction:text,requestId:crypto.randomUUID()};reviewRef.current=next;setReview(next);
+      const next:Review={proposal,instruction:text,requestId:crypto.randomUUID(),evidence};reviewRef.current=next;setReview(next);
       reviewEpoch.current=markReview?.()??-1;
       setNotice(researchNotice+" "+(locale==="ja"?"変更案を表示しました。差分を確認後、もう一度「保存してください」と明示するか、確認チェックと保存ボタンを操作してください。":"Review the proposal, then explicitly request saving or use the approval controls."));
     } catch (e) {report(e);} finally {working(false);}
@@ -168,6 +170,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
       {review.proposal.provider && <p className="tag">{review.proposal.provider.name === "meta_responses" ? "Meta Muse" : (locale === "ja" ? "代替モデル" : "Substitute model")} · {review.proposal.provider.model}</p>}
       {!valid ? <p role="alert">{t("staleProposal")}</p> : changes?.length ? <>
         <ol>{changes.map((change, i) => <li key={i}>{change}</li>)}</ol>
+        {review.evidence?.length ? <details open><summary>{locale==="ja"?"調査根拠・未取得の理由":"Research evidence and unavailable quotes"}</summary><ul>{review.evidence.map((entry,i)=><li key={i}>{entry}</li>)}</ul></details>:null}
         <p>{t("proposalOnly")}</p>
         <label className="approval"><input type="checkbox" checked={approved} disabled={busy} onChange={e => setApproved(e.target.checked)}/>{t("approveValues")}</label>
         <div className="actions"><button type="button" disabled={busy || !approved} onClick={() => void confirm()}>{t("confirmSave")}</button>
