@@ -182,3 +182,17 @@ test("clearing a supplier applies before the market price edit", async ({page}) 
   expect(operations.map(op => op.op)).toEqual(["set_material_supplier", "set_material_price"]);
   await expect(detail.getByText(/仕入単価.*1200/)).toBeVisible();
 });
+
+test("independent detail route keeps selected recipe bound to voice edit", async ({page}) => {
+ const detail = await openDetail(page);
+ await expect(page).toHaveURL(/\/recipes\/[^/]+$/);
+ await expect(page.locator(".recipe-library-section")).toHaveCount(0);
+ await expect(detail.getByRole("heading", {name: "片栗粉のレシピ"})).toBeVisible();
+ await detail.getByRole("button", {name: "🎙 音声でレシピを修正"}).click();
+ await expect(page.locator("#voice-controls")).toBeVisible();
+ await expect(page.locator("#voice-controls")).toContainText("片栗粉のレシピ");
+ await expect(page.getByRole("button", {name: /音声操作を開始/})).toBeVisible();
+ await page.reload();
+ await expect(page.locator(".recipe-library-section")).toHaveCount(0);
+ await expect(page.getByRole("heading", {name: "片栗粉のレシピ"})).toBeVisible();
+});
