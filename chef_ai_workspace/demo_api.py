@@ -1555,3 +1555,57 @@ def update_demo_notification(notification_id: UUID,
             raise HTTPException(404, "Notification not found or inaccessible") from exc
         raise HTTPException(422, message) from exc
     return _json(updated)
+
+
+# Device-independent generated illustration persistence (separate from the
+# recipe's business mutations). Demo owner is verified by demo_context.
+class DishImageBody(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    image: str = Field(min_length=40,max_length=5600000)
+
+
+@router.get("/recipes/{recipe_id}/dish-image")
+def get_demo_dish_image(recipe_id:UUID,ctx=Depends(demo_context)):
+    import base64
+    owner,repo=ctx
+    getter=getattr(repo,"load_owned_dish_image",None)
+    if not callable(getter):
+        raise HTTPException(503,"Dish images unavailable")
+    try:
+        image=getter(owner,str(recipe_id))
+    except ValueError:
+        raise HTTPException(404,"Recipe not found")
+    if image is None:
+        raise HTTPException(404,"No saved dish image")
+    return {"image":"data:"+image["mime_type"]+";base64,"+
+            base64.b64encode(image["bytes"]).decode("ascii")}
+
+
+@router.post("/recipes/{recipe_id}/dish-image")
+def save_demo_dish_image(recipe_id:UUID,body:DishImageBody,ctx=Depends(demo_context)):
+    import base64
+    import binascii
+    import re
+    owner,repo=ctx
+    match=re.fullmatch(r"data:(image/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+={0,2})",body.image)
+    if not match:
+        raise HTTPException(422,"Invalid image")
+    try:
+        image=base64.b64decode(match.group(2),validate=True)
+    except (ValueError,binascii.Error):
+        raise HTTPException(422,"Invalid image")
+    if not image or len(image)>4194304:
+        raise HTTPException(413,"Image too large")
+    mime=match.group(1)
+    if not ((mime=="image/png" and image.startswith(b"\\x89PNG\\r\\n\\x1a\\n")) or
+            (mime=="image/jpeg" and image.startswith(b"\\xff\\xd8\\xff")) or
+            (mime=="image/webp" and len(image)>=12 and image[:4]==b"RIFF" and image[8:12]==b"WEBP")):
+        raise HTTPException(422,"Image type mismatch")
+    saver=getattr(repo,"save_owned_dish_image",None)
+    if not callable(saver):
+        raise HTTPException(503,"Dish images unavailable")
+    try:
+        saver(owner,str(recipe_id),mime,image)
+    except ValueError:
+        raise HTTPException(404,"Recipe not found")
+    return {"saved":True}
