@@ -16,7 +16,7 @@ test("generated image appears in recipe list on the same origin, survives reload
  const detail=page.getByRole("region",{name:"料理イメージ"});
  await detail.getByRole("button",{name:"✦ 料理画像を生成"}).click();
  await expect(detail.getByText("このブラウザに自動保存済み")).toBeVisible();
- await page.getByRole("button",{name:"← レシピ一覧"}).click();
+ await page.getByRole("button",{name:"← ホーム"}).click();
  await expect(page.getByRole("button",{name:`${named}の詳細を開く`}).locator(".recipe-list-thumbnail img")).toHaveAttribute("src",IMG);
  await expect(page.getByRole("button",{name:"ミートソースパスタの詳細を開く"}).locator(".recipe-list-thumbnail img")).toHaveCount(0);
  await page.reload();
