@@ -26,6 +26,8 @@ test("voice recipe with unknown prices saves explicitly as price-unconfirmed",as
  expect(saved).toBe(0);
  // One explicit save commits with prices omitted, not zero-filled.
  await entry.fill("保存してください");await page.getByRole("button",{name:"反映"}).click();
+ await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
+ await page.getByRole("button", {name: "← レシピ一覧"}).click();
  await expect(page.getByRole("region",{name:"音声操作モード"}).getByText("価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。")).toBeVisible();
  expect(saved).toBe(1);
 });
@@ -52,6 +54,8 @@ test("a confirmed voice recipe with a spoken supplier saves without 422 and keep
  // One explicit save commits the confirmed draft and hands the spoken
  // purchase source to the ledger path as a memo.
  await entry.fill("保存してください"); await page.getByRole("button", {name: "反映"}).click();
+ await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
+ await page.getByRole("button", {name: "← レシピ一覧"}).click();
  await expect(page.getByRole("region", {name: "音声操作モード"}).getByText(/仕入先メモ：築地場外/)).toBeVisible();
  expect(saved).toBe(1);
  // The save boundary strips the ledger-only field instead of failing 422.

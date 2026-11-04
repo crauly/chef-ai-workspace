@@ -400,6 +400,8 @@ test("successful save clears the price failure for the next recipe", async ({pag
   await expect(page.getByText("価格検索に失敗しました")).toBeVisible({timeout: 8000});
   // One explicit registration saves the price-unconfirmed draft directly.
   await page.getByRole("button", {name: "レシピを登録"}).click();
+ await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
+ await page.getByRole("button", {name: "← レシピ一覧"}).click();
   await expect(page.getByRole("region",{name:"音声操作モード"}).getByText("価格未確定として保存しました。")).toBeVisible({timeout: 8000});
   // Next recipe with no research inherits no failure from the previous one.
   // Saving leaves registration mode, so return via the Create tab first.

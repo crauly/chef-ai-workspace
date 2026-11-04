@@ -13,7 +13,7 @@ for(const command of ["登録","登録してください","レシピを登録し
   await type(page,"内容を確認");
   await expect(page.getByRole("button",{name:"レシピを登録",exact:true})).toBeEnabled();
   expect(saves).toBe(0);await type(page,command);
-  await expect(page.getByRole("region",{name:"音声操作モード"})).toContainText("レシピを保存しました。");
+  await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
   expect(saves).toBe(1);expect(parses).toBe(1);
  });
 }
@@ -26,7 +26,7 @@ test("nothing saves without an explicit registration action and a negative reque
  await type(page,"登録しないでください");expect(saves).toBe(0);
  await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("パスタ");
  await type(page,"登録");
- await expect(page.getByRole("region",{name:"音声操作モード"})).toContainText("レシピを保存しました。");
+ await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
  expect(saves).toBe(1);
 });
 

@@ -28,6 +28,6 @@ test("full recipe voice dialogue requires an explicit action before one atomic s
  expect(saved).toBe(0);
  // One explicit registration commits the eligible draft atomically.
  await entry.fill("登録を確定");await page.getByRole("button",{name:"反映"}).click();
- await expect(page.getByText("レシピを保存しました。")).toBeVisible();
+ await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
  expect(saved).toBe(1);
 });

@@ -1,8 +1,9 @@
+import {voiceInput} from "./voice-input";
 import {test,expect,type Page} from "@playwright/test";
 import {voiceNavigation,explicitEditRequest} from "../app/voice-navigation";
 
 const recipeDraft={title:"片栗粉のレシピ",materials:[{name:"片栗粉",quantity:"10",unit:"g",price_jpy:"1000",price_quantity:"1",price_unit:"kg"}],selling_price_jpy:"1000",missing:[],notes:[]};
-async function type(page:Page,text:string){await page.getByLabel("音声認識できない場合の入力").fill(text);await page.getByRole("button",{name:"反映",exact:true}).click();}
+const type = voiceInput;
 test.beforeEach(async({request})=>{await request.post("http://127.0.0.1:8100/test/reset");});
 
 test("navigation matches whole requests and leaves quantities, negation and quoted names as data",()=>{
@@ -50,12 +51,12 @@ test("one uninterrupted microphone creates, reviews, saves, browses and edits wi
   await page.evaluate(()=>(window as unknown as {unifiedMic:{gain:GainNode}}).unifiedMic.gain.gain.value=0);
   await expect.poll(()=>transcribed).toBe(expected);
  }
- await speak("レシピを登録します");await expect(page.getByRole("region",{name:"音声操作モード"})).toContainText("現在のモード: 登録");expect(parses).toBe(0);
+ await speak("レシピを登録します");await expect(page.locator("#voice-controls")).toContainText("現在のモード: 登録");expect(parses).toBe(0);
  await speak("片栗粉のレシピ、片栗粉10g、1kg1000円、売価1000円");await expect(page.getByLabel("未保存のレシピ下書き")).toBeVisible();
  await speak("内容を確認");await expect(page.getByRole("button",{name:"レシピを登録",exact:true})).toBeEnabled();expect(full).toBe(0);
- await speak("保存してください");await expect(page.getByRole("region",{name:"音声操作モード"})).toContainText("レシピを保存しました。");expect(full).toBe(1);
+ await speak("保存してください");await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();expect(full).toBe(1);
  await speak("片栗粉のレシピを見せて");await expect(page.getByRole("region",{name:"Recipe cost summary"})).toContainText("¥10");
- await speak("片栗粉を15gに変更");await expect(page.getByRole("region",{name:"音声操作モード"})).toContainText("現在のモード: 編集");
+ await speak("片栗粉を15gに変更");await expect(page.locator("#voice-controls")).toContainText("現在のモード: 編集");
  await expect(page.getByLabel("提案の差分")).toBeVisible();
  expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).confirms).toHaveLength(0);
  await speak("保存してください");await expect(page.getByRole("region",{name:"Recipe cost summary"})).toContainText("¥15");
@@ -76,7 +77,7 @@ test("switching preserves registration draft and refuses to lose an unapproved e
  await expect(page.getByRole("button",{name:"レシピを登録",exact:true})).toBeEnabled();
  await type(page,"片栗粉のレシピを見せて");await expect(page.getByRole("region",{name:"Recipe cost summary"})).toBeVisible();
  await type(page,"片栗粉を15gに変更");await expect(page.getByLabel("提案の差分")).toBeVisible();
- await type(page,"新しいメニュー");await expect(page.getByRole("region",{name:"音声操作モード"})).toContainText("未保存の変更案があります");
+ await type(page,"新しいメニュー");await expect(page.locator("#voice-controls")).toContainText("未保存の変更案があります");
  await expect(page.getByLabel("提案の差分")).toBeVisible();
  await type(page,"変更案を破棄");await type(page,"新しいメニュー");await expect(page.getByLabel("未保存のレシピ下書き")).toBeVisible();
  expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).confirms).toHaveLength(0);
@@ -85,13 +86,13 @@ test("switching preserves registration draft and refuses to lose an unapproved e
 test("ambiguous navigation stays put; a named edit resolves the recipe without writing",async({page,request})=>{
  await page.route("**/api/intent",route=>route.fulfill({json:{intent:"clarify",target:""}}));
  await page.goto("/");await type(page,"レシピを参照したいような、登録したいような");
- await expect(page.getByRole("region",{name:"音声操作モード"})).toContainText("切り替え先を確認できませんでした");
- await expect(page.getByRole("region",{name:"音声操作モード"})).toContainText("現在のモード: 待機");
+ await expect(page.locator("#voice-controls")).toContainText("切り替え先を確認できませんでした");
+ await expect(page.locator("#voice-controls")).toContainText("現在のモード: 待機");
  await type(page,"片栗粉のレシピを見せて");await expect(page.getByRole("region",{name:"Recipe cost summary"})).toBeVisible();
- await type(page,"ありがとう");await expect(page.getByRole("region",{name:"音声操作モード"})).toContainText("参照モードのままです");
- await expect(page.getByRole("region",{name:"音声操作モード"})).toContainText("現在のモード: 参照");
+ await type(page,"ありがとう");await expect(page.locator("#voice-controls")).toContainText("参照モードのままです");
+ await expect(page.locator("#voice-controls")).toContainText("現在のモード: 参照");
  await type(page,"片栗粉のレシピを編集して");
- await expect(page.getByRole("region",{name:"音声操作モード"})).toContainText("現在のモード: 編集");
+ await expect(page.locator("#voice-controls")).toContainText("現在のモード: 編集");
  await expect(page.getByRole("region",{name:"Recipe cost summary"})).toContainText("¥10");
  expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).confirms).toHaveLength(0);
 });
@@ -103,7 +104,7 @@ test("approval queued before an edit proposal is displayed cannot approve that p
  await page.goto("/");await type(page,"片栗粉のレシピを見せて");await expect(page.getByRole("region",{name:"Recipe cost summary"})).toBeVisible();
  await type(page,"片栗粉を15gに変更");await sending;
  await type(page,"保存してください");release();await expect(page.getByLabel("提案の差分")).toBeVisible();
- await expect(page.getByRole("region",{name:"音声操作モード"})).not.toContainText("操作を処理中");
+ await expect(page.locator("#voice-controls")).not.toContainText("操作を処理中");
  expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).confirms).toHaveLength(0);
  await type(page,"保存してください");await expect(page.getByRole("region",{name:"Recipe cost summary"})).toContainText("¥15");
  expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).confirms).toHaveLength(1);

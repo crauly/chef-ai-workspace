@@ -160,7 +160,7 @@ test("real Web Audio capture sends WAV through transcription, review and explici
   await expect(page.getByRole("button", {name: "レシピを登録"})).toBeEnabled();
   expect(saved).toBe(0);
   await recordTurn();
-  await expect(page.getByText("レシピを保存しました。")).toBeVisible();
+  await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
   expect(saved).toBe(1); expect(transcribed).toBe(3);
 });
 

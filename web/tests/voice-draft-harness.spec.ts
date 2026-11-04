@@ -1,13 +1,11 @@
+import {voiceInput} from "./voice-input";
 import {test,expect,type Page} from "@playwright/test";
 
 const draft={title:"アマトリチャーナ",materials:[
  {name:"乾燥パスタ",quantity:"100",unit:"g",price_jpy:"350",price_quantity:"500",price_unit:"g"},
  {name:"トマト",quantity:"200",unit:"g",price_jpy:"300",price_quantity:"1",price_unit:"kg"},
 ],selling_price_jpy:"",notes:[],missing:[],interpretations:[]};
-async function input(page:Page,text:string){
- await page.getByLabel("音声認識できない場合の入力").fill(text);
- await page.getByRole("button",{name:"反映",exact:true}).click();
-}
+const input = voiceInput;
 test.beforeEach(async({request})=>{await request.post("http://127.0.0.1:8100/test/reset");});
 const starchDraft={title:"片栗粉のレシピ",materials:[{name:"片栗粉",quantity:"10",unit:"g",price_jpy:"1000",price_quantity:"1",price_unit:"kg"}],selling_price_jpy:"1000",missing:[],notes:[]};
 
@@ -33,7 +31,7 @@ test("draft survives browse transition and review routes back to the draft",asyn
  expect(parses).toBe(1);
  // An explicit save after the presented review commits through the normal gate.
  await input(page,"保存してください");
- await expect(page.getByText("レシピを保存しました。")).toBeVisible();
+ await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
  expect(saves).toBe(1);
 });
 
@@ -104,7 +102,7 @@ test("a correction resets the presented review and a saved draft never double-sa
  await expect(page.getByRole("button",{name:"レシピを登録",exact:true})).toBeEnabled();
  expect(saves).toBe(0);
  await input(page,"保存してください");
- await expect(page.getByText("レシピを保存しました。")).toBeVisible();
+ await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
  expect(saves).toBe(1);
  await input(page,"保存してください");
  await page.waitForTimeout(500);

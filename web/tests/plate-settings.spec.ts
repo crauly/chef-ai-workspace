@@ -197,9 +197,8 @@ test("detail section without a plate reports standard generation and sends no ph
 
 test("two registered plates can be chosen per recipe, including no plate", async ({page}) => {
  await page.setViewportSize({width: 390, height: 844});
- await page.goto("/settings");
- const settings=page.locator("details.plate-settings");
- await settings.locator("summary").click();
+ await page.goto("/settings?section=plate");
+ const settings=page.locator(".plate-settings-body");
  const file=settings.locator('input[type="file"]');
  for(const [name, url] of [["白皿", TINY_PNG], ["黒皿", KURO_PNG]] as const){
   await settings.getByPlaceholder(/白い丸皿/).fill(name);
