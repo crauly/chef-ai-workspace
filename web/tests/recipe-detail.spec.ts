@@ -443,3 +443,15 @@ test("stale research refreshes the selected recipe and requires a new proposal",
  await expect(page.getByText("最新のレシピを取得しました。変更案を作り直してください。")).toBeVisible();
  await expect(page.locator(".proposal")).toHaveCount(0);expect(reads).toBeGreaterThanOrEqual(2);
 });
+
+test("material cost display rounds to one decimal without changing backend values",async({page})=>{
+ const recipeId="11111111-1111-4111-8111-111111111111";
+ await page.route(`**/api/recipes/${recipeId}/cost`,route=>
+  route.fulfill({json:{
+   total_cost_jpy:"28.888888888888889",subtotal_jpy:"28.888888888888889",
+   cost_rate_pct:null,partial:false,line_costs:{},unresolved_line_ids:[]
+  }}));
+ const detail=await openDetail(page);
+ await expect(detail.getByRole("region",{name:"Recipe cost summary"})).toContainText("¥28.9");
+ await expect(detail.getByRole("region",{name:"Recipe cost summary"})).not.toContainText("28.88888");
+});
