@@ -51,6 +51,38 @@ class CostTests(unittest.TestCase):
         self.assertEqual(line.material_name.value, "でんぷん")
         self.assertEqual(result.line_price_sources["m1"], "shared_ingredient")
 
+    def test_supplier_selection_changes_current_cost_without_changing_ingredient_id(self):
+        line = MaterialLine("m1", known("トマト水煮"), known("500"), "g",
+                            ingredient_id="i1", supplier_id="sup-a", price_mode="inherit")
+        product = Ingredient("i1", "トマト水煮", quote("1800", "3500", "g"))
+        suppliers = {("i1", "sup-a"): quote("1800", "3500", "g"),
+                     ("i1", "sup-b"): quote("1650", "3500", "g")}
+        a = _calculate_cost(recipe(line), {"i1": product}, UNITS, suppliers)
+        b = _calculate_cost(recipe(replace(line, supplier_id="sup-b")),
+                            {"i1": product}, UNITS, suppliers)
+        self.assertEqual(a.line_costs["m1"], Decimal("500") * Decimal("1800") / 3500)
+        self.assertEqual(b.line_costs["m1"], Decimal("500") * Decimal("1650") / 3500)
+        self.assertEqual(line.ingredient_id, "i1")
+
+    def test_missing_supplier_price_does_not_fall_back_to_shared_or_market_quote(self):
+        line = MaterialLine("m1", known("トマト水煮"), known("500"), "g",
+                            ingredient_id="i1", supplier_id="sup-a", price_mode="inherit")
+        product = Ingredient("i1", "トマト水煮", quote("1650", "3500", "g"))
+        result = _calculate_cost(recipe(line), {"i1": product}, UNITS, {})
+        self.assertTrue(result.partial)
+        self.assertIsNone(result.total_cost_jpy)
+        shared = _calculate_cost(recipe(replace(line, supplier_id=None)),
+                                 {"i1": product}, UNITS, {})
+        self.assertFalse(shared.partial)
+
+    def test_supplier_price_incompatible_unit_is_partial(self):
+        line = MaterialLine("m1", known("鶏卵"), known("1"), "個",
+                            ingredient_id="i1", supplier_id="sup-a", price_mode="inherit")
+        product = Ingredient("i1", "鶏卵", quote("300", "10", "個"))
+        result = _calculate_cost(recipe(line), {"i1": product}, UNITS,
+                                 {("i1", "sup-a"): quote("300", "1", "パック")})
+        self.assertTrue(result.partial)
+
     def test_unsupported_unit_is_partial(self):
         line = MaterialLine("m1", known("海老"), known("3"), "尾", price_override=quote("300", "100", "g"))
         self.assertTrue(calculate_cost(recipe(line)).partial)
