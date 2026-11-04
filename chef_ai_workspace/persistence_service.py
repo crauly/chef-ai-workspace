@@ -199,13 +199,20 @@ def save_recipe_with_ledger(*, owner_id: str, trusted_user_confirmed: bool,
         quotes = {}
         for line in candidate.materials:
             if line.price_mode == "inherit":
-                ingredient = effective.get(line.ingredient_id or "")
-                quote = ingredient.current_price if ingredient is not None else None
+                if line.offer_id:
+                    quote = supplier_prices.get((line.ingredient_id, line.offer_id))
+                elif line.supplier_id:
+                    quote = supplier_prices.get((line.ingredient_id, line.supplier_id))
+                else:
+                    ingredient = effective.get(line.ingredient_id or "")
+                    quote = ingredient.current_price if ingredient is not None else None
             else:
                 quote = line.price_override
             quotes[line.id] = {
                 "price_mode": line.price_mode,
                 "ingredient_id": line.ingredient_id,
+                "supplier_id": line.supplier_id,
+                "offer_id": line.offer_id,
                 "effective_quote": asdict(quote) if quote is not None else None,
             }
         snapshot["effective_quotes"] = quotes
@@ -289,22 +296,30 @@ def save_validated_mutation(*, owner_id: str, trusted_user_confirmed: bool,
         from .costing import unit_factor_catalog
         unit_loader = getattr(repository, "list_owned_units", None)
         units = unit_factor_catalog(unit_loader(owner_id)) if callable(unit_loader) else {}
-        cost = calculate_cost(candidate, catalog, units)
+        price_loader = getattr(repository, "load_owned_supplier_prices", None)
+        supplier_prices = price_loader(owner_id, candidate) if callable(price_loader) else {}
+        cost = calculate_cost(candidate, catalog, units, supplier_prices)
     except ValueError as exc:
         raise MutationError(str(exc)) from exc
     snapshot = asdict(cost)
-    # Resolve actual effective quotes when saving, not just the line costs.
     if save_version:
         quotes = {}
         for line in candidate.materials:
             if line.price_mode == "inherit":
-                ingredient = (catalog or {}).get(line.ingredient_id or "")
-                quote = ingredient.current_price if ingredient is not None else None
+                if line.offer_id:
+                    quote = supplier_prices.get((line.ingredient_id, line.offer_id))
+                elif line.supplier_id:
+                    quote = supplier_prices.get((line.ingredient_id, line.supplier_id))
+                else:
+                    ingredient = (catalog or {}).get(line.ingredient_id or "")
+                    quote = ingredient.current_price if ingredient is not None else None
             else:
                 quote = line.price_override
             quotes[line.id] = {
                 "price_mode": line.price_mode,
                 "ingredient_id": line.ingredient_id,
+                "supplier_id": line.supplier_id,
+                "offer_id": line.offer_id,
                 "effective_quote": asdict(quote) if quote is not None else None,
             }
         snapshot["effective_quotes"] = quotes
