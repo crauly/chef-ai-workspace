@@ -757,8 +757,12 @@ def _complete_demo_recipe(body: CompleteRecipeBody, ctx, review_only=False):
             # approved recipe save. Create a distinct master rather than silently
             # linking to a different product or inheriting its purchase price.
             # Truly ambiguous exact identities still require a choice.
-            if plan["action"]=="choose" and not finder(owner,name):
-                plan={**plan,"action":"create","candidates":[]}
+            if plan["action"]=="choose":
+                exact=finder(owner,name)
+                if material.spec is not None:
+                    exact=[row for row in exact if (row.get("spec") or "").strip().casefold()==material.spec.strip().casefold()]
+                if not exact:
+                    plan={**plan,"action":"create","candidates":[]}
             if plan["action"]=="choose" and not review_only:
                 raise HTTPException(409,"Choose an ingredient master before saving")
             ing_id=plan["ingredient_id"] or str(uuid4())

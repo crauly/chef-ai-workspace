@@ -205,6 +205,46 @@ class VoiceFullRecipeTests(unittest.TestCase):
         self.assertTrue(all(m['action']=='reuse' for m in again.json()['ingredients']))
         self.assertEqual(self.repo.writes,1)
 
+    def test_similarity_only_creates_a_distinct_master_and_retries_once(self):
+        from chef_ai_workspace.models import Ingredient,PriceQuote,TrackedValue
+        from chef_ai_workspace.ingredient_assist import match_recipe_master
+        old_id=str(uuid4())
+        old=Ingredient(old_id,"自家製グアンチャーレ",PriceQuote(TrackedValue("999","confirmed","user"),"1","kg","manual"))
+        self.repo.ingredients[old_id]=old
+        self.repo.list_owned_ingredient_master=lambda owner:[{"id":old_id,"name":old.name}]
+        body=self.payload();body["materials"]=body["materials"][:1]
+        review=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(review.status_code,200,review.text)
+        self.assertEqual(review.json()['ingredients'][0]['action'],'create')
+        self.assertEqual(self.repo.writes,0)
+        saved=self.client.post('/demo/recipes/full',json=body,headers=self.headers)
+        self.assertEqual(saved.status_code,201,saved.text)
+        line=saved.json()['materials'][0]
+        self.assertNotEqual(line['ingredient_id'],old_id)
+        self.assertEqual(self.repo.ingredients[old_id],old)
+        self.assertEqual(self.repo.ingredients[line['ingredient_id']].current_price.amount_jpy.value,'1500')
+        again=self.client.post('/demo/recipes/full',json=body,headers=self.headers)
+        self.assertEqual(again.status_code,201,again.text);self.assertEqual(self.repo.writes,1)
+        self.assertEqual(again.json()['materials'][0]['ingredient_id'],line['ingredient_id'])
+        self.assertEqual(match_recipe_master(self.owner,self.repo,'自家製グアンチャーレ薄切り')['action'],'choose')
+
+    def test_spec_filtered_similarity_does_not_block_registration(self):
+        from chef_ai_workspace.models import Ingredient
+        old_id=str(uuid4());self.repo.ingredients[old_id]=Ingredient(old_id,'グアンチャーレ',None)
+        row={"id":old_id,"name":"グアンチャーレ","spec":"旧規格"}
+        self.repo.find_owned_ingredients_exact=lambda owner,name:[row]
+        self.repo.list_owned_ingredient_master=lambda owner:[row]
+        body=self.payload();body['materials']=body['materials'][:1];body['materials'][0]['spec']='新規格'
+        result=self.client.post('/demo/recipes/full',json=body,headers=self.headers)
+        self.assertEqual(result.status_code,201,result.text)
+        self.assertNotEqual(result.json()['materials'][0]['ingredient_id'],old_id)
+
+    def test_exact_duplicate_still_rejects_save_without_writing(self):
+        self.repo.find_owned_ingredients_exact=lambda owner,name:[{'id':'a'},{'id':'b'}]
+        result=self.client.post('/demo/recipes/full',json=self.payload(),headers=self.headers)
+        self.assertEqual(result.status_code,409,result.text)
+        self.assertEqual(self.repo.writes,0)
+
     def test_review_duplicate_master_and_invalid_quantity_never_write(self):
         body=self.payload()
         self.repo.find_owned_ingredients_exact=lambda owner,name:[{'id':'a'},{'id':'b'}]
