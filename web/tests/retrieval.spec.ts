@@ -15,7 +15,7 @@ test("name search reaches the backend beyond the first page, clears and never wr
   await expect(page.locator("section.recipe-detail")).toContainText("¥10");
   const state=await (await request.get("http://127.0.0.1:8100/test/state")).json();
   expect(state.listQueries).toContainEqual({q:"片栗粉",page:1});expect(state.confirms).toHaveLength(0);
-  await page.getByRole("button",{name:"← レシピ一覧"}).click();
+  await page.getByRole("button",{name:"← ホーム"}).click();
   await page.getByRole("button",{name:"検索を解除",exact:true}).click();
   await expect(page.getByRole("button",{name:/の詳細を開く/})).toHaveCount(20);
   await page.getByLabel("レシピ名で検索").fill("存在しない料理");
@@ -46,7 +46,7 @@ test("browse target from the shared microphone is used as the owner-scoped name 
   expect((await (await request.get("http://127.0.0.1:8100/test/state")).json()).confirms).toHaveLength(0);
   // Twenty-one matches: a single item on page two is not a unique recipe.
   // The microphone lives in the browse view: return to the list first.
-  await page.getByRole("button",{name:"← レシピ一覧"}).click();
+  await page.getByRole("button",{name:"← ホーム"}).click();
   await page.route("**/api/intent",route=>route.fulfill({json:{intent:"browse",target:"別の料理"}}));
   await page.route("**/api/voice/transcribe",route=>route.fulfill({json:{transcript:"別の料理のレシピを見せて"}}));
   await page.getByRole("button",{name:"🎙 音声操作を開始",exact:true}).click();
