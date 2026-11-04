@@ -372,6 +372,10 @@ class SupabasePersistence:
                         .eq("owner_id", owner_id).in_("id", ids).execute()).data or []
         by_obs = {o["id"]: o for o in observations}
         from .models import PriceQuote, TrackedValue
+        # Preserve canonical Unit Master identity even for count units whose
+        # conversion factor is intentionally unknown.
+        unit_ids = {row["symbol"]: row["id"]
+                    for row in self.list_owned_units(owner_id)}
         out = {}
         ambiguous = set()
         for offer in selected:
@@ -389,7 +393,8 @@ class SupabasePersistence:
                 out[key] = PriceQuote(
                     amount_jpy=TrackedValue(str(obs["amount_jpy"]), "confirmed", "user"),
                     per_quantity=str(offer["package_quantity"]),
-                    per_unit=str(offer["package_unit"]), source="manual")
+                    per_unit=str(offer["package_unit"]), source="manual",
+                    per_unit_id=unit_ids.get(str(offer["package_unit"])))
             except (ValueError, TypeError):
                 continue
         for key in ambiguous:
