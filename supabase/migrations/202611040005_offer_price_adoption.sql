@@ -117,7 +117,7 @@ begin
        raise exception 'Invalid recipe offer ID';
      end;
      if v_line->>'price_mode' is distinct from 'inherit'
-        or v_line->'price_override' <> 'null'::jsonb
+        or v_line->'price_override' is distinct from 'null'::jsonb
         or nullif(v_line->>'ingredient_id','') is null
         or nullif(v_line->>'supplier_id','') is null
         or not exists(
