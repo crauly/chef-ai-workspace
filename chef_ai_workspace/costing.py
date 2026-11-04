@@ -68,7 +68,11 @@ def calculate_cost(recipe: Recipe, ingredients: Mapping[str, Ingredient] | None 
             ingredient = catalog.get(line.ingredient_id or "")
             # A recipe-selected supplier MUST have its own approved quote.
             # Never silently fall back to another supplier or a market average.
-            if line.supplier_id:
+            if line.offer_id:
+                # The repository verifies offer ownership and parent identity.
+                # An explicit offer must never fall back to a different purchase term.
+                quote = (supplier_prices or {}).get((line.ingredient_id or "", line.offer_id))
+            elif line.supplier_id:
                 quote = (supplier_prices or {}).get((line.ingredient_id or "", line.supplier_id))
             else:
                 quote = ingredient.current_price if ingredient else None
