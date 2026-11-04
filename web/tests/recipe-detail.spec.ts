@@ -396,6 +396,7 @@ test("missing detail recipe shows an error and a usable return path",async({page
  await page.getByRole("button",{name:"← ホーム"}).click();
  await expect(page).toHaveURL("/");
  await expect(page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"})).toBeVisible();
+ await expect(page.locator("#voice-controls")).toContainText("現在のモード: 待機");
 });
 
 test("partial-cost diagnostics honor a stored material price override",async({page})=>{

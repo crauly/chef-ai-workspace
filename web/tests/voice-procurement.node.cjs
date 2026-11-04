@@ -45,3 +45,9 @@ test('NFKC material normalization keeps name-correction references bound to thei
  const result=parseRecipeDraft({title:'料理',materials:[{...material,name:' ｼﾒｼﾞ '}],selling_price_jpy:'',notes:[],name_corrections:[{material_name:' ｼﾒｼﾞ ',heard:'ｼﾒｼﾞ',candidates:[{name:'しめじ',reason:'確認候補'}]}]});
  const correction=result.nameCorrections[0];assert.equal(correction.material_name,'シメジ');assert.equal(result.materials.findIndex(m=>m.name===correction.material_name),0);assert.equal(correction.heard,'ｼﾒｼﾞ');assert.equal(correction.candidates[0].name,'しめじ');
 });
+test('supplier target in a price preview is independent of operation order',()=>{
+ const {describe}=require('../app/AIEditor.tsx');
+ const recipe={id:'recipe',title:{value:'料理'},revision:0,selling_price_jpy:{value:null},materials:[{id:'line',material_name:{value:'食材'},quantity:{value:'10'},unit:'g',price_mode:'inherit',supplier_id:'old',supplier_name:'旧仕入先',effective_price:{amount_jpy:{value:'300'},per_quantity:'1',per_unit:'kg'}}]};
+ const result=describe(recipe,[{op:'set_material_price',material_id:'line',price_jpy:'500',price_quantity:'1',price_unit:'kg'},{op:'set_material_supplier',material_id:'line',supplier_id:'new'}],'ja',{new:'東京市場'});
+ assert.match(result.changes.find(s=>s.includes('¥500')),/東京市場/);
+});

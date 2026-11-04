@@ -175,6 +175,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  const capture=useVoiceCapture(locale,enqueue,true);
  const voice={...capture,...sharedVoice};
  useImperativeHandle(control,()=>({submit:enqueue,hasPending:()=>Boolean(dataTurns.current.length||inbox.current.length||draftRef.current),isSaving:()=>phaseRef.current==="saving",requestReview:()=>{showReview();},suspend:()=>{
+  if(phaseRef.current==="saving")return;
   if(draftRef.current||dataTurns.current.length)saveEpochFloor.current=voice.markReview();reviewed.current=null;inbox.current=inbox.current.filter(input=>input.command==="data");setStage("dictating");
  }}));
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;semanticAbort.current?.abort();priceAbort.current?.abort();photoAbort.current?.abort();dishAbort.current?.abort();inbox.current=[];};},[]);

@@ -88,12 +88,13 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
   wasRecording.current=micRecording;
  },[micRecording,failureKey,micError,volume]);
  useEffect(()=>{
-  if(selected?.id!==previousTarget.current){
+  if(selected?.id!==previousTarget.current||!selected){
    if(selected?.id){if(currentMode.current==="browse")modeBoundary.current=mark();else transition("browse");feedback("参照モードです。表示中のレシピの変更内容を話すと編集へ進みます。");}
+   else if(detailOnly){if(currentMode.current==="browse")modeBoundary.current=mark();else transition("browse");}
    else if(currentMode.current!=="create"){transition("idle");}
   }
   previousTarget.current=selected?.id;
- },[selected?.id]);
+ },[selected?.id,detailOnly]);
  function mark(){boundary.current=voice.markReview();return boundary.current;}
  reviewBoundary.current=mark;
  // A detail-page edit request uses the same guarded transition as the mode button.
@@ -191,6 +192,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
  function receive(text:string,meta?:VoiceCaptureMeta){
   if(!text.trim())return;
   setHeard(text);
+  if(detailOnly&&!selectedRef.current){feedback(locale==="ja"?"対象のレシピを取得中、または取得できていません。表示を確認してからもう一度指示してください。":"The target recipe is loading or unavailable. Wait for it to display before repeating the request.",true);return;}
   logVoiceEvent("transcript.received","queued for interpretation",meta?.traceId??"");
   if(registration.current?.isSaving()){feedback("承認された下書きを保存中です。完了後に続きをお願いします。",true);return;}
   const captured:VoiceCaptureMeta={reviewEpoch:meta?.reviewEpoch??boundary.current,traceId:meta?.traceId??newTrace(),source:meta?.source,utteranceId:meta?.utteranceId};
@@ -321,6 +323,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
   <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} onDiscarded={()=>setDraftPending(false)} sharedVoice={{markReview:mark,cancel:()=>{},mic:realtimeActive?{recording:realtime.recording,transcribing:false,queued:0}:{recording:voice.recording,transcribing:voice.busy||voice.queued>0,queued:voice.queued},captureMessage:micRecording?"音声受付中です。「保存」と話すと、数量・価格などが未確定でも現在の内容を保存します。":micBusy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${micError||micNotice||""}`}} onCreated={(recipe,mode,suppliers)=>{
    // The formal save has already committed supplier links. Keep their names
    // for feedback when the registration panel switches back to browse.
+  if(currentMode.current!=="create"||window.location.pathname!==(detailOnly&&selected?`/recipes/${encodeURIComponent(selected.id)}`:"/")){setDraftPending(false);return;}
   setSupplierMemo(suppliers.length?(locale==="ja"?`保存した仕入れ先：${suppliers.join("／")}`:`Saved suppliers: ${suppliers.join(", ")}`):"");
   setDraftPending(false);transition("browse");feedback(mode==="unconfirmed"?(locale==="ja"?"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"Saved with unconfirmed prices. Only partial food costs are shown."):(locale==="ja"?"レシピを保存しました。":"Recipe saved."));onCreated(recipe);
   }}/></div>

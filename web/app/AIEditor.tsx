@@ -33,7 +33,10 @@ export function describe(recipe: Recipe, operations: Operation[], locale: Locale
         if (!line) return null;
         const p = line.effective_price??line.price_override;
         const before = line.price_mode === "inherit" && !p ? (ja ? "共通食材の単価" : "Shared ingredient price") : p ? `¥${p.amount_jpy.value ?? "—"} / ${p.per_quantity} ${p.per_unit}` : "—";
-        changes.push(`${line.material_name.value || label(locale, "unnamed")} · ${line.supplier_name??(ja?"相場参考価格":"Market reference")} · ${ja ? "単価" : "Price"}: ${before} → ¥${op.price_jpy} / ${op.price_quantity} ${op.price_unit}`);
+        const target=[...operations].reverse().find(item=>item.op==="set_material_supplier"&&item.material_id===line.id);
+        const supplier=target?(target.supplier_id?(supplierNames[target.supplier_id]||(target.supplier_id===line.supplier_id?line.supplier_name:null)):(ja?"相場参考価格":"Market reference")):(line.supplier_name??(ja?"相場参考価格":"Market reference"));
+        if(!supplier)return null;
+        changes.push(`${line.material_name.value || label(locale, "unnamed")} · ${supplier} · ${ja ? "単価" : "Price"}: ${before} → ¥${op.price_jpy} / ${op.price_quantity} ${op.price_unit}`);
         const quote={amount_jpy:{value:op.price_jpy,status:"assumed"},per_quantity:op.price_quantity,per_unit:op.price_unit};
         lines.set(line.id, {...line, price_mode: "override", price_override:quote,effective_price:quote}); break;
       }
@@ -101,11 +104,13 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
   async function refreshAfterConflict() {
     invalidate();
     const latest = await request<Recipe>(`/api/recipes/${recipe.id}`);
+    if(!alive.current||window.location.pathname!==`/recipes/${encodeURIComponent(recipe.id)}`)return;
     onSaved(latest);
     setError(locale === "ja" ? "最新のレシピを取得しました。変更案を作り直してください。" : "Recipe refreshed. Request a new proposal.");
   }
-  function working(value: boolean) {lock.current = value; setBusy(value); onBusy(value);}
+  function working(value: boolean) {lock.current = value;if(!alive.current)return;setBusy(value);onBusy(value);}
   function report(e: unknown, uncertainSave = false) {
+    if(!alive.current)return;
     const status = e instanceof Error ? e.message : "";
     if(status==="Too many operations; split the edits"){setError(locale==="ja"?"1回の承認は40操作までです。調査対象と他の変更を分けてください。":"Approval supports 40 operations. Split the research and other edits.");return;}
     if(status==="unsupported combined edit"){setError(locale==="ja"?"食材の追加などは価格調査と分けて指示してください。保存していません。":"Request ingredient additions separately from price research. Nothing was saved.");return;}
@@ -120,6 +125,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
   }
   async function proposeText(text:string,showConfirmation=false) {
     if (lock.current || !text.trim()) return;
+    if(window.location.pathname!==`/recipes/${encodeURIComponent(recipe.id)}`){setNotice(locale==="ja"?"対象のレシピを表示してから変更を指示してください。":"Wait for the target recipe before requesting changes.");return;}
     const token=++generation.current,base=latestRecipe.current;
     working(true); setError(""); setNotice(""); setReview(null); setApproved(false);setResearchResults([]);
     reviewRef.current=null;
@@ -180,7 +186,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
    try{
     const body=withMasterChoice({base_revision:current.proposal.base_revision,request_id:current.requestId,operations:current.proposal.operations,save_version:true,ledger:current.ledger},match,choice,spec);
     const masters=await request<NonNullable<Review['masters']>>(`/api/recipes/${recipe.id}/confirm/review`,{method:'POST',body:JSON.stringify(body)});
-    if(reviewRef.current!==current)return;
+    if(!alive.current||reviewRef.current!==current)return;
     const next={...current,masters,ledger:body.ledger,proposal:{...current.proposal,operations:body.operations}};
     reviewRef.current=next;setReview(next);reviewEpoch.current=markReview?.()??-1;
    }catch(e){report(e);}finally{working(false);}
@@ -188,17 +194,18 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
   async function confirm(voiceApproval?:Review) {
     const current=voiceApproval??review;
     if(lock.current){setNotice(locale==="ja"?"処理中です。完了後に保存してください。":"Processing. Save after it completes.");return;}
-    if(!current||current!==reviewRef.current||current.proposal.recipe_id!==recipe.id||current.proposal.base_revision!==recipe.revision){setError(locale==="ja"?"現在のレシピに有効な変更案がありません。変更内容を再度指示してください。":"No current proposal matches this recipe. Request the changes again.");return;}
+    if(!current||current!==reviewRef.current||window.location.pathname!==`/recipes/${encodeURIComponent(recipe.id)}`||current.proposal.recipe_id!==recipe.id||current.proposal.base_revision!==recipe.revision){setError(locale==="ja"?"現在のレシピに有効な変更案がありません。変更内容を再度指示してください。":"No current proposal matches this recipe. Request the changes again.");return;}
     if(current.masters?.requires_selection){setNotice(locale==="ja"?"食材マスターの候補を選択して再照合してください。":"Choose the ingredient masters and apply the selections.");return;}
     if(!voiceApproval&&!approved){setNotice(locale==="ja"?"変更内容の確認チェックを入れて保存してください。":"Check approval before saving.");return;}
     if(!describe(recipe,current.proposal.operations,locale,current.proposal.supplier_names)?.changes.length){setNotice(locale==="ja"?"保存する変更点がありません。":"There are no changes to save.");return;}
     working(true); setError("");setProcessing("save");
     try {
       const result = await request<{recipe: Recipe}>(`/api/recipes/${recipe.id}/confirm`, {method: "POST", body: JSON.stringify({base_revision: current.proposal.base_revision, request_id: current.requestId, operations: current.proposal.operations, save_version: true,ledger:current.ledger??[]})});
+      if(!alive.current||window.location.pathname!==`/recipes/${encodeURIComponent(recipe.id)}`)return;
       latestRecipe.current=result.recipe;invalidate();voiceHistory.current=[];setInstruction("");setNotice(t("savedRecalculated")); onSaved(result.recipe);
     } catch (e) {
       report(e, true);
-      if (e instanceof Error && e.message === "409" && !safeIngredientSaveCode((e as {code?:unknown}).code)) {
+      if (alive.current && e instanceof Error && e.message === "409" && !safeIngredientSaveCode((e as {code?:unknown}).code)) {
         try {await refreshAfterConflict();} catch {setError(t("failure"));}
       }
       // Keep the same request ID on uncertain network outcomes: retry cannot apply twice.

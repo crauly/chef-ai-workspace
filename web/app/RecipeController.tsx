@@ -147,12 +147,16 @@ export default function RecipeController({pageKind:initialPageKind}:{pageKind:"h
  useEffect(()=>{
   let active=true;
   const sync=async()=>{
-   const match=window.location.pathname.match(/^\/recipes\/([^/]+)\/?$/);
+   editor.current?.invalidate();setBusy(false);
+   const targetPath=window.location.pathname;
+   const match=targetPath.match(/^\/recipes\/([^/]+)\/?$/);
    if(!match){setPageKind("home");setSelected(null);return;}
    setPageKind("detail");
+   // URL and editable selection must never refer to different recipes while loading.
+   setSelected(previous=>previous?.id===decodeURIComponent(match[1])?previous:null);
    try{const recipe=await request<Recipe>(`/api/recipes/${encodeURIComponent(decodeURIComponent(match[1]))}`);
     if(active&&window.location.pathname===`/recipes/${encodeURIComponent(recipe.id)}`){setSelected(recipe);setRename(recipe.title.value||"");setError("");}}
-   catch(e){if(active)setError(String(e));}
+   catch(e){if(active&&window.location.pathname===targetPath)setError(String(e));}
   };
   void sync();window.addEventListener("popstate",sync);
   return()=>{active=false;window.removeEventListener("popstate",sync);};
@@ -334,7 +338,7 @@ export default function RecipeController({pageKind:initialPageKind}:{pageKind:"h
   return new Promise(resolve=>{browseWaiter.current=resolve;search(target,true,openVoiceEdit);});
  }
  return <main id="top" className={pageKind==="detail"?"recipe-detail-page":""}><div><header className="chef-header"><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><PriceBell locale={locale}/><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">Japanese</option><option value="en-US">English</option></select></label></div><div className="chef-brand"><img src="/chef-ai-mark.svg" alt="" width="58" height="58"/><h1>Chef AI</h1></div>{pageKind==="home"&&<p className="muted">{t("intro")}</p>}</header>
- </div>{(pageKind==="home"||selected)&&<div><VoiceWorkspace onMicControl={setMicControl} detailOnly={pageKind==="detail"} locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} setEditTargetSelectionPending={pending=>{editSelectionPending.current=pending;}} editRequest={voiceEditRequest} onCreated={recipe=>{showDetail(recipe);setError("");void reload();}}/></div>}
+ </div>{<div><VoiceWorkspace onMicControl={setMicControl} detailOnly={pageKind==="detail"} locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} setEditTargetSelectionPending={pending=>{editSelectionPending.current=pending;}} editRequest={voiceEditRequest} onCreated={recipe=>{showDetail(recipe);setError("");void reload();}}/></div>}
  {pageKind==="detail"&&detailCandidatesActive&&<section className="workspace-section" aria-label={locale==="ja"?"レシピ検索結果":"Recipe search results"} aria-busy={loadingList}>
   <h2>{locale==="ja"?"候補からレシピを選択":"Choose a recipe"}</h2>
   {items.length===0?<p role="status">{loadingList?(locale==="ja"?"検索しています…":"Searching…"):(locale==="ja"?"このページに候補はありません。":"No recipes on this page.")}</p>:<div className="recipe-list">{items.map(item=><button key={item.id} className="recipe-list-item" disabled={busy||loadingList} onClick={()=>void open(item.id)} aria-label={locale==="ja"?`${item.title}の詳細を開く`:`View ${item.title}`}>

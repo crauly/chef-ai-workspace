@@ -117,3 +117,25 @@ test("voice editing adds an unpriced ingredient and approves owned supplier and 
  const stored=await (await request.get('/api/recipes/'+rid)).json();expect(stored.materials.find((m:any)=>m.id===added)).toMatchObject({price_mode:'inherit',price_override:null,quantity:{value:'10'}});expect(stored.materials.find((m:any)=>m.id===mid)).toMatchObject({supplier_id:supplier.id,price_override:{amount_jpy:{value:'500'}}});
  await page.reload();await page.locator('.recipe-gap-disclosure summary').click();await expect(page.locator('.recipe-gap-disclosure')).toContainText('卵：仕入単価');
 });
+
+test('self review: back invalidates the old proposal while the next recipe loads',async({page,request})=>{
+ const first='11111111-1111-4111-8111-111111111111';let release!:()=>void;const held=new Promise<void>(r=>release=r);let loading=false;
+ await page.goto('/');await type(page,'片栗粉のレシピを開いて');await expect(page.getByRole('heading',{name:'片栗粉のレシピ',exact:true})).toBeVisible();await type(page,'ミートソースパスタを開いて');await expect(page.getByRole('heading',{name:'ミートソースパスタ',exact:true})).toBeVisible();await type(page,'パスタを15gに変更');await expect(page.getByRole('dialog',{name:'変更案の確認'})).toBeVisible();
+ await page.route('**/api/recipes/'+first,async r=>{loading=true;await held;await r.fallback();});await page.goBack();await expect.poll(()=>loading).toBe(true);
+ try{await expect(page.getByRole('dialog',{name:'変更案の確認'})).toHaveCount(0);await type(page,'承認して保存');expect((await (await request.get('http://127.0.0.1:8100/test/state')).json()).confirms).toHaveLength(0);}finally{release();}
+ await expect(page.getByRole('heading',{name:'片栗粉のレシピ',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'■ マイクを停止',exact:true})).toBeVisible();
+});
+
+test('self review: a late successful save cannot replace the recipe reached by back',async({page,request})=>{
+ const first='11111111-1111-4111-8111-111111111111',second='33333333-3333-4333-8333-333333333333';let release!:()=>void;const held=new Promise<void>(r=>release=r);let saving=false;
+ await page.goto('/');await type(page,'片栗粉のレシピを開いて');await expect(page.getByRole('heading',{name:'片栗粉のレシピ',exact:true})).toBeVisible();await type(page,'ミートソースパスタを開いて');await expect(page.getByRole('heading',{name:'ミートソースパスタ',exact:true})).toBeVisible();await type(page,'パスタを15gに変更');await expect(page.getByRole('dialog',{name:'変更案の確認'})).toBeVisible();
+ await page.route('**/api/recipes/'+second+'/confirm',async r=>{saving=true;await held;await r.fallback();});await type(page,'保存してください');await expect.poll(()=>saving).toBe(true);await page.goBack();await expect(page.getByRole('heading',{name:'片栗粉のレシピ',exact:true})).toBeVisible();const completed=page.waitForResponse(r=>r.url().endsWith('/'+second+'/confirm'));release();await completed;
+ await expect.poll(async()=>(await (await request.get('/api/recipes/'+second)).json()).revision).toBe(1);await expect(page.getByRole('heading',{name:'片栗粉のレシピ',exact:true})).toBeVisible();expect(page.url()).toContain('/recipes/'+first);expect((await (await request.get('/api/recipes/'+first)).json()).revision).toBe(0);
+});
+
+test('self review: a late registration save preserves the recipe reached by back',async({page,request})=>{
+ const first='11111111-1111-4111-8111-111111111111';let release!:()=>void;const held=new Promise<void>(r=>release=r);let payload:any=null;
+ await page.route('**/api/voice-recipe',r=>r.fulfill({json:{...recipeDraft,title:'遅延パスタ'}}));await page.route('**/api/recipes/full',async r=>{payload=r.request().postDataJSON();await held;await r.fallback();});
+ await page.goto('/');await type(page,'片栗粉のレシピを開いて');await expect(page.getByRole('heading',{name:'片栗粉のレシピ',exact:true})).toBeVisible();await type(page,'新しいメニュー');await expect(page).toHaveURL('http://localhost:3100/');await type(page,'遅延パスタ、片栗粉10g');await expect(page.getByText('未保存の下書き：遅延パスタ')).toBeVisible();await type(page,'保存');await expect.poll(()=>payload).not.toBeNull();await page.goBack();await expect(page.getByRole('heading',{name:'片栗粉のレシピ',exact:true})).toBeVisible();release();
+ await expect(page.getByText('未保存の下書き：遅延パスタ')).toHaveCount(0);await expect(page.getByRole('heading',{name:'片栗粉のレシピ',exact:true})).toBeVisible();expect(page.url()).toContain('/recipes/'+first);expect((await (await request.get('/api/recipes/'+payload.request_id)).json()).title.value).toBe('遅延パスタ');
+});
