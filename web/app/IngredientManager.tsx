@@ -1,6 +1,7 @@
 "use client";
 import {useCallback,useEffect,useState} from "react";
 import {type Locale} from "./i18n";
+import VoiceFieldInput from "./VoiceFieldInput";
 
 type Price={amount_jpy?:{value?:string|null};per_quantity?:string;per_unit?:string};
 type Ingredient={id:string;name:string;spec?:string|null;current_price?:Price|null};
