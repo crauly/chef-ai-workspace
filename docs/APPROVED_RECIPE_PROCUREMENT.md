@@ -89,3 +89,7 @@ from public.offers where supplier_id is null group by owner_id, ingredient_id;
 レシピ材料の仕入先がある場合も、編集の確認画面で購入条件・価格を明示承認できる。既存confirm RPC内でOffer価格を採用し、レシピの参照、現在原価、保存版を整合させる。共有価格への直接更新や別APIとの逐次保存は行わない。
 
 新規材料の曖昧な名称は登録・編集ともに候補選択を要求する。新規登録材料の任意の `ingredient_id / new_master / spec`、編集の `ledger / link_ingredient` を既存保存経路に渡す。詳細と本番読み取り調査の限界は [ADR-018](ADR_018_RECIPE_MASTER_PROCUREMENT.md)。
+
+### 登録入力の依存関係
+
+使用量（数量・単位）と購入価格（価格・基準数量・単位）は独立する。使用量が未確定でも、既知の購入価格は承認後に正式採用し、原価はpartialとする。空欄・数値表記・文字数・単位分類・エラー復旧の契約は [ADR-011](ADR_011_STRUCTURED_OUTPUT.md#登録入力契約の修正2026-11-05) に従う。保存APIは不完全な組を422で拒否し、フロントは理由を提示したうえで未確定の組をNULLに投影する。

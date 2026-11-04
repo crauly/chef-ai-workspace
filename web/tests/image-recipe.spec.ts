@@ -302,3 +302,14 @@ test("selling price needs its mention next to the amount", async () => {
     expect((await res2.json()).selling_price_jpy).toBe("1200");
   } finally { restore(); restoreFetch(); }
 });
+
+test('decimal memo provenance is checked before numeric normalization',async()=>{
+ const restore=withEnv();const proposal={...MUSE_GUESSED,materials:[{...MUSE_GUESSED.materials[0],name:'ﾎｰﾙﾄﾏﾄ',quantity:'100.00',price_jpy:'300.00',price_quantity:'400.00'}],selling_price_jpy:'1200.00'};
+ const restoreFetch=upstreamProposal(proposal);
+ try{
+  for(const [text,stated] of [['ﾎｰﾙﾄﾏﾄ１００.００g、４００.００gで３００.００円仕入れ、売価１２００.００円',true],['ﾎｰﾙﾄﾏﾄです',false]] as const){
+   const response=await proposeImage(authed('http://localhost/api/image-recipe',{image:PNG,text}));expect(response.status).toBe(200);const body=await response.json();
+   expect(body.materials[0].quantity).toBe(stated?'100':'');expect(body.materials[0].unit).toBe(stated?'g':'');expect(body.materials[0].price_jpy).toBe(stated?'300':'');expect(body.materials[0].price_quantity).toBe(stated?'400':'');expect(body.selling_price_jpy).toBe(stated?'1200':'');
+  }
+ }finally{restore();restoreFetch();}
+});

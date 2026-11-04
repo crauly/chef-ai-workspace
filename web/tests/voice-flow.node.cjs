@@ -45,3 +45,9 @@ test('intentional removals and renames must be declared and visible for review',
  global.fetch=async()=>Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify({title:'カルボナーラ',materials:[{...rows[1],name:'乾燥パスタ'}],notes:[],selling_price_jpy:'',material_changes:[{previous_name:'鶏卵',action:'remove',replacement_name:''},{previous_name:'パスタ',action:'rename',replacement_name:'乾燥パスタ'}]})}}]});
  try{const result=await voiceRecipeModel('x','x',{previous_draft:{title:'カルボナーラ',materials:rows}},new AbortController().signal,{});assert.equal(result.materials.length,1);assert.equal(result.interpretations[0].source,'鶏卵');assert.equal(result.interpretations[0].suggestion,'削除');}finally{global.fetch=old;}
 });
+test('one targeted repair cannot change already valid material facts',async()=>{
+ const old=global.fetch;let calls=0;
+ global.fetch=async(url,init)=>{calls++;const request=JSON.parse(init.body);if(calls===2)assert.match(request.messages.at(-1).content,/repair/);
+  return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify({title:calls===1?'x'.repeat(201):'料理',materials:[{...materials[0],quantity:calls===1?'10':'999'}],notes:[],selling_price_jpy:''})}}]});};
+ try{await assert.rejects(voiceRecipeModel('x','x',{},new AbortController().signal,{}),e=>e.code==='invalid_response'&&e.issues.some(i=>i.path==='materials.0.quantity'));assert.equal(calls,2);}finally{global.fetch=old;}
+});

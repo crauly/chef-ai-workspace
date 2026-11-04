@@ -136,16 +136,41 @@ class VoiceFullRecipeTests(unittest.TestCase):
         self.assertIn(line["id"], snapshot["unresolved_line_ids"])
         self.assertEqual(self.repo.writes, 1)
 
-    def test_empty_string_prices_rejected_not_zero_filled(self):
-        # The voice UI must normalize missing prices to null before saving;
-        # raw empty strings are explicit input errors, never silent zeroes.
+    def test_empty_string_prices_normalize_to_unresolved_not_zero(self):
+        # Empty optional fields have the same unresolved meaning at the API boundary.
         body = self.payload()
         body["materials"][1] = {"name": "卵", "quantity": "100", "unit": "g",
                                 "price_jpy": "", "price_quantity": "",
                                 "price_unit": ""}
         response = self.client.post("/demo/recipes/full", json=body, headers=self.headers)
-        self.assertEqual(response.status_code, 422, response.text)
-        self.assertEqual(self.repo.writes, 0)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertIsNone(response.json()["materials"][1]["effective_price"])
+        self.assertEqual(self.repo.writes, 1)
+
+    def test_known_price_can_save_without_usage_and_retry_does_not_duplicate(self):
+        body=self.payload();body['materials'][0].update(quantity=None,unit=None,price_jpy='１，５００.００')
+        review=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(review.status_code,200,review.text);self.assertEqual(self.repo.writes,0)
+        self.assertEqual(review.json()['materials'][0]['price_jpy'],'1500')
+        response=self.client.post('/demo/recipes/full',json=body,headers=self.headers)
+        self.assertEqual(response.status_code,201,response.text)
+        line=response.json()['materials'][0]
+        self.assertIsNone(line['quantity']['value']);self.assertEqual(line['quantity']['status'],'unresolved')
+        self.assertEqual(line['effective_price']['amount_jpy']['value'],'1500')
+        self.client.post('/demo/recipes/full',json=body,headers=self.headers);self.assertEqual(self.repo.writes,1)
+
+    def test_review_reports_field_errors_and_service_outages(self):
+        body=self.payload();body['materials'][0]['unit']=None
+        response=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(response.status_code,422,response.text)
+        self.assertEqual(response.json()['detail'][0]['loc'],['body','materials',0,'quantity'])
+        body=self.payload();body['materials'][0]['price_quantity']='0'
+        response=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(response.status_code,422,response.text);self.assertEqual(response.json()['detail'][0]['loc'],['body','materials',0,'price_quantity'])
+        self.repo.list_owned_units=lambda owner:(_ for _ in ()).throw(RuntimeError('private service detail'))
+        response=self.client.post('/demo/recipes/full/review',json=self.payload(),headers=self.headers)
+        self.assertEqual(response.status_code,503);self.assertNotIn('private',response.text)
+        self.assertEqual(self.repo.writes,0)
 
     def test_invalid_numbers_fail_before_database_write(self):
         for quantity in ["abc", "-10", "NaN"]:
