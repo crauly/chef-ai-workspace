@@ -26,7 +26,8 @@ def decode_recipe(raw):
         ingredient_id=m.get("ingredient_id"),
         price_override=_quote(m.get("price_override")),
         price_mode=m.get("price_mode", "override"),
-        unit_id=m.get("unit_id"), supplier_id=m.get("supplier_id")) for m in raw.get("materials", ()))
+        unit_id=m.get("unit_id"), supplier_id=m.get("supplier_id"),
+        offer_id=m.get("offer_id")) for m in raw.get("materials", ()))
     return Recipe(id=raw["id"], title=_tracked(raw["title"]),
                   materials=materials,
                   selling_price_jpy=_tracked(raw["selling_price_jpy"]),
