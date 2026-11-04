@@ -6,6 +6,8 @@ do $$ declare c jsonb; begin
  c:=public.procured_recipe_cost('10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000006');
  if (c->>'total_cost_jpy')::numeric<>70 then raise exception 'Legacy costing changed'; end if;
  if has_function_privilege('authenticated','public.create_owned_procured_recipe(uuid,uuid,text,jsonb,jsonb,jsonb,jsonb,jsonb,text)','EXECUTE')
-  or has_function_privilege('anon','public.ensure_market_reference_supplier(uuid)','EXECUTE') then raise exception 'Procurement RPC exposed'; end if;
+  or has_function_privilege('anon','public.ensure_market_reference_supplier(uuid)','EXECUTE')
+  or has_function_privilege('authenticated','public.procurement_decimal28(numeric)','EXECUTE')
+  or has_function_privilege('anon','public.procurement_divide28(numeric,numeric)','EXECUTE') then raise exception 'Procurement RPC exposed'; end if;
 end $$;
 delete from auth.users where id='10000000-0000-4000-8000-000000000001';

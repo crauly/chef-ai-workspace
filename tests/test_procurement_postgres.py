@@ -212,6 +212,26 @@ class ProcurementPostgresTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sql(f"update public.suppliers set name='Amazon' where owner_id={literal(self.owner)};")
 
+    def test_saved_cost_matches_decimal_current_cost_at_rounding_boundaries(self):
+        cases=[('repeating fractions',[('1','1','3')]*3+[('1','1','2')]),
+               ('half-even down',[('1.2345678901234567890123456785','1','1')]),
+               ('half-even up',[('1.2345678901234567890123456795','1','1')]),
+               ('tiny fraction',[('1e-30','7','3e30')])]
+        for name,terms in cases:
+            with self.subTest(name=name):
+                body=self.body(None,'1');body['selling_price_jpy']='7'
+                body['materials']=[{**body['materials'][0],'name':f'{name}-{i}',
+                                    'quantity':qty,'price_jpy':price,'price_quantity':denominator}
+                                   for i,(qty,price,denominator) in enumerate(terms)]
+                saved=self.save(body)
+                current=self.client.get('/demo/recipes/'+saved['id']+'/cost',headers=self.headers).json()
+                snapshot=sql(f"select cost_snapshot from public.recipe_versions where recipe_id={literal(saved['id'])};")
+                for key in ('subtotal_jpy','total_cost_jpy','cost_rate_pct'):
+                    self.assertEqual(Decimal(snapshot[key]),Decimal(current[key]),key)
+                self.assertEqual({k:Decimal(v) for k,v in snapshot['line_costs'].items()},
+                                 {k:Decimal(v) for k,v in current['line_costs'].items()})
+                if name=='repeating fractions': self.assertEqual(current['total_cost_jpy'],'2')
+
     def test_auth_refusal_has_no_side_effects(self):
         self.assertEqual(self.client.post('/demo/recipes/full',json=self.body()).status_code,403)
         for table in ('recipes','suppliers','ingredients','offers','price_observations'):self.assertEqual(self.count(table),0)

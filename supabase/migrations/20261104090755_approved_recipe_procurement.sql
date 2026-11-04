@@ -138,6 +138,37 @@ grant execute on function public.set_owned_offer_price(uuid,uuid,uuid,numeric,nu
   to service_role;
 
 
+-- Match Python Decimal's default 28 significant digits / half-even for
+-- intermediate operations. Final JPY / rate rounding remains half-up below.
+create function public.procurement_decimal28(p_value numeric) returns numeric
+language plpgsql immutable strict set search_path='' as $$
+declare digits text; exponent integer; places integer; rounded numeric; shifted numeric;
+begin
+ if p_value=0 then return 0; end if;
+ digits:=abs(p_value)::text;
+ if split_part(digits,'.',1)<>'0' then exponent:=length(split_part(digits,'.',1))-1;
+ else
+  digits:=split_part(digits,'.',2);
+  exponent:=-1-(length(digits)-length(ltrim(digits,'0')));
+ end if;
+ places:=27-exponent;
+ rounded:=round(p_value,places);
+ shifted:=p_value*('1e'||places)::numeric;
+ if abs(shifted-trunc(shifted))=0.5 and mod(abs(trunc(shifted)),2)=0 then
+  rounded:=rounded-sign(p_value)*('1e'||(-places))::numeric;
+ end if;
+ return rounded;
+end $$;
+create function public.procurement_divide28(p_left numeric,p_right numeric) returns numeric
+language sql immutable strict set search_path='' as $$
+ select public.procurement_decimal28(
+  round(p_left,least(16383,scale(p_left)+length(split_part(abs(p_right)::text,'.',1))+32))/p_right);
+$$;
+revoke all on function public.procurement_decimal28(numeric),public.procurement_divide28(numeric,numeric)
+ from public,anon,authenticated;
+grant execute on function public.procurement_decimal28(numeric),public.procurement_divide28(numeric,numeric)
+ to service_role;
+
 -- Resolve the cost snapshot inside the SAME transaction as price adoption.
 -- This mirrors calculate_cost: explicit offer > unambiguous supplier > legacy
 -- shared price; only approved Unit Master factors permit cross-unit conversion.
@@ -145,7 +176,7 @@ create function public.procured_recipe_cost(p_owner_id uuid,p_recipe_id uuid) re
 language plpgsql security definer set search_path='' as $$
 declare st jsonb; m jsonb; q jsonb; o record; a record; b record; n integer;
 declare costs jsonb:='{}'; sources jsonb:='{}'; quotes jsonb:='{}'; missing jsonb:='[]';
-declare amount numeric; qty numeric; denominator numeric; converted numeric; subtotal numeric:=0;
+declare amount numeric; qty numeric; denominator numeric; converted numeric; subtotal numeric:=0; line_cost numeric;
 declare adjustment numeric; total numeric; rate numeric; estimated boolean:=false;
 begin
  select state into st from public.recipes where id=p_recipe_id and owner_id=p_owner_id;
@@ -190,16 +221,17 @@ begin
      select * into a from public.units where owner_id=p_owner_id and id=(m->>'unit_id')::uuid;
      select * into b from public.units where owner_id=p_owner_id and
       id=coalesce(nullif(q->>'per_unit_id','')::uuid,public.resolve_owned_unit_id(p_owner_id,q->>'per_unit'));
-     if a.dimension=b.dimension and a.base_factor>0 and b.base_factor>0 then converted:=qty*a.base_factor/b.base_factor; end if;
+     if a.dimension=b.dimension and a.base_factor>0 and b.base_factor>0 then converted:=public.procurement_divide28(public.procurement_decimal28(qty*a.base_factor),b.base_factor); end if;
     end if;
    end if;
   exception when invalid_text_representation or numeric_value_out_of_range or raise_exception then converted:=null;
   end;
   if converted is null then missing:=missing||jsonb_build_array(m->>'id');
   else
-   costs:=costs||jsonb_build_object(m->>'id',(converted*amount/denominator)::text);
+   line_cost:=public.procurement_divide28(public.procurement_decimal28(converted*amount),denominator);
+   costs:=costs||jsonb_build_object(m->>'id',line_cost::text);
    sources:=sources||jsonb_build_object(m->>'id','shared_ingredient');
-   subtotal:=subtotal+converted*amount/denominator;
+   subtotal:=public.procurement_decimal28(subtotal+line_cost);
    estimated:=estimated or m#>>'{quantity,status}'='assumed' or q#>>'{amount_jpy,status}'='assumed';
   end if;
  end loop;
@@ -207,8 +239,8 @@ begin
  estimated:=estimated or st#>>'{cost_adjustment_jpy,status}'='assumed' or st#>>'{selling_price_jpy,status}'='assumed';
  if jsonb_array_length(missing)=0 and adjustment is not null then
   if subtotal+adjustment<0 then raise exception 'Adjusted cost cannot be negative'; end if;
-  total:=round(subtotal+adjustment,0);
-  if (st#>>'{selling_price_jpy,value}')::numeric>0 then rate:=round(total/(st#>>'{selling_price_jpy,value}')::numeric*100,1); end if;
+  total:=round(public.procurement_decimal28(subtotal+adjustment),0);
+  if (st#>>'{selling_price_jpy,value}')::numeric>0 then rate:=round(public.procurement_decimal28(public.procurement_divide28(total,(st#>>'{selling_price_jpy,value}')::numeric)*100),1); end if;
  end if;
  return jsonb_build_object('partial',total is null,'line_costs',costs,'line_price_sources',sources,
   'unresolved_line_ids',missing,'subtotal_jpy',subtotal::text,'total_cost_jpy',total::text,'cost_rate_pct',rate::text,
