@@ -135,6 +135,33 @@ class RecipeCrudTests(unittest.TestCase):
         self.assertIsNone(snapshot["total_cost_jpy"])
         self.assertEqual(saved.recipe.materials[0].offer_id, offer)
 
+    def test_renaming_to_another_master_drops_old_purchase_identity(self):
+        old_line = self.repo.recipe.materials[0]
+        supplier, offer, other = str(uuid4()), str(uuid4()), str(uuid4())
+        self.repo.ingredients[other] = Ingredient(
+            other, "Tomato", PriceQuote(tv("300"), "1", "kg", "manual"))
+        self.repo.recipe = replace(self.repo.recipe, materials=(
+            replace(old_line, supplier_id=supplier, offer_id=offer),))
+        saved = self.save({"op": "set_material_name",
+                           "material_id": old_line.id, "value": "Tomato"})
+        line = saved.recipe.materials[0]
+        self.assertEqual(line.ingredient_id, other)
+        self.assertIsNone(line.supplier_id)
+        self.assertIsNone(line.offer_id)
+        self.assertEqual(self.repo.commits[-1]["state"]["materials"][0]["offer_id"], None)
+
+    def test_switching_supplier_clears_selected_offer(self):
+        old_line = self.repo.recipe.materials[0]
+        supplier, offer, other_supplier = str(uuid4()), str(uuid4()), str(uuid4())
+        self.repo.recipe = replace(self.repo.recipe, materials=(
+            replace(old_line, supplier_id=supplier, offer_id=offer),))
+        saved = self.save({"op": "set_material_supplier", "material_id": old_line.id,
+                           "supplier_id": other_supplier})
+        line = saved.recipe.materials[0]
+        self.assertEqual(line.supplier_id, other_supplier)
+        self.assertIsNone(line.offer_id)
+        self.assertTrue(self.repo.commits[-1]["cost_snapshot"]["partial"])
+
     def test_same_name_different_ingredient_ids_update_only_selected_master(self):
         other_id = str(uuid4())
         from dataclasses import replace
