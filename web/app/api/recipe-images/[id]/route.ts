@@ -14,7 +14,7 @@ async function proxy(req:NextRequest,id:string){
  if(!origin||!token)return fail(503);
  try{
   const body=req.method==="POST"?await req.text():undefined;
-  if(body&&new TextEncoder().encode(body).byteLength>5600000)return fail(413);
+  if(body&&new TextEncoder().encode(body).byteLength>4200000)return fail(413);
   const response=await fetch(new URL("/demo/recipes/"+encodeURIComponent(id)+"/dish-image",origin),{
    method:req.method,headers:{"X-Demo-Access":token,"Content-Type":"application/json"},
    body,cache:"no-store",redirect:"error",signal:AbortSignal.timeout(30000)});
