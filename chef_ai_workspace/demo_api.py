@@ -182,7 +182,9 @@ def _displayed_recipe(owner, repository, found):
     supplier_prices = price_loader(owner, found) if callable(price_loader) else {}
     for line in out["materials"]:
         ingredient = catalog.get(line.get("ingredient_id"))
-        quote = (supplier_prices.get((line.get("ingredient_id"), line["supplier_id"]))
+        quote = (supplier_prices.get((line.get("ingredient_id"), line["offer_id"]))
+                 if line.get("offer_id") else
+                 supplier_prices.get((line.get("ingredient_id"), line["supplier_id"]))
                  if line.get("supplier_id") else
                  ingredient.current_price if ingredient is not None else None)
         line["effective_price"] = asdict(quote) if quote is not None else None
