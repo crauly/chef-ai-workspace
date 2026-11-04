@@ -123,7 +123,7 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
         snapshots = {}
         for line in candidate.materials:
             if line.offer_id:
-                quote = supplier_prices.get((line.ingredient_id, line.offer_id))
+                quote = supplier_prices.get((line.ingredient_id, f"offer:{line.offer_id}"))
             elif line.supplier_id:
                 quote = supplier_prices.get((line.ingredient_id, line.supplier_id))
             else:
