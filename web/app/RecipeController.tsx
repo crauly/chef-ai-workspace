@@ -292,7 +292,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
   onContextMenu={e=>{e.preventDefault();cancelLongPress();longPressTriggered.current=true;setActionItem(item);}}
   onClick={()=>{if(longPressTriggered.current){longPressTriggered.current=false;return;}void open(item.id);}}
   aria-label={locale==="ja"?`${item.title}の詳細を開く`:`View ${item.title}`}>
-  <span className="recipe-list-thumbnail" aria-hidden="true">{thumbnails[item.id]?<img src={thumbnails[item.id]} alt="" loading="lazy" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span>♨</span>}</span>
+  <span className="recipe-list-thumbnail" aria-hidden="true">{thumbnails[item.id]?<img src={thumbnails[item.id]} alt="" loading="lazy" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<svg viewBox="0 0 24 24" width="25" height="25" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m5 17 4.5-4 3 2.5 2.5-2 4 3.5"/><path d="M4 21 21 3"/></svg>}</span>
   <span className="recipe-list-copy"><strong>{item.title}</strong><small>{locale==="ja"?"レシピ":"Recipe"} · Rev {item.revision}</small></span>
   <span className="recipe-list-chevron" aria-hidden="true">›</span>
  </button>)}</div>
