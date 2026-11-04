@@ -89,7 +89,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
       let proposal:AIProposal;
       if(researchRequested){
         const result=await request<{indices:number[];operations:Operation[];results:{name:string;status:string;description:string}[];ambiguous:boolean}>("/api/recipe-price-research",{
-          method:"POST",body:JSON.stringify({instruction:text,materials:base.materials.map(m=>({id:m.id,name:m.material_name.value||""}))})});
+          method:"POST",body:JSON.stringify({instruction:text,materials:base.materials.map(m=>({id:m.id,name:m.material_name.value||"",supplier_id:m.supplier_id??null,offer_id:m.offer_id??null}))})});
         if(!alive.current||token!==generation.current||latestRecipe.current.id!==base.id||latestRecipe.current.revision!==base.revision)return;
         if(result.ambiguous||!result.indices.length){
           setNotice(locale==="ja"?"調査対象を特定できませんでした。食材名・範囲、または「すべて」を指定してください。":"Could not determine the target rows. Name ingredients, a range, or all.");
