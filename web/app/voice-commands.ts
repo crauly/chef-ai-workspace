@@ -31,3 +31,13 @@ export function voiceCommand(utterance: string): VoiceCommand {
   const rest = text.replace(/^(?:内容|下書き|登録内容)(?:を)?確認(?:してから|したので|しました|して)?/, "");
   return rest !== text && save(rest) ? "save" : "data";
 }
+
+// Edit-only consent: registration keeps its existing vocabulary and gate.
+export function editVoiceCommand(utterance:string):VoiceCommand {
+ const existing=voiceCommand(utterance);
+ if(existing!=="data")return existing;
+ const text=utterance.normalize("NFKC").trim().replace(/[。.!！]+$/g,"");
+ if(/^(?:承認|更新)(?:は)?(?:しない(?:で(?:ください)?)?|しません)$/.test(text))return "hold";
+ if(/^(?:この変更案を|変更案を|内容を)?(?:承認|更新)(?:して|してください|します)?$/.test(text))return "save";
+ return "data";
+}
