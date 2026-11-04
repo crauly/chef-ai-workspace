@@ -8,6 +8,13 @@ import {recipeGaps} from "./recipe-gaps";
 import VoiceWorkspace from "./VoiceWorkspace";
 import PriceBell from "./PriceBell";
 import {request, startupRead, type Recipe} from "./types";
+// Presentation only: retain exact Decimal strings for backend costing and persistence.
+const costFormatter=new Intl.NumberFormat("ja-JP",{minimumFractionDigits:1,maximumFractionDigits:1});
+function displayCostJpy(value:string|number|null|undefined):string{
+ if(value==null)return "—";
+ const numeric=Number(value);
+ return Number.isFinite(numeric)?`¥${costFormatter.format(numeric)}`:"—";
+}
 type Item={id:string;title:string;revision:number;updated_at?:string};
 export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  const [items,setItems]=useState<Item[]>([]),[selected,setSelected]=useState<Recipe|null>(null);
@@ -317,7 +324,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  <DishImageSection key={selected.id} recipeId={selected.id} title={selected.title.value||""} names={selected.materials.map(m=>m.material_name.value?.trim()||selected.display_names?.[m.id]?.display?.trim()||"")} locale={locale} disabled={busy}/>
  <div className="detail-metrics" role="region" aria-label="Recipe cost summary">
   <div><span>{locale==="ja"?"販売価格":"Selling price"}</span><strong>{selected.selling_price_jpy.value===null?"—":`¥${selected.selling_price_jpy.value}`}</strong></div>
-  <div><span>{locale==="ja"?"材料原価":"Food cost"}</span><strong>{cost?.total_cost_jpy!=null?`¥${cost.total_cost_jpy}`:cost?.partial&&Object.keys(cost.line_costs).length>0?`¥${cost.subtotal_jpy} (${locale==="ja"?"部分原価":"partial"})`:"—"}</strong></div>
+  <div><span>{locale==="ja"?"材料原価":"Food cost"}</span><strong>{cost?.total_cost_jpy!=null?displayCostJpy(cost.total_cost_jpy):cost?.partial&&Object.keys(cost.line_costs).length>0?`${displayCostJpy(cost.subtotal_jpy)} (${locale==="ja"?"部分原価":"partial"})`:"—"}</strong></div>
   <div><span>{locale==="ja"?"原価率":"Cost rate"}</span><strong>{cost?.cost_rate_pct==null?"—":`${cost.cost_rate_pct}%`}</strong></div>
  </div>
  {costError&&<p className="error" role="alert">{locale==="ja"?"原価計算を取得できませんでした。画面を再読み込みして確認してください。":"Could not load the cost calculation. Reload to retry."}</p>}
