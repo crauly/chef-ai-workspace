@@ -386,25 +386,30 @@ class SupabasePersistence:
         return str(result.data)
 
     def load_owned_supplier_prices(self, owner_id, recipe):
-        """Approved JPY quotes keyed by (ingredient_id, supplier_id).
+        """Load only owner-owned adopted offers matching the selected recipe line.
 
-        Only recipe-selected supplier pairs are fetched. Multiple adopted
-        purchase terms for the same pair remain unresolved rather than
-        selecting an arbitrary package or newest observation.
+        Explicit offer IDs select a single purchase term; legacy supplier-only
+        selections resolve only when exactly one adopted term is available.
+        No other supplier, market reference, or newest-price fallback is allowed.
         """
-        pairs = {(m.ingredient_id, m.supplier_id) for m in recipe.materials
-                 if m.price_mode == "inherit" and m.ingredient_id and m.supplier_id}
-        if not pairs:
+        selections = [m for m in recipe.materials
+                      if m.price_mode == "inherit" and m.ingredient_id
+                      and (m.supplier_id or m.offer_id)]
+        if not selections:
             return {}
-        ingredient_ids = sorted({i for i, _ in pairs})
+        ingredient_ids = sorted({m.ingredient_id for m in selections})
         offers = (self.client.table("offers")
                   .select("id,ingredient_id,supplier_id,package_quantity,"
                           "package_unit,package_unit_id,adopted_observation_id")
                   .eq("owner_id", owner_id)
                   .in_("ingredient_id", ingredient_ids).execute()).data or []
-        selected = [o for o in offers
-                    if (o["ingredient_id"], o.get("supplier_id")) in pairs
-                    and o.get("adopted_observation_id")]
+        selected = [
+            o for o in offers if o.get("adopted_observation_id") and any(
+                m.ingredient_id == o["ingredient_id"]
+                and (m.offer_id == o["id"] if m.offer_id else m.supplier_id == o.get("supplier_id"))
+                and (m.supplier_id is None or m.supplier_id == o.get("supplier_id"))
+                for m in selections)
+        ]
         ids = sorted({o["adopted_observation_id"] for o in selected})
         if not ids:
             return {}
@@ -413,30 +418,35 @@ class SupabasePersistence:
                         .eq("owner_id", owner_id).in_("id", ids).execute()).data or []
         by_obs = {o["id"]: o for o in observations}
         from .models import PriceQuote, TrackedValue
-        out = {}
+        by_offer = {}
+        by_supplier = {}
         ambiguous = set()
         for offer in selected:
-            key = (offer["ingredient_id"], offer["supplier_id"])
             obs = by_obs.get(offer["adopted_observation_id"])
             if (not obs or obs["offer_id"] != offer["id"]
                     or obs["currency"] != "JPY" or not obs["confirmed"]
                     or not offer.get("package_quantity")
                     or not offer.get("package_unit")):
                 continue
-            if key in out:
-                ambiguous.add(key)
-                continue
             try:
-                out[key] = PriceQuote(
+                quote = PriceQuote(
                     amount_jpy=TrackedValue(str(obs["amount_jpy"]), "confirmed", "user"),
                     per_quantity=str(offer["package_quantity"]),
                     per_unit=str(offer["package_unit"]), source="manual",
                     per_unit_id=offer.get("package_unit_id"))
             except (ValueError, TypeError):
                 continue
+            by_offer[(offer["ingredient_id"], offer["id"])] = quote
+            key = (offer["ingredient_id"], offer.get("supplier_id"))
+            if key in by_supplier:
+                ambiguous.add(key)
+            else:
+                by_supplier[key] = quote
         for key in ambiguous:
-            out.pop(key, None)
-        return out
+            by_supplier.pop(key, None)
+        # Offer IDs and supplier IDs occupy disjoint UUID namespaces by contract;
+        # when explicitly selected, use only a validated matching offer quote.
+        return {**by_supplier, **by_offer}
 
     def create_owned_offer(self, owner_id, ingredient_id, supplier_id=None,
                            product_url=None, package_quantity=None,
