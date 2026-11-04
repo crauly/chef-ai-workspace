@@ -69,6 +69,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  const [loadingList,setLoadingList]=useState(false);
  const [waking,setWaking]=useState(false);
  const [cost,setCost]=useState<{partial:boolean;subtotal_jpy:string;line_costs:Record<string,string>;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean;unresolved_line_ids:string[]}|null>(null);
+ const [costError,setCostError]=useState(false);
  const [food,setFood]=useState(""),[qty,setQty]=useState(""),[unit,setUnit]=useState(""),[price,setPrice]=useState(""),[priceQty,setPriceQty]=useState("1"),[priceUnit,setPriceUnit]=useState("");
  const [units,setUnits]=useState<Array<{id:string;symbol:string;dimension:string;aliases:string[]}>>([]);
  const [unitsLoaded,setUnitsLoaded]=useState(false);
@@ -122,7 +123,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  const t=(key:Parameters<typeof label>[1])=>label(locale,key);
  useEffect(()=>{const current=localStorage.getItem("chef-ui-locale");if(current==="ja"||current==="en-US"){setLocale(current);document.documentElement.lang=current;}},[]);
  function switchLocale(next:Locale){setLocale(next);localStorage.setItem("chef-ui-locale",next);document.documentElement.lang=next;}
- useEffect(()=>{let active=true;setCost(null);if(selected){void request<{partial:boolean;subtotal_jpy:string;line_costs:Record<string,string>;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean;unresolved_line_ids:string[]}>(`/api/recipes/${selected.id}/cost`).then(result=>{if(active)setCost(result);}).catch(()=>{if(active)setCost(null);});}return()=>{active=false;};},[selected?.id,selected?.revision]);
+ useEffect(()=>{let active=true;setCost(null);setCostError(false);if(selected){void request<{partial:boolean;subtotal_jpy:string;line_costs:Record<string,string>;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean;unresolved_line_ids:string[]}>(`/api/recipes/${selected.id}/cost`).then(result=>{if(active){setCost(result);setCostError(false);}}).catch(()=>{if(active){setCost(null);setCostError(true);}});}return()=>{active=false;};},[selected?.id,selected?.revision]);
  const reload=useCallback(async()=>{
    const current=++listRequest.current;setWaking(false);setLoadingList(true);
    try{
@@ -278,6 +279,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
   <div><span>{locale==="ja"?"材料原価":"Food cost"}</span><strong>{cost?.total_cost_jpy!=null?`¥${cost.total_cost_jpy}`:cost?.partial&&Object.keys(cost.line_costs).length>0?`¥${cost.subtotal_jpy} (${locale==="ja"?"部分原価":"partial"})`:"—"}</strong></div>
   <div><span>{locale==="ja"?"原価率":"Cost rate"}</span><strong>{cost?.cost_rate_pct==null?"—":`${cost.cost_rate_pct}%`}</strong></div>
  </div>
+ {costError&&<p className="error" role="alert">{locale==="ja"?"原価計算を取得できませんでした。画面を再読み込みして確認してください。":"Could not load the cost calculation. Reload to retry."}</p>}
  {cost?.partial&&<div className="detail-estimate" role="status">
   <p>{locale==="ja"?`未確定の材料 ${cost.unresolved_line_ids.length}件。合計原価と原価率は全材料の価格・単位換算が確定するまで表示されません。`:`${cost.unresolved_line_ids.length} unresolved lines. Total cost and cost rate require all prices and units to be resolved.`}</p>
   <ul>{selected.materials.filter(line=>cost.unresolved_line_ids.includes(line.id)).map(line=><li key={line.id}>
