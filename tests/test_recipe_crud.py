@@ -111,6 +111,12 @@ class RecipeCrudTests(unittest.TestCase):
                            "supplier_id": supplier, "offer_id": offer})
         self.assertEqual(saved.recipe.materials[0].offer_id, offer)
         self.assertEqual(self.repo.commits[-1]["state"]["materials"][0]["offer_id"], offer)
+        snapshot = self.repo.commits[-1]["cost_snapshot"]
+        self.assertFalse(snapshot["partial"])
+        self.assertEqual(snapshot["total_cost_jpy"], "47")
+        self.assertEqual(
+            snapshot["effective_quotes"][line.id]["effective_quote"]["amount_jpy"]["value"],
+            "1650")
 
     def test_supplier_price_cannot_mutate_shared_master(self):
         supplier = str(uuid4())
