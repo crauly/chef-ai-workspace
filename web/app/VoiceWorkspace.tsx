@@ -298,7 +298,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    // The spoken purchase source survives as a memo in this always-visible
   // region (the registration panel hides in browse mode). Formal linkage
   // reuses the ledger path behind the Human Gate; nothing auto-registers.
-  setSupplierMemo(suppliers.length?(locale==="ja"?`仕入先メモ：${suppliers.join("／")} — 台帳の仕入先連携で登録できます`:`Supplier notes: ${suppliers.join(", ")}`):"");
+  setSupplierMemo(suppliers.length?(locale==="ja"?`保存した仕入れ先：${suppliers.join("／")}`:`Saved suppliers: ${suppliers.join(", ")}`):"");
   setDraftPending(false);transition("browse");feedback(mode==="unconfirmed"?(locale==="ja"?"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。":"Saved with unconfirmed prices. Only partial food costs are shown."):(locale==="ja"?"レシピを保存しました。":"Recipe saved."));onCreated(recipe);
   }}/></div>
   {(micRecording||(mode!=="create"&&(micBusy||routing)))&&

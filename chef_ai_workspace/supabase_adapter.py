@@ -53,6 +53,42 @@ class SupabasePersistence:
             raise RuntimeError("Unexpected create RPC result")
         return recipe.id
 
+    @staticmethod
+    def _creation_hash(payload):
+        from hashlib import sha256
+        from .persistence_service import canonical_json
+        return sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+    def verify_owned_creation_payload(self, owner_id, recipe_id, payload):
+        rows=(self.client.table("recipes").select("creation_payload_hash")
+              .eq("owner_id",owner_id).eq("id",recipe_id).execute()).data or []
+        if not rows or (rows[0].get("creation_payload_hash") is not None and
+                        rows[0]["creation_payload_hash"] != self._creation_hash(payload)):
+            raise ValueError("Creation request conflict")
+
+    def create_owned_procured_recipe(self, owner_id, recipe, cost_snapshot, *, unit_candidates=(),
+                                     ingredient_entries=(), procurement=(), request_payload):
+        try:
+            result=self.client.rpc("create_owned_procured_recipe",{
+                "p_owner_id":owner_id,"p_recipe_id":recipe.id,"p_title":recipe.title.value,
+                "p_initial_state":asdict(recipe),"p_cost_snapshot":cost_snapshot,
+                "p_unit_candidates":list(unit_candidates),"p_ingredient_entries":list(ingredient_entries),
+                "p_procurement":list(procurement),"p_payload_hash":self._creation_hash(request_payload),
+            }).execute()
+        except APIError as exc:
+            if str(getattr(exc,"code","")) in ("P0001","23505","23503"):
+                raise ValueError("Procurement identity or creation conflict") from exc
+            raise
+        if str(result.data)!=recipe.id: raise RuntimeError("Unexpected procurement result")
+        return recipe.id
+
+    def ensure_market_reference_supplier(self, owner_id):
+        return self.client.rpc("ensure_market_reference_supplier",{"p_owner_id":owner_id}).execute().data
+
+    def load_owned_supplier_names(self, owner_id, ids):
+        rows=(self.client.table("suppliers").select("id,name").eq("owner_id",owner_id).in_("id",ids).execute()).data or []
+        return {row["id"]:row["name"] for row in rows}
+
     def list_owned_recipes(self, owner_id, *, offset=0, limit=20, search=""):
         if offset < 0 or limit < 1 or limit > 50:
             raise ValueError("Invalid pagination")
@@ -301,7 +337,7 @@ class SupabasePersistence:
 
     def list_owned_suppliers(self, owner_id, limit=50, offset=0):
         response = (self.client.table("suppliers")
-                    .select("id,name,note").eq("owner_id", owner_id)
+                    .select("id,name,note,is_market_reference").eq("owner_id", owner_id)
                     .order("name").order("id")
                     .range(max(offset, 0), max(offset, 0) + min(max(limit, 1), 100) - 1).execute())
         return response.data or []

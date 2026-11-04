@@ -1,6 +1,7 @@
 import {test,expect} from "@playwright/test";
 test("voice recipe with unknown prices saves explicitly as price-unconfirmed",async({page})=>{
- let saved=0;let body:any=null;
+ let saved=0;let body:any=null;let recipe:any=null;
+ await page.route("**/api/recipes/*",route=>recipe&&route.request().method()==="GET"&&route.request().url().endsWith(recipe.id)?route.fulfill({json:recipe}):route.fallback());
  const draft={title:"カルボナーラ",materials:[{name:"卵",quantity:"100",unit:"g",price_jpy:"",price_quantity:"",price_unit:""}],selling_price_jpy:"1800",notes:[],missing:["卵の仕入単価・基準数量・単位"]};
  await page.route("**/api/voice-recipe",async route=>{
   await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(draft)});
@@ -12,7 +13,7 @@ test("voice recipe with unknown prices saves explicitly as price-unconfirmed",as
   expect(body.materials[0].price_jpy).toBeNull();
   expect(body.materials[0].price_quantity).toBeNull();
   expect(body.materials[0].price_unit).toBeNull();
-  const recipe={id:body.request_id,title:{value:body.title,status:"confirmed"},revision:0,materials:[],selling_price_jpy:{value:body.selling_price_jpy,status:"confirmed"}};
+  recipe={id:body.request_id,title:{value:body.title,status:"confirmed"},revision:0,materials:[],selling_price_jpy:{value:body.selling_price_jpy,status:"confirmed"}};
   await route.fulfill({status:201,contentType:"application/json",body:JSON.stringify(recipe)});
  });
  await page.goto("/");
@@ -27,21 +28,21 @@ test("voice recipe with unknown prices saves explicitly as price-unconfirmed",as
  // One explicit save commits with prices omitted, not zero-filled.
  await entry.fill("保存してください");await page.getByRole("button",{name:"反映"}).click();
  await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
- await page.getByRole("button", {name: "← ホーム"}).click();
- await expect(page.getByRole("region",{name:"音声操作モード"}).getByText("価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。")).toBeVisible();
+ await expect(page.getByRole("heading",{name:"カルボナーラ",exact:true})).toBeVisible();
+ await page.reload();
+ await expect(page.getByRole("heading",{name:"カルボナーラ",exact:true})).toBeVisible();
  expect(saved).toBe(1);
 });
 
-test("a confirmed voice recipe with a spoken supplier saves without 422 and keeps the memo", async ({page}) => {
- // Backend recipe lines carry no supplier column (extra=forbid): the save
- // boundary projects materials, while review still shows the spoken source and
- // the save message hands it to the existing ledger linkage (Human Gate).
- let saved = 0; let body: any = null;
+test("a confirmed voice recipe forwards its approved supplier and survives reload", async ({page}) => {
+ // Supplier resolution is part of the explicitly approved atomic save.
+ let saved = 0; let body: any = null; let recipe: any = null;
+ await page.route("**/api/recipes/*",route=>recipe&&route.request().method()==="GET"&&route.request().url().endsWith(recipe.id)?route.fulfill({json:recipe}):route.fallback());
  const draft = {title: "ペペロンチーノ", materials: [{name: "ディチェコ パスタ", quantity: "100", unit: "g", price_jpy: "350", price_quantity: "500", price_unit: "g", supplier: "築地場外"}], selling_price_jpy: "1800", notes: [], missing: []};
  await page.route("**/api/voice-recipe", route => route.fulfill({status: 200, contentType: "application/json", body: JSON.stringify(draft)}));
  await page.route("**/api/recipes/full", async route => {
   saved++; body = route.request().postDataJSON();
-  const recipe = {id: body.request_id, title: {value: body.title, status: "confirmed"}, revision: 0, materials: [], selling_price_jpy: {value: body.selling_price_jpy, status: "confirmed"}};
+  recipe = {id: body.request_id, title: {value: body.title, status: "confirmed"}, revision: 0, materials: [], selling_price_jpy: {value: body.selling_price_jpy, status: "confirmed"}};
   await route.fulfill({status: 201, contentType: "application/json", body: JSON.stringify(recipe)});
  });
  await page.goto("/");
@@ -51,16 +52,16 @@ test("a confirmed voice recipe with a spoken supplier saves without 422 and keep
  await expect(page.getByText("未保存の下書き：ペペロンチーノ")).toBeVisible();
  await expect(page.getByText("仕入先: 築地場外")).toBeVisible();
  expect(saved).toBe(0);
- // One explicit save commits the confirmed draft and hands the spoken
- // purchase source to the ledger path as a memo.
+ // One explicit save includes the approved purchase source.
  await entry.fill("保存してください"); await page.getByRole("button", {name: "反映"}).click();
  await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
- await page.getByRole("button", {name: "← ホーム"}).click();
- await expect(page.getByRole("region", {name: "音声操作モード"}).getByText(/仕入先メモ：築地場外/)).toBeVisible();
+ await expect(page.getByRole("heading",{name:"ペペロンチーノ",exact:true})).toBeVisible();
+ await page.reload();
+ await expect(page.getByRole("heading",{name:"ペペロンチーノ",exact:true})).toBeVisible();
  expect(saved).toBe(1);
- // The save boundary strips the ledger-only field instead of failing 422.
+ // The approved save forwards the supplier for atomic owner-scoped resolution.
  expect(body.materials).toHaveLength(1);
- expect(body.materials[0]).not.toHaveProperty("supplier");
+ expect(body.materials[0].supplier).toBe("築地場外");
  expect(body.materials[0]).toMatchObject({name: "ディチェコ パスタ", quantity: "100", unit: "g", price_jpy: "350"});
 });
 

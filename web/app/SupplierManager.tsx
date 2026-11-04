@@ -2,7 +2,7 @@
 import {useEffect,useRef,useState} from "react";
 import VoiceFieldInput from "./VoiceFieldInput";
 import {type Locale} from "./i18n";
-type Supplier={id:string;name:string;note:string|null};
+type Supplier={id:string;name:string;note:string|null;is_market_reference?:boolean};
 export default function SupplierManager({locale}:{locale:Locale}){
  const ja=locale==="ja";
  const [items,setItems]=useState<Supplier[]>([]);
@@ -62,7 +62,7 @@ export default function SupplierManager({locale}:{locale:Locale}){
    <label>{ja?"メモ（任意）":"Notes (optional)"}<input value={note} maxLength={1000} onChange={e=>setNote(e.target.value)}/></label>
    <div className="toolbar"><button disabled={busy||!name.trim()}>{editing?(ja?"変更を保存":"Save changes"):(ja?"仕入先を登録":"Add supplier")}</button>{editing&&<button type="button" onClick={reset}>{ja?"キャンセル":"Cancel"}</button>}</div>
   </form>
-  <ul className="supplier-manager-list">{items.map(item=><li key={item.id}><div><strong>{item.name}</strong>{item.note&&<small>{item.note}</small>}</div><div className="toolbar"><button type="button" disabled={busy} onClick={()=>edit(item)}>{ja?"編集":"Edit"}</button><button type="button" disabled={busy} onClick={()=>void remove(item)}>{ja?"削除":"Delete"}</button></div></li>)}</ul>
+  <ul className="supplier-manager-list">{items.map(item=><li key={item.id}><div><strong>{item.name}</strong>{item.note&&<small>{item.note}</small>}</div><div className="toolbar"><button type="button" disabled={busy||item.is_market_reference} onClick={()=>edit(item)}>{ja?"編集":"Edit"}</button><button type="button" disabled={busy||item.is_market_reference} onClick={()=>void remove(item)}>{ja?"削除":"Delete"}</button></div></li>)}</ul>
   <div className="toolbar"><button type="button" disabled={busy||page===1} onClick={()=>setPage(v=>v-1)}>{ja?"前へ":"Previous"}</button><span>{page}</span><button type="button" disabled={busy||items.length<pageSize} onClick={()=>setPage(v=>v+1)}>{ja?"次へ":"Next"}</button></div>
   {!items.length&&!error&&<p className="muted">{ja?"登録済み仕入先はありません。":"No suppliers registered."}</p>}
  </section>;

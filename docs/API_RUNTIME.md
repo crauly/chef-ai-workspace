@@ -72,3 +72,15 @@ owner (404 for an inaccessible ID) and bypasses the three name-search suggestion
 available tax/shipping notes. Both the backend and frontend changes must be released
 for this exact-ID lookup. Focused backend regression: `python -m unittest discover
 -s tests -p 'test_price_reference.py' -v`.
+
+## Approved recipe procurement
+
+`POST /demo/recipes/full` (Web proxy: `/api/recipes/full`) accepts optional
+`materials[].supplier` and saves approved supplier identity, Offer selection and
+complete purchase quotes atomically with the recipe. Incomplete draft price tuples
+remain null. Supplier names and effective adopted prices are returned on detail
+reads; line costs use the same selected Offer. The owner-local abstract supplier
+`相場参考価格` has a real ID. Named suppliers never fall back to its price.
+See [the save contract and migration runbook](APPROVED_RECIPE_PROCUREMENT.md)
+and [ADR-009](ADR_009_INGREDIENT_PROCUREMENT_ASSISTANCE.md) for retry conflicts,
+legacy NULL compatibility, approval and deployment boundaries.

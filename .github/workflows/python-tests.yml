@@ -44,8 +44,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          createdb chef_procurement_test
+          export PGDATABASE=chef_procurement_test
           psql -v ON_ERROR_STOP=1 -f tests/sql/bootstrap.sql
           for migration in supabase/migrations/*.sql; do
+            if [[ "$migration" == *20261104090755_approved_recipe_procurement.sql ]]; then
+              psql -v ON_ERROR_STOP=1 -f tests/sql/procurement_legacy_before.sql
+            fi
             psql -v ON_ERROR_STOP=1 -f "$migration"
           done
           psql -v ON_ERROR_STOP=1 -f tests/sql/offer_quantity_identity.sql
+          psql -v ON_ERROR_STOP=1 -f tests/sql/procurement_legacy_after.sql
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-api.txt
+      - name: Approved procurement API and real PostgreSQL regression
+        env:
+          CHEF_TEST_PGHOST: localhost
+          CHEF_TEST_PGPORT: '5432'
+        run: python -m unittest discover -s tests -p 'test_procurement_postgres.py' -v
