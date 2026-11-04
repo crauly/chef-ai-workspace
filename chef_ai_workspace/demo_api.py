@@ -182,7 +182,7 @@ def _displayed_recipe(owner, repository, found):
     supplier_prices = price_loader(owner, found) if callable(price_loader) else {}
     for line in out["materials"]:
         ingredient = catalog.get(line.get("ingredient_id"))
-        quote = (supplier_prices.get((line.get("ingredient_id"), line["offer_id"]))
+        quote = (supplier_prices.get((line.get("ingredient_id"), f"offer:{line['offer_id']}"))
                  if line.get("offer_id") else
                  supplier_prices.get((line.get("ingredient_id"), line["supplier_id"]))
                  if line.get("supplier_id") else
