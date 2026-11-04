@@ -200,7 +200,7 @@ def save_recipe_with_ledger(*, owner_id: str, trusted_user_confirmed: bool,
         for line in candidate.materials:
             if line.price_mode == "inherit":
                 if line.offer_id:
-                    quote = supplier_prices.get((line.ingredient_id, line.offer_id))
+                    quote = supplier_prices.get((line.ingredient_id, f"offer:{line.offer_id}"))
                 elif line.supplier_id:
                     quote = supplier_prices.get((line.ingredient_id, line.supplier_id))
                 else:
@@ -307,7 +307,7 @@ def save_validated_mutation(*, owner_id: str, trusted_user_confirmed: bool,
         for line in candidate.materials:
             if line.price_mode == "inherit":
                 if line.offer_id:
-                    quote = supplier_prices.get((line.ingredient_id, line.offer_id))
+                    quote = supplier_prices.get((line.ingredient_id, f"offer:{line.offer_id}"))
                 elif line.supplier_id:
                     quote = supplier_prices.get((line.ingredient_id, line.supplier_id))
                 else:
