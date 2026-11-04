@@ -136,3 +136,37 @@ def build_approval_request(*, material_id: str, material_name: str,
     # suggested ID (one-shot path above) so registration and linking
     # complete as one approved request.
     raise ValueError("New ingredient approval requires an assigned ID")
+
+
+def match_recipe_master(owner, repository, name, *, ingredient_id=None, new_master=False, spec=None, candidate_rows=None):
+    """Resolve exact identities; similarity only supplies choices, never writes/merges."""
+    from .mutations import MutationError
+    if ingredient_id:
+        ingredient=repository.load_owned_ingredients(owner,[ingredient_id]).get(ingredient_id)
+        if ingredient is None: raise MutationError("Ingredient not owned")
+        return {"name":name,"master_name":ingredient.name,"ingredient_id":ingredient_id,"action":"reuse","spec":spec,"candidates":[]}
+    exact=repository.find_owned_ingredients_exact(owner,name)
+    if spec is not None:
+        exact=[row for row in exact if (row.get("spec") or "").strip().casefold()==spec.strip().casefold()]
+    if new_master:
+        if exact: raise MutationError("Ingredient identity collision; reuse the existing master")
+        return {"name":name,"master_name":name,"ingredient_id":None,"action":"create","spec":spec,"candidates":[]}
+    if len(exact)==1:
+        row=exact[0]
+        return {"name":name,"master_name":row["name"],"ingredient_id":str(row["id"]),"action":"reuse","spec":row.get("spec"),"candidates":[]}
+    candidates=exact
+    if not candidates:
+        import unicodedata
+        from difflib import SequenceMatcher
+        def normalize(value): return ''.join(c for c in unicodedata.normalize('NFKC',value).casefold() if c.isalnum())
+        needle=normalize(name)
+        loader=getattr(repository,"list_owned_ingredient_master",None)
+        rows=candidate_rows if candidate_rows is not None else (loader(owner) if callable(loader) else [])
+        scored=[]
+        for row in rows:
+            label=normalize(row["name"])
+            score=SequenceMatcher(None,needle,label).ratio()
+            if needle and label and (needle in label or label in needle or score>=0.68): scored.append((score,row))
+        candidates=[r for _,r in sorted(scored,key=lambda x:(-x[0],x[1]["name"],x[1]["id"]))[:20]]
+    return {"name":name,"master_name":name,"ingredient_id":None,"action":"choose" if candidates else "create","spec":spec,
+            "candidates":[{k:r.get(k) for k in ("id","name","spec","brand")} for r in candidates]}

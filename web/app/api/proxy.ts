@@ -1,9 +1,10 @@
 import {NextRequest, NextResponse} from "next/server";
+import {safeIngredientSaveCode} from "../../ingredient-save-contract";
 import {previewAuthorized, sameOrigin} from "../../preview-access";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-type Action = "" | "/cost" | "/confirm" | "/propose" | "/corrections" | "/full" | "/full/review";
-function failure(status: number) {
-  return NextResponse.json({error: "Workspace request failed"}, {status, headers: {"Cache-Control": "no-store"}});
+type Action = "" | "/cost" | "/confirm" | "/confirm/review" | "/propose" | "/corrections" | "/full" | "/full/review";
+function failure(status: number,code?:string) {
+  return NextResponse.json({error: code??"Workspace request failed"}, {status, headers: {"Cache-Control": "no-store"}});
 }
 // Recheck access at the privileged proxy, independently of middleware.
 export async function forward(req: NextRequest, id?: string, action: Action = "") {
@@ -32,7 +33,12 @@ export async function forward(req: NextRequest, id?: string, action: Action = ""
       body, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(30000),
     });
     // Do not reflect backend/provider errors or private response headers.
-    if (!response.ok) return failure(response.status >= 400 && response.status < 600 ? response.status : 502);
+    if (!response.ok){
+      let data:{error?:unknown;detail?:unknown}={};try{data=await response.json();}catch{}
+      const known:Record<string,string>={"Unknown or ambiguous unit":"unit_unknown","Recipe supplier must belong to owner":"supplier_unavailable","Ingredient not owned":"ingredient_unavailable","Ingredient identity collision":"ingredient_conflict","Ambiguous purchase offer":"ingredient_conflict","Choose an ingredient master before saving":"ingredient_conflict","Ambiguous ingredient identity":"ingredient_conflict","Invalid material price or price unit":"invalid_price","Invalid purchase price":"invalid_price","Invalid material quantity":"invalid_input","Invalid quantity or unit":"invalid_input"};
+      const code=safeIngredientSaveCode(data.error)??(typeof data.detail==='string'?known[data.detail]:undefined);
+      return failure(response.status >= 400 && response.status < 600 ? response.status : 502,code);
+    }
     return NextResponse.json(await response.json(), {status: response.status, headers: {"Cache-Control": "no-store"}});
   } catch {return failure(502);}
 }

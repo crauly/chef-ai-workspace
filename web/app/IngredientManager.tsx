@@ -211,7 +211,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
   const quote=displayedPrice(item);
   if(quote)return `${quote.supplier_name??""}: ¥${formatAmount(quote.amount_jpy)} / ${quote.quantity} ${quote.unit}`;
   return !item.selected_offer_id&&item.current_price?.amount_jpy?.value!=null
-   ?`¥${formatAmount(item.current_price.amount_jpy.value)} / ${item.current_price.per_quantity??""} ${item.current_price.per_unit??""}`
+   ?`${ja?"共通価格 ":"Shared price "}¥${formatAmount(item.current_price.amount_jpy.value)} / ${item.current_price.per_quantity??""} ${item.current_price.per_unit??""}`
    :(ja?"未設定":"Not set");
  };
  const suppliers=(item:Ingredient)=>supplierMap===null
@@ -250,7 +250,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
   <div className="ingredient-actions"><button type="button" disabled={busy||supplierLoading} onClick={()=>save(item.id)}>{ja?"保存":"Save"}</button><button type="button" className="secondary" disabled={busy} onClick={()=>setEditing(null)}>{ja?"キャンセル":"Cancel"}</button></div>
  </>}
  </section></div>;
- return <section className="ingredient-manager" aria-label={ja?"食材ライブラリ":"Ingredient library"}>
+ return <section className="ingredient-manager" aria-label={ja?"食材マスター":"Ingredient master"}>
   <p className="settings-panel-description">{ja?"レシピで使用する食材と、価格・仕入れ先を管理します。":"Manage ingredients, prices and suppliers used in recipes."}</p>
   <div className="ingredient-controls">
    <button type="button" className="ingredient-add-button" aria-expanded={showCreate} onClick={()=>setShowCreate(v=>!v)}>{showCreate?(ja?"登録フォームを閉じる":"Close form"):(ja?"+ 新規登録":"+ Add Ingredient")}</button>
@@ -261,6 +261,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
     {supplierNames.map(n=><option value={n} key={n}>{n}</option>)}
    </select></label>
   </div>
+  {(query||supplierFilter!=="all")&&<button type="button" className="secondary" onClick={()=>{setQuery("");setSupplierFilter("all");setPage(1);}}>{ja?"絞り込みを解除":"Clear filters"}</button>}
   {showCreate&&<div className="ingredient-create">
    <label>{ja?"新規食材名":"New ingredient name"}<input value={newName} maxLength={200} disabled={busy} onChange={e=>setNewName(e.target.value)}/></label>
    <VoiceFieldInput locale={locale} label={ja?"食材名":"ingredient name"} disabled={busy} onTranscript={value=>setNewName(value.slice(0,200))}/>

@@ -1,6 +1,6 @@
 import {NextRequest, NextResponse} from "next/server";
 import {previewAuthorized} from "../../../preview-access";
-import {VOICE_RECIPE_SCHEMA,chatResponseFormat} from "../../../muse-schemas";
+import {IMAGE_RECIPE_SCHEMA,chatResponseFormat} from "../../../muse-schemas";
 import {assembleEntries} from "../../../price-enrichment";
 import {parseRecipeDraft} from "../../../recipe-draft-parse";
 export const runtime="nodejs";
@@ -43,7 +43,7 @@ Never determine quantity, weight, unit, purchase price, or selling price from th
 Output only JSON with exactly title, materials, selling_price_jpy, notes, interpretations, price_research, name_corrections. price_research is [] unless the user text explicitly asks for a price lookup. title is a short dish name or "" when unidentifiable.`;
   const userText=hint?`Accompanying user note (auxiliary only; quantities and prices count only when stated here explicitly): ${hint}`:"No accompanying text. All quantities, units, and prices are unknown.";
   const started=performance.now();
-  const upstream=await fetch("https://api.meta.ai/v1/chat/completions",{method:"POST",headers:{"Authorization":"Bearer "+key,"Content-Type":"application/json"},body:JSON.stringify({model:"muse-spark-1.3",reasoning_effort:"low",max_completion_tokens:8192,response_format:chatResponseFormat("chef_image_recipe",VOICE_RECIPE_SCHEMA),messages:[{role:"developer",content:system},{role:"user",content:[{type:"text",text:userText},{type:"image_url",image_url:{url:image}}]}]}),cache:"no-store",redirect:"error",signal:AbortSignal.any([req.signal,AbortSignal.timeout(25000)])});
+  const upstream=await fetch("https://api.meta.ai/v1/chat/completions",{method:"POST",headers:{"Authorization":"Bearer "+key,"Content-Type":"application/json"},body:JSON.stringify({model:"muse-spark-1.3",reasoning_effort:"low",max_completion_tokens:8192,response_format:chatResponseFormat("chef_image_recipe",IMAGE_RECIPE_SCHEMA),messages:[{role:"developer",content:system},{role:"user",content:[{type:"text",text:userText},{type:"image_url",image_url:{url:image}}]}]}),cache:"no-store",redirect:"error",signal:AbortSignal.any([req.signal,AbortSignal.timeout(25000)])});
   if(!upstream.ok){
    // Undecodable image bytes surface here as a 400; keep it distinct from
    // transport/API failures so the UI can ask for a retake, not a retry.

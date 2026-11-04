@@ -83,3 +83,9 @@ from public.offers where supplier_id is null group by owner_id, ingredient_id;
 編集モーダルは「保存」に統合。購入条件・価格を変える場合は確認・承認後に `save_owned_ingredient_edit` が既存採用RPCとメタデータ更新を原子的に実行する。価格を変えない保存は観測を増やさない。編集用選択参照はレシピ材料のOffer参照を置き換えないため、別仕入先の原価・保存版は維持される。
 
 [ADR-017](ADR_017_INGREDIENT_ATOMIC_EDIT.md) にAPI、冪等性、エラー、正規移行、実DBブラウザ検証手順を記載。
+
+## レシピ編集の価格採用とマスター選択
+
+レシピ材料の仕入先がある場合も、編集の確認画面で購入条件・価格を明示承認できる。既存confirm RPC内でOffer価格を採用し、レシピの参照、現在原価、保存版を整合させる。共有価格への直接更新や別APIとの逐次保存は行わない。
+
+新規材料の曖昧な名称は登録・編集ともに候補選択を要求する。新規登録材料の任意の `ingredient_id / new_master / spec`、編集の `ledger / link_ingredient` を既存保存経路に渡す。詳細と本番読み取り調査の限界は [ADR-018](ADR_018_RECIPE_MASTER_PROCUREMENT.md)。

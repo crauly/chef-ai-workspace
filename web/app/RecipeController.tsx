@@ -1,6 +1,8 @@
 "use client";
 import {useCallback,useEffect,useRef,useState} from "react";
 import {label, type Locale} from "./i18n";
+import {ingredientSaveMessage,safeIngredientSaveCode} from "../ingredient-save-contract";
+import MasterMatchReview,{withMasterChoice,type MasterMatch,type EditRequest} from "./MasterMatchReview";
 import AIEditor,{type EditorHandle} from "./AIEditor";
 import DishImageSection from "./DishImageSection";
 import {getDishPreview} from "./dish-image-cache";
@@ -15,6 +17,7 @@ function displayCostJpy(value:string|number|null|undefined):string{
  const numeric=Number(value);
  return Number.isFinite(numeric)?`¥${costFormatter.format(numeric)}`:"—";
 }
+const decimalText=(value:string)=>{const [whole,fraction=""]=value.split(".");const tail=fraction.replace(/0+$/,"");return (whole.replace(/^0+(?=\d)/,"")||"0")+(tail?"."+tail:"");};
 type Item={id:string;title:string;revision:number;updated_at?:string};
 export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  const [items,setItems]=useState<Item[]>([]),[selected,setSelected]=useState<Recipe|null>(null);
@@ -97,17 +100,25 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  const [costError,setCostError]=useState(false);
  const [food,setFood]=useState(""),[qty,setQty]=useState(""),[unit,setUnit]=useState(""),[price,setPrice]=useState(""),[priceQty,setPriceQty]=useState("1"),[priceUnit,setPriceUnit]=useState("");
  const [units,setUnits]=useState<Array<{id:string;symbol:string;dimension:string;aliases:string[]}>>([]);
- const [unitsLoaded,setUnitsLoaded]=useState(false);
+ const [unitsLoaded,setUnitsLoaded]=useState(false),[unitsFailed,setUnitsFailed]=useState(false);
+ type ChangeReview={ingredients:MasterMatch[];requires_selection:boolean;materials:Recipe['materials'];purchases:{material_id:string;supplier_id:string|null;quote:{amount_jpy:{value:string};per_quantity:string;per_unit:string}}[]};
+ const [changeReview,setChangeReview]=useState<{body:EditRequest;plan:ChangeReview}|null>(null);
+ const [suppliersFailed,setSuppliersFailed]=useState(false);
  const [suppliers,setSuppliers]=useState<Array<{id:string;name:string}>>([]);
  useEffect(()=>{let active=true;
-   request<{items:Array<{id:string;name:string}>}>("/api/suppliers?page_size=100")
-     .then(result=>{if(active)setSuppliers(result.items);}).catch(()=>{});
+   void (async()=>{const rows:Array<{id:string;name:string}>=[];
+    for(let page=1;;page++){
+     const result=await request<{items:Array<{id:string;name:string}>}>(`/api/suppliers?page=${page}&page_size=100`);
+     rows.push(...result.items);if(result.items.length<100)break;
+    }
+    if(active)setSuppliers(rows);
+   })().catch(()=>{if(active)setSuppliersFailed(true);});
    return()=>{active=false;};
  },[]);
  useEffect(()=>{let mounted=true;
    request<{items:Array<{id:string;symbol:string;dimension:string;aliases:string[]}>}>("/api/units")
     .then(result=>{if(mounted){setUnits(result.items);setUnitsLoaded(true);}})
-    .catch(()=>{if(mounted)setUnitsLoaded(false);});
+    .catch(()=>{if(mounted){setUnitsLoaded(false);setUnitsFailed(true);}});
    return()=>{mounted=false;};
  },[]);
  const unitChoices=(value:string)=>{const available=units.map(item=>item.symbol);
@@ -124,6 +135,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  const [editOffer,setEditOffer]=useState("");
  const [editOffers,setEditOffers]=useState<Array<{offer_id:string;supplier_id:string|null;supplier_name:string|null;amount_jpy:string;quantity:string;unit:string}>>([]);
  const [editOffersLoading,setEditOffersLoading]=useState(false);
+ const editLookup=useRef(0);
  const [aiOpen,setAiOpen]=useState(false);
  const [voiceEditRequest,setVoiceEditRequest]=useState(0);
  // A one-time navigation hint carries the requested voice-edit mode across
@@ -227,12 +239,17 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  try{const result=await request<{recipe:Recipe}>(`/api/recipes/${selected.id}/confirm`,{method:"POST",body:JSON.stringify({base_revision:selected.revision,request_id:crypto.randomUUID(),operations:[{op:"set_title",value:rename.trim()}],save_version:true})});setSelected(result.recipe);await reload();}
  catch(e){setError(String(e));}finally{setBusy(false);}}
 
- async function saveOperations(operations:Record<string,string>[]):Promise<boolean> {
+ function saveError(error:unknown){
+  const code=safeIngredientSaveCode((error as {code?:unknown})?.code);
+  if(code)return ingredientSaveMessage(code,locale==="ja");
+  return locale==="ja"?"保存・照合に失敗しました。通信状態、レシピの更新競合、食材・単位・仕入条件を確認してください。入力は保持しています。":"Save or review failed. Check connection, revision conflict and master purchase terms. Inputs are retained.";
+ }
+ async function saveOperations(operations:Record<string,string>[],approvedBody?:EditRequest):Promise<boolean> {
    if(!selected||busy)return false;
    setError("");setBusy(true);
    try {
      const result=await request<{recipe:Recipe}>(`/api/recipes/${selected.id}/confirm`,{
-       method:"POST",body:JSON.stringify({base_revision:selected.revision,
+       method:"POST",body:JSON.stringify(approvedBody??{base_revision:selected.revision,
          request_id:crypto.randomUUID(),operations,save_version:true})});
      setSelected(result.recipe);
      try {
@@ -243,8 +260,12 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
          if(op.op==="set_material_name"&&(!material||material.material_name.value!==op.value))throw new Error("Ingredient name not persisted");
          if(op.op==="remove_material"&&material)throw new Error("Ingredient removal not persisted");
          if(op.op==="set_material_quantity"&&(!material||material.quantity.value!==op.value||material.unit!==op.unit))throw new Error("Quantity not persisted");
-         if(op.op==="set_material_price"&&(!material||material.effective_price?.amount_jpy.value!==op.price_jpy||String(material.effective_price?.per_quantity)!==op.price_quantity||material.effective_price?.per_unit!==op.price_unit))throw new Error("Price not persisted");
-         if(op.op==="set_material_supplier"&&(!material||(material.supplier_id||"")!==op.supplier_id||(material.offer_id||"")!==(op.offer_id||"")))throw new Error("Supplier or purchase condition not persisted");
+         if(op.op==="set_material_price"&&(!material||decimalText(material.effective_price?.amount_jpy.value??"")!==decimalText(op.price_jpy)||decimalText(String(material.effective_price?.per_quantity??""))!==decimalText(op.price_quantity)||material.effective_price?.per_unit!==op.price_unit))throw new Error("Price not persisted");
+         if(op.op==="set_material_supplier"){
+          const adopted=operations.some(p=>p.material_id===op.material_id&&(p.op==="set_material_price"||(p.op==="link_ingredient"&&p.price_mode==="override")));
+          const matches=material&&((material.supplier_id||"")===op.supplier_id||(adopted&&!op.supplier_id&&material.supplier_name==="相場参考価格"));
+          if(!matches||(!adopted&&op.offer_id&&material?.offer_id!==op.offer_id))throw new Error("Supplier or purchase condition not persisted");
+         }
          if(op.op==="set_selling_price"&&persisted.selling_price_jpy.value!==op.value_jpy)throw new Error("Selling price not persisted");
        }
        setSelected(persisted);setError("");
@@ -255,30 +276,42 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
        return true;
      }
      return true;
-   }catch(e){setError(String(e));return false;}finally{setBusy(false);}
+   }catch(e){setError(saveError(e));return false;}finally{setBusy(false);}
+ }
+ async function reviewOperations(body:EditRequest){
+  if(!selected||busy)return;setBusy(true);setError("");
+  try{const plan=await request<ChangeReview>(`/api/recipes/${selected.id}/confirm/review`,{method:"POST",body:JSON.stringify(body)});setChangeReview({body,plan});}
+  catch(e){setError(saveError(e));}
+  finally{setBusy(false);}
+ }
+ async function queueOperations(operations:Record<string,string>[]){
+  if(!selected)return;
+  await reviewOperations({base_revision:selected.revision,request_id:crypto.randomUUID(),operations,save_version:true});
  }
  async function addFood(e:React.FormEvent){e.preventDefault();
-   if(!food.trim()||!qty.trim()||!price.trim()||!priceQty.trim())return;
-   const saved=await saveOperations([{op:"add_material",material_id:crypto.randomUUID(),name:food.trim(),
-     quantity:qty,unit,price_jpy:price,price_quantity:priceQty,price_unit:priceUnit}]);
-   if(saved){setFood("");setQty("");setPrice("");}
+  if(!food.trim()||!qty.trim()||!unit||!unitsLoaded)return;
+  if(price.trim()&&(!priceQty.trim()||!priceUnit)){setError(locale==="ja"?"価格を入力した場合は仕入数量・単位も指定してください。":"Purchase quantity and unit are required with a price.");return;}
+  const material_id=crypto.randomUUID();
+  await queueOperations([price.trim()?{op:"add_material",material_id,name:food.trim(),quantity:qty,unit,price_jpy:price,price_quantity:priceQty,price_unit:priceUnit}:
+   {op:"add_unpriced_material",material_id,name:food.trim(),quantity:qty,unit}]);
  }
  function openEdit(materialId:string){
    const line=selected?.materials.find(m=>m.id===materialId);
    if(!line||busy)return;
+   const lookup=++editLookup.current;
    setEditName(line.material_name.value||"");
-   setEditQty(line.quantity.value||"");setEditUnit(line.unit||"g");
+   setEditQty(line.quantity.value||"");setEditUnit(line.unit||"");
    setEditSupplier(line.supplier_id||"");setEditOffer(line.offer_id||"");
    setEditOffers([]);setEditOffersLoading(Boolean(line.ingredient_id));
    if(line.ingredient_id){
      void request<{items:Array<{offer_id:string;supplier_id:string|null;supplier_name:string|null;amount_jpy:string;quantity:string;unit:string}>}>(`/api/ingredients/${encodeURIComponent(line.ingredient_id)}/offer-prices`)
-       .then(result=>setEditOffers(result.items))
-       .catch(()=>setError(locale==="ja"?"購入条件の取得に失敗しました":"Failed to load purchase conditions"))
-       .finally(()=>setEditOffersLoading(false));
+       .then(result=>{if(editLookup.current===lookup)setEditOffers(result.items);})
+       .catch(()=>{if(editLookup.current===lookup)setError(locale==="ja"?"購入条件の取得に失敗しました":"Failed to load purchase conditions");})
+       .finally(()=>{if(editLookup.current===lookup)setEditOffersLoading(false);});
    }
    setEditPrice(line.effective_price?.amount_jpy.value||line.price_override?.amount_jpy.value||"");
    setEditPriceQty(line.effective_price?.per_quantity||line.price_override?.per_quantity||"1");
-   setEditPriceUnit(line.effective_price?.per_unit||line.price_override?.per_unit||line.unit||"g");
+   setEditPriceUnit(line.effective_price?.per_unit||line.price_override?.per_unit||line.unit||"");
    setConfirmQty(false);setConfirmPrice(false);setEditingId(materialId);
  }
  async function submitEdit(){
@@ -286,21 +319,17 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
    if(!line)return;
    const operations:Record<string,string>[]=[];
    if(editName.trim()!==line.material_name.value)operations.push({op:"set_material_name",material_id:line.id,value:editName.trim()});
-   if((editQty.trim()&&editQty.trim()!==line.quantity.value)||editUnit!==(line.unit||"g")||(confirmQty&&line.quantity.status==="assumed"))
+   if((editQty.trim()&&editQty.trim()!==line.quantity.value)||editUnit!==(line.unit||"")||(confirmQty&&line.quantity.status==="assumed"))
      operations.push({op:"set_material_quantity",material_id:line.id,value:editQty.trim()||line.quantity.value||"",unit:editUnit});
-   if(editSupplier&&((editPrice.trim()&&editPrice.trim()!==(line.effective_price?.amount_jpy.value||line.price_override?.amount_jpy.value||""))||editPriceQty!==(line.effective_price?.per_quantity||line.price_override?.per_quantity||"1")||editPriceUnit!==(line.effective_price?.per_unit||line.price_override?.per_unit||line.unit||"g"))){
-     setError(locale==="ja"?"仕入れ先別価格は食材管理画面で承認してください。ここでは採用済み購入条件を選択します。":"Approve supplier prices in ingredient settings, then select the adopted offer here.");
-     return;
+   const priceChanged=editPrice.trim()!==(line.effective_price?.amount_jpy.value||line.price_override?.amount_jpy.value||"")||editPriceQty!==(line.effective_price?.per_quantity||line.price_override?.per_quantity||"1")||editPriceUnit!==(line.effective_price?.per_unit||line.price_override?.per_unit||line.unit||"")||(confirmPrice&&line.price_override?.amount_jpy.status==="assumed");
+   if(editSupplier!==(line.supplier_id||"")||editOffer!==(line.offer_id||"")||priceChanged)
+    operations.push({op:"set_material_supplier",material_id:line.id,supplier_id:editSupplier,offer_id:editOffer});
+   if(priceChanged&&(editPrice.trim()||editPriceQty.trim()||editPriceUnit||editSupplier===(line.supplier_id||""))){
+    if(!editPrice.trim()||!editPriceQty.trim()||!editPriceUnit){setError(locale==="ja"?"仕入価格・数量・単位をすべて入力してください。":"Enter purchase price, quantity and unit.");return;}
+    operations.push({op:"set_material_price",material_id:line.id,price_jpy:editPrice.trim(),price_quantity:editPriceQty,price_unit:editPriceUnit});
    }
-   // Clear purchase identity before applying a supplier-less price edit.
-   if(editSupplier!==(line.supplier_id||"")||editOffer!==(line.offer_id||""))
-     operations.push({op:"set_material_supplier",material_id:line.id,supplier_id:editSupplier,offer_id:editOffer});
-   if(!editSupplier&&((editPrice.trim()&&editPrice.trim()!==(line.effective_price?.amount_jpy.value||line.price_override?.amount_jpy.value||""))||editPriceQty!==(line.effective_price?.per_quantity||line.price_override?.per_quantity||"1")||editPriceUnit!==(line.effective_price?.per_unit||line.price_override?.per_unit||line.unit||"g")||(confirmPrice&&line.price_override?.amount_jpy.status==="assumed")))
-     operations.push({op:"set_material_price",material_id:line.id,
-       price_jpy:editPrice.trim()||line.effective_price?.amount_jpy.value||line.price_override?.amount_jpy.value||"",
-       price_quantity:editPriceQty,price_unit:editPriceUnit});
    if(!operations.length){setEditingId(null);return;}
-   if(await saveOperations(operations))setEditingId(null);
+   await queueOperations(operations);
  }
  function browseByVoice(target:string,openVoiceEdit=false):Promise<Recipe|null>{
   browseWaiter.current?.(null);
@@ -376,14 +405,14 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
   const name=m.material_name.value?.trim()||selected.display_names?.[m.id]?.display?.trim()?.trim()||t("unnamed");
   const qtyMark=m.quantity.status==="assumed"?` (${t("assumed")})`:m.quantity.status==="unresolved"?` (${t("unresolved")})`:"";
   const price=m.effective_price||m.price_override;
-  const priceText=price?`${locale==="ja"?"仕入単価":"Purchase"} ¥${price.amount_jpy.value} / ${price.per_quantity}${price.per_unit}${price.amount_jpy.status==="assumed"?` (${t("assumed")})`:price.amount_jpy.status==="unresolved"?` (${t("unresolved")})`:""}`:m.price_mode==="inherit"?(locale==="ja"?"共通食材の継承価格（詳細値は未取得）":"Inherited ingredient price (not loaded)"):(locale==="ja"?"仕入単価 未設定":"Purchase price not set");
+  const priceText=price?`${locale==="ja"?"仕入単価":"Purchase"} ¥${price.amount_jpy.value} / ${price.per_quantity}${price.per_unit}${price.amount_jpy.status==="assumed"?` (${t("assumed")})`:price.amount_jpy.status==="unresolved"?` (${t("unresolved")})`:""}`:m.supplier_id?(locale==="ja"?"この仕入先・購入条件の採用価格は未設定":"No adopted price for these supplier terms"):m.price_mode==="inherit"?(locale==="ja"?"共通価格 未確定":"Shared price unresolved"):(locale==="ja"?"仕入単価 未設定":"Purchase price not set");
   return <li key={m.id} className="ingredient-row"><div className="ingredient-main"><strong>{name}</strong><div className="detail-ingredient-data"><span className="detail-ingredient-qty">{m.quantity.value??t("missing")} {m.unit??""}{qtyMark}</span><span className="ingredient-price">{priceText}</span>{m.supplier_name&&<span className="ingredient-supplier">{m.supplier_name}</span>}{cost?.line_costs?.[m.id]!=null&&<span>{locale==="ja"?"材料原価":"Line cost"} {displayCostJpy(cost.line_costs[m.id])}</span>}</div></div><button className="icon-button" disabled={busy} type="button" aria-label={locale==="ja"?`${name}を編集`:`Edit ${name}`} onClick={()=>openEdit(m.id)}>✏️</button></li>;})}</ul>}
- {editingId!==null&&(()=>{
+ {editingId!==null&&!changeReview&&(()=>{
   const line=selected.materials.find(m=>m.id===editingId);
   if(!line)return null;
   const name=line.material_name.value?.trim()||selected.display_names?.[line.id]?.display?.trim()||t("unnamed");
-  const qtyChanged=editQty.trim()!==line.quantity.value||editUnit!==(line.unit||"g");
-  const priceChanged=editPrice.trim()!==(line.effective_price?.amount_jpy.value||line.price_override?.amount_jpy.value||"")||editPriceQty!==(line.effective_price?.per_quantity||line.price_override?.per_quantity||"1")||editPriceUnit!==(line.effective_price?.per_unit||line.price_override?.per_unit||line.unit||"g");
+  const qtyChanged=editQty.trim()!==line.quantity.value||editUnit!==(line.unit||"");
+  const priceChanged=editPrice.trim()!==(line.effective_price?.amount_jpy.value||line.price_override?.amount_jpy.value||"")||editPriceQty!==(line.effective_price?.per_quantity||line.price_override?.per_quantity||"1")||editPriceUnit!==(line.effective_price?.per_unit||line.price_override?.per_unit||line.unit||"");
   return <div className="name-choice-overlay" onClick={()=>setEditingId(null)}>
    <section role="dialog" aria-modal="true" aria-label={locale==="ja"?`${name}を編集`:`Edit ${name}`} className="name-choice-dialog" onClick={e=>e.stopPropagation()}>
     <h4>{name}</h4>
@@ -393,18 +422,19 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
      <label>{locale==="ja"?"食材名":"Ingredient name"}<input value={editName} onChange={e=>setEditName(e.target.value)} disabled={busy}/></label>
      <label>{locale==="ja"?"数量":"Quantity"}<input inputMode="decimal" value={editQty} onChange={e=>setEditQty(e.target.value)} disabled={busy}/></label>
      <label>Unit<select value={editUnit} onChange={e=>setEditUnit(e.target.value)} disabled={busy}><option value="">—</option>{unitChoices(editUnit).map(symbol=><option key={symbol} value={symbol}>{symbol}</option>)}</select></label>
-     <label>{locale==="ja"?"仕入先":"Supplier"}<select value={editSupplier} onChange={e=>{setEditSupplier(e.target.value);setEditOffer("");}} disabled={busy}><option value="">—</option>{suppliers.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+     <label>{locale==="ja"?"仕入先":"Supplier"}<select value={editSupplier} onChange={e=>{const id=e.target.value;setEditSupplier(id);setEditOffer("");const q=editOffers.find(q=>q.supplier_id===id);setEditPrice(q?.amount_jpy??"");setEditPriceQty(q?.quantity??"");setEditPriceUnit(q?.unit??"");}} disabled={busy}><option value="">—</option>{editSupplier&&!suppliers.some(s=>s.id===editSupplier)&&<option value={editSupplier}>{line.supplier_name??(locale==="ja"?"仕入先を取得できません":"Supplier unavailable")}</option>}{suppliers.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
      {editSupplier&&<label>{locale==="ja"?"採用する購入条件":"Adopted purchase condition"}
-       <select value={editOffer} onChange={e=>setEditOffer(e.target.value)} disabled={busy||editOffersLoading}>
+       <select value={editOffer} onChange={e=>{const id=e.target.value;setEditOffer(id);const q=editOffers.find(q=>q.offer_id===id);if(q){setEditPrice(q.amount_jpy);setEditPriceQty(q.quantity);setEditPriceUnit(q.unit);}}} disabled={busy||editOffersLoading}>
          <option value="">{locale==="ja"?"指定しない（購入条件が複数なら原価未確定）":"Unspecified (partial cost if ambiguous)"}</option>
          {editOffers.filter(offer=>offer.supplier_id===editSupplier).map(offer=>
            <option key={offer.offer_id} value={offer.offer_id}>{offer.quantity} {offer.unit} / ¥{offer.amount_jpy} — {offer.offer_id.slice(0,8)}</option>)}
        </select>
      </label>}
-     {editSupplier&&<p className="muted">{locale==="ja"?"仕入れ先別価格は食材管理で承認・登録し、ここで採用条件を選択します。":"Approve supplier pricing in Ingredient Manager and select its purchase term here."}</p>}
-     <label>{locale==="ja"?"仕入単価（円）":"Price (JPY)"}<input inputMode="decimal" value={editPrice} onChange={e=>setEditPrice(e.target.value)} disabled={busy||Boolean(editSupplier)}/></label>
-     <label>{locale==="ja"?"単価の基準数量":"Price per quantity"}<input inputMode="decimal" value={editPriceQty} onChange={e=>setEditPriceQty(e.target.value)} disabled={busy||Boolean(editSupplier)}/></label>
-     <label>Price unit<select value={editPriceUnit} onChange={e=>setEditPriceUnit(e.target.value)} disabled={busy||Boolean(editSupplier)}><option value="">—</option>{unitChoices(editPriceUnit).map(symbol=><option key={symbol} value={symbol}>{symbol}</option>)}</select></label>
+     {suppliersFailed&&<p role="alert">{locale==="ja"?"仕入先一覧を取得できません。再読み込みして確認してください。":"Supplier list is unavailable. Reload to retry."}</p>}
+     {editSupplier&&<p className="muted">{locale==="ja"?"仕入価格の変更は、仕入れ先・購入条件を確認して承認した後、食材マスターの採用価格へ反映します。":"Review and approve supplier purchase terms to update the adopted master price."}</p>}
+     <label>{locale==="ja"?"仕入単価（円）":"Price (JPY)"}<input inputMode="decimal" value={editPrice} onChange={e=>setEditPrice(e.target.value)} disabled={busy||!unitsLoaded}/></label>
+     <label>{locale==="ja"?"単価の基準数量":"Price per quantity"}<input inputMode="decimal" value={editPriceQty} onChange={e=>setEditPriceQty(e.target.value)} disabled={busy||!unitsLoaded}/></label>
+     <label>Price unit<select value={editPriceUnit} onChange={e=>setEditPriceUnit(e.target.value)} disabled={busy||!unitsLoaded}><option value="">—</option>{unitChoices(editPriceUnit).map(symbol=><option key={symbol} value={symbol}>{symbol}</option>)}</select></label>
      {line.quantity.status==="assumed"&&<label><input type="checkbox" checked={confirmQty} onChange={e=>setConfirmQty(e.target.checked)}/> {locale==="ja"?"現在の数量を明示確定":"Confirm current quantity"}</label>}
      {line.price_override?.amount_jpy.status==="assumed"&&<label><input type="checkbox" checked={confirmPrice} onChange={e=>setConfirmPrice(e.target.checked)}/> {locale==="ja"?"現在の仕入価格を明示確定":"Confirm current price"}</label>}
     </div>
@@ -424,11 +454,12 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  <select aria-label="Unit" value={unit} onChange={e=>setUnit(e.target.value)}><option value="">—</option>{unitChoices(unit).map(symbol=><option key={symbol} value={symbol}>{symbol}</option>)}</select>
  </fieldset>
  <fieldset><legend>{locale==="ja"?"仕入単価":"Unit price"}</legend>
- <input aria-label={locale==="ja"?"仕入単価（円）":"Price (JPY)"} placeholder={locale==="ja"?"仕入単価 ¥":"Price ¥"} inputMode="decimal" value={price} onChange={e=>setPrice(e.target.value)} required/>
- <input aria-label={locale==="ja"?"単価の基準数量":"Price per quantity"} placeholder="1" inputMode="decimal" value={priceQty} onChange={e=>setPriceQty(e.target.value)} required/>
+ <input aria-label={locale==="ja"?"仕入単価（円）":"Price (JPY)"} placeholder={locale==="ja"?"仕入単価 ¥":"Price ¥"} inputMode="decimal" value={price} onChange={e=>setPrice(e.target.value)}/>
+ <input aria-label={locale==="ja"?"単価の基準数量":"Price per quantity"} placeholder="1" inputMode="decimal" value={priceQty} onChange={e=>setPriceQty(e.target.value)}/>
  <select aria-label="Price unit" value={priceUnit} onChange={e=>setPriceUnit(e.target.value)}><option value="">—</option>{unitChoices(priceUnit).map(symbol=><option key={symbol} value={symbol}>{symbol}</option>)}</select>
  </fieldset>
- <button disabled={busy||!food.trim()||!qty.trim()||!price.trim()||!unitsLoaded||!unit||!priceUnit}>{locale==="ja"?"食材を追加":"Add ingredient"}</button>
+ {!unitsLoaded&&<p role="status">{unitsFailed?(locale==="ja"?"単位マスターの取得に失敗しました。画面を再読み込みして再試行してください。":"Unit master failed to load. Reload to retry."):(locale==="ja"?"単位マスターを取得中です。":"Loading unit master…")}</p>}
+ <button disabled={busy||!food.trim()||!qty.trim()||!unitsLoaded||!unit||(Boolean(price.trim())&&(!priceQty.trim()||!priceUnit))}>{locale==="ja"?"食材を追加":"Add ingredient"}</button>
  </form></details>
  {cost?.estimated&&<p className="detail-estimate">{locale==="ja"?"原価に推定値が含まれます":"Cost includes estimates"}</p>}
  <details className="detail-action"><summary>{locale==="ja"?"✎ 料理名を変更":"✎ Rename recipe"}</summary><form onSubmit={change}><input aria-label={t("rename")} value={rename} onChange={e=>setRename(e.target.value)}/><button disabled={busy||!rename.trim()}>{t("save")}</button></form></details>
@@ -437,6 +468,16 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  <button type="button" disabled={busy} aria-expanded={aiOpen} onClick={()=>setAiOpen(v=>!v)} className="detail-ai-button">{locale==="ja"?"◇ AIに変更相談":"◇ Ask AI to edit"}</button>
  <div hidden={!aiOpen}><AIEditor micControl={micControl} key={selected.id} recipe={selected} locale={locale} control={editor} markReview={()=>reviewBoundary.current?.()??-1} onBusy={b=>{setBusy(b);if(b)setAiOpen(true);}} onSaved={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");void reload();}} /></div>
  </section>}
+ {changeReview&&<div className="name-choice-overlay"><section role="dialog" aria-modal="true" aria-label={locale==="ja"?"レシピと食材マスターの保存確認":"Confirm recipe and master changes"} className="name-choice-dialog">
+  <h3>{locale==="ja"?"レシピと食材マスターの保存確認":"Confirm recipe and master changes"}</h3>
+  <MasterMatchReview items={changeReview.plan.ingredients} ja={locale==="ja"} disabled={busy} onChoose={(m,c,spec)=>void reviewOperations(withMasterChoice(changeReview.body,m,c,spec))}/>
+  <ul>{changeReview.plan.materials.map(m=><li key={m.id}>{m.material_name.value}：{m.quantity.value??"—"} {m.unit}</li>)}</ul>
+  <ul>{changeReview.plan.purchases?.map(p=><li key={p.material_id}>{suppliers.find(s=>s.id===p.supplier_id)?.name??(p.supplier_id?(selected?.materials.find(m=>m.id===p.material_id&&m.supplier_id===p.supplier_id)?.supplier_name??(locale==="ja"?"仕入先を確認できません":"Supplier unavailable")):(locale==="ja"?"相場参考価格":"Market reference"))}：¥{p.quote.amount_jpy.value} / {p.quote.per_quantity} {p.quote.per_unit}</li>)}</ul>
+  <p>{locale==="ja"?"仕入価格の採用は同じ食材・仕入れ先・購入条件を使うレシピの現在原価にも反映されます。":"Adoption updates current costs for recipes using the same ingredient and purchase terms."}</p>
+  {error&&<p role="alert">{error}</p>}
+  <button disabled={busy||changeReview.plan.requires_selection} onClick={()=>void saveOperations(changeReview.body.operations,changeReview.body).then(ok=>{if(ok){setChangeReview(null);setEditingId(null);setFood("");setQty("");setPrice("");}})}>{locale==="ja"?"承認して保存":"Approve and save"}</button>
+  <button disabled={busy} onClick={()=>setChangeReview(null)}>{locale==="ja"?"戻る":"Back"}</button>
+ </section></div>}
  {actionItem&&<div className="name-choice-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setActionItem(null);}}>
    <section role="dialog" aria-modal="true" aria-label={locale==="ja"?"レシピの操作":"Recipe actions"} className="name-choice-dialog recipe-action-dialog">
     <h3>{actionItem.title}</h3>

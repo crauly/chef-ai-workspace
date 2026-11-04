@@ -57,6 +57,11 @@ class SupabasePersistence:
     def _creation_hash(payload):
         from hashlib import sha256
         from .persistence_service import canonical_json
+        import copy
+        payload=copy.deepcopy(payload)
+        for line in payload.get("materials",[]):
+            for key,default in (("ingredient_id",None),("spec",None),("new_master",False)):
+                if line.get(key)==default: line.pop(key,None)
         return sha256(canonical_json(payload).encode("utf-8")).hexdigest()
 
     def verify_owned_creation_payload(self, owner_id, recipe_id, payload):
@@ -229,10 +234,17 @@ class SupabasePersistence:
         """Complete owner-scoped ingredient SSOT for the manager."""
         rows=[]
         while True:
-            response=(self.client.table("ingredients")
-                      .select("id,name,spec,current_price,price_research_enabled,last_research_at,last_research_error,selected_offer_id")
-                      .eq("owner_id",owner_id)
-                      .order("id").range(len(rows),len(rows)+499).execute())
+            fields="id,name,spec,current_price,price_research_enabled,last_research_at,last_research_error"
+            try:
+                response=(self.client.table("ingredients").select(fields+",selected_offer_id")
+                          .eq("owner_id",owner_id).order("id").range(len(rows),len(rows)+499).execute())
+            except APIError as exc:
+                # A staged deployment must still expose masters before ADR-017 is applied.
+                # Only this precise missing optional display-column error is compatible.
+                if str(exc.code) not in ("42703","PGRST204") or "selected_offer_id" not in exc.message:
+                    raise
+                response=(self.client.table("ingredients").select(fields)
+                          .eq("owner_id",owner_id).order("id").range(len(rows),len(rows)+499).execute())
             batch=response.data or []
             if not batch:
                 return rows
@@ -321,7 +333,7 @@ class SupabasePersistence:
         # receipt because SQL matching and Python casefold differ by locale.
         token=name.strip().replace("\\","\\\\").replace("%","\\%").replace("_","\\_")
         response=(self.client.table("ingredients")
-                  .select("id,name,current_price").eq("owner_id",owner_id)
+                  .select("id,name,spec,brand,current_price").eq("owner_id",owner_id)
                   .ilike("name",token).execute())
         return [row for row in (response.data or [])
                 if row["name"].strip().casefold()==name.strip().casefold()]
@@ -1125,6 +1137,7 @@ class SupabasePersistence:
                 "Stale recipe revision", "Request ID reused with a different mutation",
                 "Ingredient identity collision", "Recipe ingredient must belong to owner",
                 "Unknown or ambiguous unit", "Recipe price override forbidden",
+                "Recipe supplier must belong to owner", "Ambiguous purchase offer", "Invalid purchase price",
             ):
                 raise MutationError(exc.message) from exc
             raise

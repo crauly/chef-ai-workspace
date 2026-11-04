@@ -1,4 +1,5 @@
 "use client";
+import MasterMatchReview,{type MasterMatch} from "./MasterMatchReview";
 import {useEffect,useImperativeHandle,useRef,useState,type Ref} from "react";
 import {useVoiceProcessingStatus,type VoiceStatusRow} from "./VoiceProcessingStatus";
 import type {Locale} from "./i18n";
@@ -105,7 +106,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   request<{items:Array<{id:string;symbol:string;dimension:string;base_factor:string|null;aliases:string[]}>}>("/api/units").then(result=>{if(!cancelled)setUnitCatalog(result.items);}).catch(()=>{if(!cancelled)setUnitCatalog(null);});
   return ()=>{cancelled=true;};
  },[]);
- type MasterReview={already_saved?:boolean;ingredients:{name:string;action:string;price_action?:string}[];units:{symbol:string;dimension:string}[];suppliers:{name:string;action:string}[]};
+ type MasterReview={already_saved?:boolean;ingredients:(MasterMatch&{price_action?:string})[];units:{symbol:string;dimension:string}[];suppliers:{name:string;action:string}[]};
  const [masterReview,setMasterReview]=useState<MasterReview|null>(null);
  const reviewFlight=useRef(false);
  const [phase,setPhase]=useState<"dictating"|"review"|"saving">("dictating");
@@ -144,7 +145,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  const reviewMode=useRef<SaveMode|null>(null);
  const inbox=useRef<Input[]>([]),draining=useRef(false),revision=useRef(0),epoch=useRef(0);
  const requestId=useRef<string|null>(null),semanticAbort=useRef<AbortController|null>(null),priceAbort=useRef<AbortController|null>(null),priceEpoch=useRef(0),alive=useRef(true);
- type RegistrationPayload={request_id:string;title:string;materials:ReturnType<typeof toSaveMaterials>;unit_candidates:{symbol:string;dimension:string}[];selling_price_jpy:string|null};
+ type RegistrationPayload={request_id:string;title:string;materials:(ReturnType<typeof toSaveMaterials>[number]&{ingredient_id?:string;new_master?:boolean;spec?:string|null})[];unit_candidates:{symbol:string;dimension:string}[];selling_price_jpy:string|null};
  const registrationPayload=useRef<RegistrationPayload|null>(null);
  const priceFlight=useRef<{key:string;rows:string[]} | null>(null);
  type DonePrices=Pick<Draft,"price_references"|"research_status"|"provisional_prices"|"research_state">;
@@ -511,6 +512,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   const d=draftRef.current;
   const mode=reviewMode.current;
   if(phaseRef.current!=="review"||!d||!mode||reviewed.current!==d||saveModeFor(d)!==mode||!unitCatalog||parsedTurns.current<dataTurns.current.length)return;
+  if(masterReview?.ingredients.some(m=>m.action==="choose")){say(ja?"食材マスターの候補を選択して再照合してください。":"Select the ingredient masters before approval.");return;}
   let payload:ReturnType<typeof savePayload>;
   try{payload=savePayload(d);}catch{
    say(ja?"新規単位の分類を確認してください。":"Review the dimension of every proposed new unit.");return;
@@ -918,11 +920,16 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    {phase==="review"&&masterReview&&<div aria-label={ja?"正式登録の確認":"Registration review"}>
     {masterReview.already_saved&&<p>{ja?"この登録は保存済みです。承認後に同じ登録IDで保存結果を再取得します。":"This registration is already saved. Approval retrieves its result with the same request ID."}</p>}
     <p>{ja?"以下のマスター変更と上のレシピ内容を確認して承認してください。価格候補の採用も承認に含まれます。":"Review these master changes and the recipe above before approving, including any selected price candidates."}</p>
-    <ul>{masterReview.ingredients.map((m,i)=><li key={i}>{m.name}：{m.action==="reuse"?(ja?"既存食材を使用":"Use existing ingredient"):(ja?"食材を新規登録":"Create ingredient")}{m.price_action==="reviewed_quote"&&(ja?"（表示価格を共通の採用価格として登録）":" (adopt displayed shared price)")}</li>)}</ul>
+    <MasterMatchReview items={masterReview.ingredients} ja={ja} disabled={busy} onChoose={(match,choice,spec)=>{
+     const payload=registrationPayload.current;if(!payload)return;
+     registrationPayload.current={...payload,materials:payload.materials.map(m=>m.name===match.name?{...m,ingredient_id:choice==='new'?undefined:choice,new_master:choice==='new',spec:spec.trim()||null}:m)};
+     reviewed.current=null;reviewMode.current=null;setStage("dictating");void showReview();
+    }}/>
+    <p>{ja?"表示した価格は各食材の仕入れ先・購入条件に対する採用価格として登録します。":"Displayed prices are adopted for their supplier and purchase terms."}</p>
     <ul>{masterReview.suppliers.map((m,i)=><li key={i}>{m.name}：{m.action==="reuse"?(ja?"既存仕入先を使用":"Use existing supplier"):(ja?"仕入先を新規登録":"Create supplier")}</li>)}</ul>
     <ul>{masterReview.units.map((u,i)=><li key={i}>{ja?"単位を新規登録：":"Create unit: "}{u.symbol}（{u.dimension}）</li>)}</ul>
    </div>}
-   <button type="button" disabled={busy||!eligible||phase==="saving"} onClick={()=>void register()}>{phase==="review"?(ja?"承認して保存":"Approve and save"):(ja?"レシピを登録":"Register recipe")}</button>
+   <button type="button" disabled={busy||!eligible||phase==="saving"||(phase==="review"&&masterReview?.ingredients.some(m=>m.action==="choose"))} onClick={()=>void register()}>{phase==="review"?(ja?"承認して保存":"Approve and save"):(ja?"レシピを登録":"Register recipe")}</button>
    <button type="button" disabled={phase==="saving"} onClick={clear}>{ja?"下書きを破棄":"Discard draft"}</button>
   </div>}
   <details className="voice-transcript"><summary>{ja?"認識した発話":"Recognized utterances"}（{turns.length}{ja?"件":" turns"}）</summary>{turns.length>0?<ol aria-label={ja?"認識した発話の一覧":"Recognized utterances"}>{[...turns].reverse().map((turn,index)=><li key={`${turns.length-index}`}>{turn}</li>)}</ol>:<p>{ja?"まだ発話はありません。":"No utterances yet."}</p>}</details>

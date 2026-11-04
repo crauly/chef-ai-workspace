@@ -547,6 +547,9 @@ def create_demo_recipe(body: CreateRecipeBody, ctx=Depends(demo_context)):
 
 class CompleteRecipeMaterial(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    ingredient_id: UUID | None=None
+    new_master: StrictBool=False
+    spec: str | None=Field(default=None,max_length=200)
     name: str = Field(min_length=1, max_length=200)
     quantity: str | None = Field(default=None, max_length=30)
     unit: str | None = Field(default=None, min_length=1, max_length=32)
@@ -695,31 +698,27 @@ def _complete_demo_recipe(body: CompleteRecipeBody, ctx, review_only=False):
     catalog={}
     entries_by_name={}
     master_review=[]
+    candidate_loader=getattr(repository,"list_owned_ingredient_master",None)
+    candidate_rows=candidate_loader(owner) if callable(candidate_loader) else []
     for line, material in zip(recipe.materials, body.materials):
         name=(line.material_name.value or "").strip()
-        key=name.casefold()
+        key=(name.casefold(),str(material.ingredient_id or ""),material.spec,material.new_master)
         entry=entries_by_name.get(key)
         if entry is None:
-            matches=finder(owner,name)
-            if len(matches)>1:
-                raise HTTPException(409,"Ambiguous ingredient identity; select a master")
-            if matches:
-                raw=matches[0]
-                ing_id=str(raw["id"])
-                if not callable(reader):
-                    raise HTTPException(503,"Ingredient master lookup unavailable")
-                saved_catalog=reader(owner,[ing_id])
-                ingredient=saved_catalog.get(ing_id)
-                if ingredient is None:
-                    raise HTTPException(409,"Ingredient master disappeared")
-                existing_price=ingredient.current_price
-            else:
-                ing_id=str(uuid4())
-                existing_price=None
-            master_review.append({"name":name,"action":"reuse" if matches else "create",
-                                  "ingredient_id":ing_id if matches else None,
-                                  "price_action":"reviewed_quote" if line.price_override is not None else "existing_or_unconfirmed"})
-            entry={"id":ing_id,"name":name,"current_price":None}
+            from .ingredient_assist import match_recipe_master
+            try:
+                plan=match_recipe_master(owner,repository,name,
+                    ingredient_id=str(material.ingredient_id) if material.ingredient_id else None,
+                    new_master=material.new_master,spec=material.spec,candidate_rows=candidate_rows)
+            except MutationError as exc: raise HTTPException(409,str(exc)) from exc
+            if plan["action"]=="choose" and not review_only:
+                raise HTTPException(409,"Choose an ingredient master before saving")
+            ing_id=plan["ingredient_id"] or str(uuid4())
+            ingredient=reader(owner,[ing_id]).get(ing_id) if plan["action"]=="reuse" and callable(reader) else None
+            if plan["action"]=="reuse" and ingredient is None: raise HTTPException(409,"Ingredient master disappeared")
+            existing_price=ingredient.current_price if ingredient else None
+            master_review.append({**plan,"price_action":"reviewed_quote" if line.price_override is not None else "existing_or_unconfirmed"})
+            entry={"id":ing_id,"name":plan["master_name"],"spec":plan.get("spec"),"current_price":None}
             entries_by_name[key]=entry
             catalog[ing_id]=Ingredient(ing_id,name,existing_price)
         ing_id=entry["id"]
@@ -786,6 +785,23 @@ def _complete_demo_recipe(body: CompleteRecipeBody, ctx, review_only=False):
     committed = repository.load_owned_recipe(owner, recipe_id)
     return _displayed_recipe(owner, repository, committed)
 
+@router.post("/recipes/{recipe_id}/confirm/review")
+def review_demo_change(recipe_id:UUID,body:ConfirmChangeBody,ctx=Depends(demo_context)):
+    from .recipe_crud import save_recipe_crud
+    from .persistence_service import LedgerIngredient
+    owner,repository=ctx
+    try:
+        return save_recipe_crud(owner_id=owner,
+            proposal=Proposal(str(recipe_id),body.base_revision,str(body.request_id),tuple(body.operations)),
+            repository=repository,save_version=body.save_version,review_only=True,
+            ledger=tuple(LedgerIngredient(e.kind,id=str(e.id) if e.id else None,name=e.name,brand=e.brand,spec=e.spec) for e in body.ledger))
+    except MutationError as exc: raise HTTPException(409,str(exc)) from exc
+    except ValueError as exc: raise HTTPException(404,"Recipe not found or inaccessible") from exc
+    except Exception:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error":"database_error"},status_code=503)
+
+
 @router.post("/recipes/{recipe_id}/confirm")
 def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
                         ctx=Depends(demo_context)):
@@ -806,6 +822,9 @@ def confirm_demo_change(recipe_id: UUID, body: ConfirmChangeBody,
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(404, "Recipe not found or inaccessible") from exc
+    except Exception:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error":"database_error"},status_code=503)
     response = {"recipe": _displayed_recipe(owner, repository, saved.recipe),
                 "revision": saved.resulting_revision, "replayed": saved.replayed}
     if body.ledger:

@@ -95,6 +95,7 @@ createServer(async (req, res) => {
     const revision = body.instruction === "stale" ? target.revision + 1 : target.revision;
     return send(200, {recipe_id: id, base_revision: revision, requires_confirmation: true, provider: {name: "meta_responses", model: "muse-spark-1.3"}, operations: body.instruction === "empty" ? [] : [{op: "set_material_quantity", material_id: materialId, value: "15", unit: "g"}, {op: "set_selling_price", value_jpy: "1800"}]});
   }
+  if(path.endsWith('/confirm/review'))return send(200,{ingredients:[],materials:target?.materials??recipe.materials,purchases:[],requires_selection:false});
   if (path.endsWith("/confirm")) {
     if (receipts.has(body.request_id)) return send(200, {recipe: target, replayed: true});
     if (body.base_revision !== target.revision) return send(409, {});

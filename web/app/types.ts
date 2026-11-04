@@ -27,6 +27,8 @@ export async function startupRead<T>(path: string, onWaiting: () => void): Promi
 }
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {...init, headers: {"Content-Type": "application/json"}, cache: "no-store"});
-  if (!response.ok) throw new Error(String(response.status));
+  if (!response.ok){let data:{error?:unknown}={};try{data=await response.json();}catch{}
+    throw Object.assign(new Error(String(response.status)),{code:data.error});
+  }
   return response.json();
 }

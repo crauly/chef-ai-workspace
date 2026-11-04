@@ -17,7 +17,7 @@ async function mockIngredients(page:import("@playwright/test").Page){
 test("desktop settings keeps Chef brand and displays labeled ingredient table, filtering and sorting",async({page})=>{
  await mockIngredients(page);
  await page.goto("/settings");
- await page.getByRole("navigation",{name:"設定項目"}).getByRole("button",{name:"食材ライブラリ"}).click();
+ await page.getByRole("navigation",{name:"設定項目"}).getByRole("button",{name:"食材マスター"}).click();
  await expect(page.locator("img[src='/chef-ai-mark.svg']")).toBeVisible();
  await expect(page.getByRole("navigation",{name:"設定項目"})).toBeVisible();
  const table=page.getByRole("table");
@@ -70,7 +70,7 @@ test("ingredient editor chooses a supplier only through an approved purchase pri
  });
  page.on("dialog",dialog=>dialog.accept());
  await page.goto("/settings");
- await page.getByRole("navigation",{name:"設定項目"}).getByRole("button",{name:"食材ライブラリ"}).click();
+ await page.getByRole("navigation",{name:"設定項目"}).getByRole("button",{name:"食材マスター"}).click();
  await page.getByRole("row",{name:/バター/}).getByRole("button",{name:"編集"}).click();
  await expect(page.getByRole("dialog",{name:"バターを編集"})).toBeVisible();
  const dialog=page.getByRole("dialog",{name:"バターを編集"});
@@ -93,7 +93,7 @@ test("ingredient prices keep fractional precision rather than rounding in the li
   }}],suppliers_by_ingredient:{},
  }}));
  await page.goto("/settings");
- await page.getByRole("navigation",{name:"設定項目"}).getByRole("button",{name:"食材ライブラリ"}).click();
+ await page.getByRole("navigation",{name:"設定項目"}).getByRole("button",{name:"食材マスター"}).click();
  await expect(page.getByRole("row",{name:/微量材料/})).toContainText("¥1,234.0004");
 });
 
@@ -102,7 +102,7 @@ test("settings opens with no category selected and editor opens as a modal",asyn
  await page.goto("/settings");
  await expect(page.getByText("左のメニューから設定項目を選択してください。")).toBeVisible();
  await expect(page.getByRole("table")).toHaveCount(0);
- await page.getByRole("navigation",{name:"設定項目"}).getByRole("button",{name:"食材ライブラリ"}).click();
+ await page.getByRole("navigation",{name:"設定項目"}).getByRole("button",{name:"食材マスター"}).click();
  await page.getByRole("row",{name:/バター/}).getByRole("button",{name:"編集"}).click();
  await expect(page.getByRole("dialog",{name:"バターを編集"})).toBeVisible();
  await expect(page.getByRole("table")).toBeVisible();
@@ -118,4 +118,14 @@ test("settings microphone remains square at narrow mobile widths",async({page})=
  const size=await mic.boundingBox();
  expect(size).not.toBeNull();
  expect(Math.abs(size!.width-size!.height)).toBeLessThanOrEqual(1);
+});
+
+test('master search includes ingredients beyond the displayed page and clears supplier filters',async({page})=>{
+ const items=Array.from({length:41},(_,i)=>({id:String(i),name:i===40?'自家製グアンチャーレ':'材料'+String(i).padStart(2,'0'),spec:null,current_price:null}));
+ await page.route('**/api/ingredients',r=>r.fulfill({json:{items,suppliers_by_ingredient:{'0':['A食品']}}}));
+ await page.goto('/settings?section=ingredient');const master=page.getByRole('region',{name:'食材マスター',exact:true});
+ await master.getByRole('button',{name:'次のページ',exact:true}).click();
+ await master.getByRole('searchbox',{name:'食材名と規格で検索'}).fill('グアンチャーレ');await expect(master.getByRole('row',{name:/自家製グアンチャーレ/})).toBeVisible();
+ await master.getByRole('combobox',{name:'仕入れ先',exact:true}).selectOption('A食品');await expect(master.getByRole('row',{name:/自家製グアンチャーレ/})).toHaveCount(0);
+ await master.getByRole('button',{name:'絞り込みを解除'}).click();await master.getByRole('searchbox',{name:'食材名と規格で検索'}).fill('グアンチャーレ');await expect(master.getByRole('row',{name:/自家製グアンチャーレ/})).toBeVisible();
 });

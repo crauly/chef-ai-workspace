@@ -220,7 +220,7 @@ class ProcurementPostgresTests(unittest.TestCase):
         for name,terms in cases:
             with self.subTest(name=name):
                 body=self.body(None,'1');body['selling_price_jpy']='7'
-                body['materials']=[{**body['materials'][0],'name':f'{name}-{i}',
+                body['materials']=[{**body['materials'][0],'name':f'{name}-{i}','new_master':True,
                                     'quantity':qty,'price_jpy':price,'price_quantity':denominator}
                                    for i,(qty,price,denominator) in enumerate(terms)]
                 saved=self.save(body)

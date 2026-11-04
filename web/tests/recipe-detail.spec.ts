@@ -42,6 +42,7 @@ test("detail shows dish/ingredients/prices, pencil opens modal, qty+price edit s
   await dialog.getByLabel("数量", {exact: true}).fill("15");
   await expect(dialog.getByText(/変更後.*15\s*g/)).toBeVisible();
   await dialog.getByRole("button", {name: "変更して保存"}).click();
+  await page.getByRole("dialog",{name:"レシピと食材マスターの保存確認"}).getByRole("button",{name:"承認して保存",exact:true}).click();
   await expect(dialog).toBeHidden();
   await expect(detail.getByText(/15\s*g/)).toBeVisible();
   let state = await (await request.get("http://127.0.0.1:8100/test/state")).json();
@@ -52,6 +53,7 @@ test("detail shows dish/ingredients/prices, pencil opens modal, qty+price edit s
   const dialog2 = page.getByRole("dialog", {name: "片栗粉を編集"});
   await dialog2.getByLabel("仕入単価（円）", {exact: true}).fill("1200");
   await dialog2.getByRole("button", {name: "変更して保存"}).click();
+  await page.getByRole("dialog",{name:"レシピと食材マスターの保存確認"}).getByRole("button",{name:"承認して保存",exact:true}).click();
   await expect(dialog2).toBeHidden();
   await expect(detail.getByText(/仕入単価.*1200/)).toBeVisible();
   state = await (await request.get("http://127.0.0.1:8100/test/state")).json();
@@ -192,7 +194,9 @@ test("clearing a supplier applies before the market price edit", async ({page}) 
   const dialog = page.getByRole("dialog", {name: "片栗粉を編集"});
   await dialog.getByRole("combobox", {name: "仕入先", exact: true}).selectOption("");
   await dialog.getByLabel("仕入単価（円）", {exact: true}).fill("1200");
+  await dialog.getByLabel("単価の基準数量").fill("1");await dialog.getByRole("combobox",{name:"Price unit",exact:true}).selectOption("kg");
   await dialog.getByRole("button", {name: "変更して保存"}).click();
+  await page.getByRole("dialog",{name:"レシピと食材マスターの保存確認"}).getByRole("button",{name:"承認して保存",exact:true}).click();
   await expect(dialog).toBeHidden();
   expect(operations.map(op => op.op)).toEqual(["set_material_supplier", "set_material_price"]);
   await expect(detail.getByText(/仕入単価.*1200/)).toBeVisible();

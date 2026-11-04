@@ -52,7 +52,7 @@ test("the recording thread tags pre-review buffers before any delayed main-threa
  expect(packets.slice().reverse().map(packet=>packet.reviewEpoch===1)).toEqual([true,false]);
 });
 
-test("reported typo is a visible interpretation; combined review/save registers in one explicit action without a selling price",async({page})=>{
+test("reported typo remains visible and master review precedes a fresh explicit approval",async({page})=>{
  let parses=0,saves=0;
  await page.route("**/api/voice-recipe",route=>{parses++;return route.fulfill({json:draft});});
  await page.route("**/api/recipes/full",async route=>{
@@ -69,13 +69,15 @@ test("reported typo is a visible interpretation; combined review/save registers 
  await page.locator(".voice-transcript summary").click();
  await expect(page.getByLabel("認識した発話の一覧").getByRole("listitem")).toContainText("ベベロンチーノ");
  await expect(page.getByRole("button",{name:"レシピを登録",exact:true})).toBeEnabled();
- // A combined review/save is one explicit authorization: it registers at once.
+ // Master changes must be presented before a second explicit approval.
  await input(page,"内容を確認。登録を確定");
+ await expect(page.getByRole("button",{name:"承認して保存",exact:true})).toBeEnabled();expect(saves).toBe(0);
+ await input(page,"保存してください");
  await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
  expect(saves).toBe(1);expect(parses).toBe(1);
 });
 
-test("queued fragments coalesce and a save queued before review commits the arrived draft once",async({page})=>{
+test("queued fragments coalesce but pre-review save commands never approve unseen master changes",async({page})=>{
  let release!:()=>void;const blocked=new Promise<void>(resolve=>{release=resolve;});
  let parses=0,saves=0;
  const submitted:{turns:string[];previous?:{title:string}}[]=[];
@@ -95,16 +97,16 @@ test("queued fragments coalesce and a save queued before review commits the arri
  await input(page,"オイル25g、1kg4000円");await input(page,"パスタは100g");
  await input(page,"内容を確認");await input(page,"保存してください");await input(page,"登録を確定");
  release();
- // The queued explicit save commits the arrived draft exactly once.
+ // Commands queued before master review cannot approve a not-yet-presented plan.
+ await expect(page.getByRole("button",{name:"承認して保存",exact:true})).toBeEnabled();expect(saves).toBe(0);
+ await input(page,"保存してください");
  await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
  expect(saves).toBe(1);expect(parses).toBe(2);
- // Cursor fix (#101): the first parse went stale mid-flight (revisions
- // advanced while it was blocked), so no parsed draft exists yet. The
- // follow-up resends the full 5-turn history with no previous context —
- // otherwise the first utterance would never be interpreted at all.
- expect(submitted[1].turns).toHaveLength(5);
+ // The validated first response is preserved as context; only the four
+ // unparsed speech fragments are sent next, with no save/review commands.
+ expect(submitted[1].turns).toHaveLength(4);
  expect(submitted[1].turns).not.toContain("保存してください");
- expect(submitted[1].previous).toBeUndefined();
+ expect(submitted[1].previous?.title).toContain("ペペロンチーノ");
  // Return from the saved detail to the manual voice fallback.
  await page.getByRole("button", {name: "← ホーム"}).click();
  // A later negative request saves nothing more; the commit happened once.
@@ -146,7 +148,7 @@ test("audio recorded before review cannot approve the draft even when transcript
  release();
  // The late pre-review audio only presents the draft; it cannot commit it.
  await expect(page.getByRole("button",{name:"🎙 音声操作を開始",exact:true})).toBeEnabled();
- await expect(page.getByRole("button",{name:"レシピを登録",exact:true})).toBeEnabled();
+ await expect(page.getByRole("button",{name:"承認して保存",exact:true})).toBeEnabled();
  expect(saves).toBe(0);
  await input(page,"保存してください");
  await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();expect(saves).toBe(1);

@@ -123,11 +123,12 @@ class RecipeCrudTests(unittest.TestCase):
         line = self.repo.recipe.materials[0]
         self.repo.recipe = replace(self.repo.recipe, materials=(
             replace(line, supplier_id=supplier),))
-        with self.assertRaises(MutationError):
-            self.save({"op": "set_material_price", "material_id": line.id,
-                       "price_jpy": "123", "price_quantity": "1", "price_unit": "kg"})
-        self.assertEqual(self.repo.ingredients[self.repo.ingredient_id].current_price.amount_jpy.value, "400")
-        self.assertEqual(self.repo.commits, [])
+        self.save({"op":"set_material_price","material_id":line.id,"price_jpy":"123","price_quantity":"1","price_unit":"kg"})
+        self.assertEqual(self.repo.ingredients[self.repo.ingredient_id].current_price.amount_jpy.value,"400")
+        entry=self.repo.commits[0]["ingredient_entries"][0]
+        self.assertIsNone(entry["current_price"])
+        self.assertEqual(entry["purchases"][0]["supplier_id"],supplier)
+        self.assertEqual(entry["purchases"][0]["quote"]["amount_jpy"]["value"],"123")
 
     def test_explicit_offer_price_absent_keeps_cost_partial(self):
         supplier, offer = str(uuid4()), str(uuid4())
