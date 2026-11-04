@@ -1,6 +1,7 @@
 "use client";
 import {useCallback,useEffect,useState} from "react";
 import {type Locale} from "./i18n";
+import VoiceFieldInput from "./VoiceFieldInput";
 
 type Price={amount_jpy?:{value?:string|null};per_quantity?:string;per_unit?:string};
 type Ingredient={id:string;name:string;spec?:string|null;current_price?:Price|null};
@@ -208,7 +209,9 @@ export default function IngredientManager({locale}:{locale:Locale}){
   </div>
   {showCreate&&<div className="ingredient-create">
    <label>{ja?"新規食材名":"New ingredient name"}<input value={newName} maxLength={200} disabled={busy} onChange={e=>setNewName(e.target.value)}/></label>
+   <VoiceFieldInput locale={locale} label={ja?"食材名":"ingredient name"} disabled={busy} onTranscript={value=>setNewName(value.slice(0,200))}/>
    <label>{ja?"規格（任意）":"Specification (optional)"}<input value={newSpec} maxLength={200} disabled={busy} onChange={e=>setNewSpec(e.target.value)}/></label>
+   <VoiceFieldInput locale={locale} label={ja?"規格":"specification"} disabled={busy} onTranscript={value=>setNewSpec(value.slice(0,200))}/>
    <button type="button" disabled={busy||!newName.trim()} onClick={()=>void create()}>{ja?"食材を登録":"Add ingredient"}</button>
   </div>}
   {error&&<p role="alert" className="error">{error}</p>}

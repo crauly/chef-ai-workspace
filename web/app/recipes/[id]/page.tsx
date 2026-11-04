@@ -1,3 +1,8 @@
-// Standalone recipe URL shares the existing protected recipe controller.
-// It reads the recipe id from the pathname on mount; no duplicate mutation path.
-export {default} from "../../page";
+"use client";
+import RecipeController from "../../RecipeController";
+
+// Separate Next.js route. URL owns the recipe identity; the shared
+// controller retains the existing authenticated CRUD + Human Gate path.
+export default function RecipeDetailPage(){
+ return <RecipeController pageKind="detail"/>;
+}
