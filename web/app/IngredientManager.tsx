@@ -31,6 +31,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
  const [allPrices,setAllPrices]=useState<Record<string,ApprovedPrice[]>>({});
  const [confirmation,setConfirmation]=useState<IngredientSavePayload|null>(null);
  const attempted=useRef<{key:string;payload:IngredientSavePayload}|null>(null);
+ const uncertain=useRef(false);
  const baseline=useRef({supplier:"",price:"",quantity:"",unit:""});
  const editEpoch=useRef(0);
  const [page,setPage]=useState(1);
@@ -62,7 +63,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
  },[ja]);
  useEffect(()=>{void load();},[load]);
  async function begin(item:Ingredient){
-  const version=++editEpoch.current;setConfirmation(null);attempted.current=null;
+  const version=++editEpoch.current;setConfirmation(null);attempted.current=null;uncertain.current=false;
   setEditing(item.id);setResearch(item.price_research_enabled??false);setName(item.name);setSpec(item.spec??"");setPriceSupplier("");
   setPrice(item.current_price?.amount_jpy?.value??"");
   setQuantity(item.current_price?.per_quantity??"");
@@ -106,13 +107,42 @@ export default function IngredientManager({locale}:{locale:Locale}){
   if(busy)return;setBusy(true);setError("");
   try{
    const r=await fetch("/api/ingredients/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-   if(!r.ok){let data:{error?:unknown}={};try{data=await r.json();}catch{}setError(ingredientSaveMessage(data.error??"database_error",ja));setConfirmation(null);return;}
-   setConfirmation(null);setEditing(null);attempted.current=null;await load();
-  }catch{setError(ingredientSaveMessage("api_unavailable",ja));setConfirmation(null);}
+   if(!r.ok){uncertain.current=r.status>=500;let data:{error?:unknown}={};try{data=await r.json();}catch{}setError(ingredientSaveMessage(data.error??"database_error",ja));setConfirmation(null);return;}
+   setConfirmation(null);setEditing(null);attempted.current=null;uncertain.current=false;await load();
+  }catch{uncertain.current=true;setError(ingredientSaveMessage("api_unavailable",ja));setConfirmation(null);}
   finally{setBusy(false);}
  }
- function save(id:string){
+ async function save(id:string){
   if(busy||supplierLoading)return;
+  if(uncertain.current&&attempted.current){
+   const pending=attempted.current.payload;
+   const purchase=pending.purchase;
+   const previous=purchase?{supplier:pending.supplier_id??"",price:purchase.amount_jpy,quantity:purchase.quantity,unit:purchase.unit}:baseline.current;
+   const sameInput=name.trim()===pending.name&&(spec.trim()||null)===pending.spec&&research===pending.price_research_enabled&&
+    priceSupplier===(purchase||pending.supplier_id?pending.supplier_id??"":previous.supplier)&&
+    normalizedNumber(price)===normalizedNumber(previous.price)&&normalizedNumber(quantity)===normalizedNumber(previous.quantity)&&unit===previous.unit;
+   if(sameInput){if(purchase)setConfirmation(pending);else void commit(id,pending);return;}
+   // Resolve the earlier approved write before interpreting edits against its old baseline.
+   // Replaying its ID waits on the existing transaction/receipt; a GET alone could race it.
+   setBusy(true);setError("");
+   try{
+    const response=await fetch("/api/ingredients/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(pending)});
+    if(!response.ok&&response.status>=500){let data:{error?:unknown}={};try{data=await response.json();}catch{}setError(ingredientSaveMessage(data.error??"database_error",ja));return;}
+    const refreshed=await fetch("/api/ingredients",{cache:"no-store"});
+    if(!refreshed.ok)throw new Error("refresh");
+    const data=await refreshed.json() as {items:Ingredient[];approved_prices_by_ingredient?:Record<string,ApprovedPrice[]>};
+    const item=data.items.find(item=>item.id===id);if(!item)throw new Error("ingredient");
+    const prices=data.approved_prices_by_ingredient?.[id]??[];
+    const quote=item.selected_offer_id?prices.find(q=>q.offer_id===item.selected_offer_id):latest(prices);
+    const legacy=item.selected_offer_id?null:item.current_price;
+    const enteredUnit=quote?.unit??legacy?.per_unit??"";
+    baseline.current={supplier:item.selected_supplier_id??quote?.supplier_id??availableSuppliers.find(s=>s.is_market_reference)?.id??"",
+     price:quote?.amount_jpy??legacy?.amount_jpy?.value??"",quantity:quote?.quantity??legacy?.per_quantity??"",
+     unit:units.find(u=>u.symbol===enteredUnit||u.aliases?.includes(enteredUnit))?.symbol??enteredUnit};
+    setApprovedPrices(prices);uncertain.current=false;attempted.current=null;
+   }catch{setError(ingredientSaveMessage("api_unavailable",ja));return;}
+   finally{setBusy(false);}
+  }
   if(!name.trim()||name.trim().length>200){setError(ingredientSaveMessage("invalid_input",ja));return;}
   const value=price.trim(),qty=quantity.trim(),u=unit.trim();
   const original=baseline.current;
