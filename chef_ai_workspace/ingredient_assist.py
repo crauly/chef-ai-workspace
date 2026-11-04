@@ -138,8 +138,15 @@ def build_approval_request(*, material_id: str, material_name: str,
     raise ValueError("New ingredient approval requires an assigned ID")
 
 
-def match_recipe_master(owner, repository, name, *, ingredient_id=None, new_master=False, spec=None, candidate_rows=None):
-    """Resolve exact identities; similarity only supplies choices, never writes/merges."""
+def match_recipe_master(owner, repository, name, *, ingredient_id=None, new_master=False, spec=None, candidate_rows=None, similarity_action="choose"):
+    """Single identity policy for registration and editing.
+
+    Exact matches (including spec) always retain their existing contract.
+    Registration chooses create for similarity-only results; editing chooses
+    a candidate. Similarity never selects an existing ingredient ID.
+    """
+    if similarity_action not in ("choose", "create"):
+        raise ValueError("Invalid similarity action")
     from .mutations import MutationError
     if ingredient_id:
         ingredient=repository.load_owned_ingredients(owner,[ingredient_id]).get(ingredient_id)
@@ -155,7 +162,7 @@ def match_recipe_master(owner, repository, name, *, ingredient_id=None, new_mast
         row=exact[0]
         return {"name":name,"master_name":row["name"],"ingredient_id":str(row["id"]),"action":"reuse","spec":row.get("spec"),"candidates":[]}
     candidates=exact
-    if not candidates:
+    if not candidates and similarity_action=="choose":
         import unicodedata
         from difflib import SequenceMatcher
         def normalize(value): return ''.join(c for c in unicodedata.normalize('NFKC',value).casefold() if c.isalnum())

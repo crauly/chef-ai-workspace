@@ -740,8 +740,6 @@ def _complete_demo_recipe(body: CompleteRecipeBody, ctx, review_only=False):
     catalog={}
     entries_by_name={}
     master_review=[]
-    candidate_loader=getattr(repository,"list_owned_ingredient_master",None)
-    candidate_rows=candidate_loader(owner) if callable(candidate_loader) else []
     for line, material in zip(recipe.materials, body.materials):
         name=(line.material_name.value or "").strip()
         key=(name.casefold(),str(material.ingredient_id or ""),material.spec,material.new_master)
@@ -751,7 +749,8 @@ def _complete_demo_recipe(body: CompleteRecipeBody, ctx, review_only=False):
             try:
                 plan=match_recipe_master(owner,repository,name,
                     ingredient_id=str(material.ingredient_id) if material.ingredient_id else None,
-                    new_master=material.new_master,spec=material.spec,candidate_rows=candidate_rows)
+                    new_master=material.new_master,spec=material.spec,
+                    similarity_action="create")
             except MutationError as exc: raise HTTPException(409,str(exc)) from exc
             if plan["action"]=="choose" and not review_only:
                 raise HTTPException(409,"Choose an ingredient master before saving")
