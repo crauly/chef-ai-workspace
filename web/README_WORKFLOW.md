@@ -206,3 +206,14 @@ path; other suppliers and purchase conditions keep their own approved prices.
 
 Database migration, scheduler activation, deployment protection, verification and
 production limitations: [ADR-016](../docs/ADR_016_SCHEDULED_PRICE_RESEARCH.md).
+
+
+## 音声レシピの保存確認（2026-11-05）
+
+1. 登録モードで料理名・材料・数量を話す。訂正・メーカー・仕入先の追加は同じ下書きへ反映する。
+2. 「全部の平均価格を調べて」などで全対象の調査を開始。検索中も訂正でき、結果と失敗は行ごとに表示される。出典と購入単位は価格詳細で確認する。
+3. 最初の「保存」でマスター照合結果を表示する。数量・価格・再利用食材・新規食材・単位・仕入先と、共通採用価格への変更を確認する。
+4. その後にもう一度「保存」または「承認して保存」で登録する。確認前の録音・未解析の追加入力は承認にならない。価格不明は未確定として保存する。
+5. 保存後の詳細表示と再読込で内容を確認する。
+
+実行手順・実APIの検証範囲は `docs/VOICE_RECIPE_ACCEPTANCE.md` を参照。

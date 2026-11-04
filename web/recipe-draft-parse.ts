@@ -43,7 +43,7 @@ export function parseRecipeDraft(raw:unknown):RecipeDraft|null {
   });
  }))return null;
  const priceResearch=o.price_research===undefined?[]:o.price_research;
- if(!Array.isArray(priceResearch)||priceResearch.length>10||!priceResearch.every(value=>{
+ if(!Array.isArray(priceResearch)||priceResearch.length>40||!priceResearch.every(value=>{
   if(!value||typeof value!=="object"||Array.isArray(value))return false;
   const item=value as Record<string,unknown>;
   const keys=Object.keys(item).sort().join("|");

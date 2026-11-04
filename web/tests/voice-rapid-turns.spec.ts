@@ -53,7 +53,8 @@ test("rapid command + 5 ingredients keep every turn in order", async ({page}) =>
   // No turn lost: the command is navigation (mode switch, by design), and all
   // five ingredient turns after it arrive in order in the applied parse.
   const last = bodies[bodies.length - 1];
-  expect(last.turns).toEqual(INGREDIENTS);
+  expect(bodies.flatMap(b=>b.turns)).toEqual(INGREDIENTS);
+  expect(last.previous.materials.map((m:any)=>m.name)).toContain("イタリア産ホールトマト");
   // Order preserved on screen (newest first).
   await page.getByText(/認識した発話/).first().click();
   const items = page.getByLabel("認識した発話の一覧").getByRole("listitem");

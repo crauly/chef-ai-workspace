@@ -538,6 +538,16 @@ class CompleteRecipeBody(BaseModel):
 
 @router.post("/recipes/full", status_code=201)
 def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_context)):
+    return _complete_demo_recipe(body, ctx)
+
+
+@router.post("/recipes/full/review")
+def review_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_context)):
+    """Read-only preflight; uses the same validation and owner lookup as commit."""
+    return _complete_demo_recipe(body, ctx, review_only=True)
+
+
+def _complete_demo_recipe(body: CompleteRecipeBody, ctx, review_only=False):
     """Validate every field before a single durable create. Idempotent recipe UUID."""
     from .mutations import prepare_mutation
     from dataclasses import replace
@@ -551,6 +561,8 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
     except ValueError:
         existing = None
     if existing is not None:
+        if review_only:
+            raise HTTPException(409,"Recipe already saved; reload the saved recipe")
         # An uncertain retry must not create suppliers/offers or adopt twice.
         verifier = getattr(repository, "verify_owned_creation_payload", None)
         if callable(verifier):
@@ -632,9 +644,11 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
     if not procured and any(m.supplier for m in body.materials):
         raise HTTPException(503,"Atomic procurement save unavailable")
     procurement=[]
+    quotes_by_product_supplier={}
     prepared_lines=[]
     catalog={}
     entries_by_name={}
+    master_review=[]
     for line, material in zip(recipe.materials, body.materials):
         name=(line.material_name.value or "").strip()
         key=name.casefold()
@@ -656,11 +670,21 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
             else:
                 ing_id=str(uuid4())
                 existing_price=None
+            master_review.append({"name":name,"action":"reuse" if matches else "create",
+                                  "ingredient_id":ing_id if matches else None,
+                                  "price_action":"reviewed_quote" if line.price_override is not None else "existing_or_unconfirmed"})
             entry={"id":ing_id,"name":name,"current_price":None}
             entries_by_name[key]=entry
             catalog[ing_id]=Ingredient(ing_id,name,existing_price)
         ing_id=entry["id"]
         quote=line.price_override
+        supplier_key=(material.supplier or "").strip().casefold()
+        quote_key=(ing_id,supplier_key)
+        if quote is not None:
+            serialized_quote=asdict(quote)
+            if quote_key in quotes_by_product_supplier and quotes_by_product_supplier[quote_key]!=serialized_quote:
+                raise HTTPException(422,"Conflicting quotes for one ingredient and supplier")
+            quotes_by_product_supplier[quote_key]=serialized_quote
         procurement.append({"material_id":line.id,"supplier":material.supplier.strip() if material.supplier else None,
                             "quote":asdict(quote) if quote is not None else None})
         if quote is not None and not procured:
@@ -672,6 +696,29 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
                                       price_mode="inherit",price_override=None))
     recipe=replace(recipe,materials=tuple(prepared_lines))
     ingredient_entries=tuple(entries_by_name.values())
+    if review_only:
+        supplier_names=list(dict.fromkeys(m.supplier.strip() for m in body.materials if m.supplier and m.supplier.strip()))
+        supplier_review=[]
+        supplier_loader=getattr(repository,"list_owned_suppliers",None)
+        if supplier_names and not callable(supplier_loader):
+            raise HTTPException(503,"Supplier master lookup unavailable")
+        suppliers=[]
+        if supplier_names:
+            offset=0
+            while True:
+                page=supplier_loader(owner,limit=50,offset=offset)
+                suppliers.extend(page)
+                if len(page)<50: break
+                offset+=len(page)
+        for name in supplier_names:
+            matches=[item for item in suppliers if item["name"].strip().casefold()==name.casefold()]
+            if len(matches)>1:
+                raise HTTPException(409,"Ambiguous supplier identity; select a master")
+            supplier_review.append({"name":name,"action":"reuse" if matches else "create"})
+        return {"title":title,"ingredients":master_review,"units":new_units,"suppliers":supplier_review,
+                "materials":[{**m.model_dump(),"unit":canonical.get(m.unit,m.unit),
+                              "price_unit":canonical.get(m.price_unit,m.price_unit)} for m in body.materials],
+                "selling_price_jpy":body.selling_price_jpy}
     # The Supabase create_owned_recipe RPC requires initial revision 0.
     recipe = replace(recipe, revision=0)
     try:

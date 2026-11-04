@@ -55,6 +55,9 @@ createServer(async (req, res) => {
   }
   // Fixture-only equivalent of POST /demo/recipes/full: honor the submitted
   // recipe ID and content, never return the unrelated seeded test recipe.
+  if (path === "/demo/recipes/full/review" && req.method === "POST") {
+    return send(200,{ingredients:body.materials.map(m=>({name:m.name,action:"create"})),units:body.unit_candidates??[],suppliers:[...new Set(body.materials.map(m=>m.supplier).filter(Boolean))].map(name=>({name,action:"create"}))});
+  }
   if (path === "/demo/recipes/full" && req.method === "POST") {
     const uuid = /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i;
     if (!uuid.test(body.request_id ?? "") || typeof body.title !== "string" || !body.title.trim() ||

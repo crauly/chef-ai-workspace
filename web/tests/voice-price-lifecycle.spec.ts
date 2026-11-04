@@ -400,8 +400,9 @@ test("successful save clears the price failure for the next recipe", async ({pag
   await reflect.click();
   await expect(page.getByText("未保存の下書き：パスタ")).toBeVisible();
   await expect(page.getByText("価格検索に失敗")).toBeVisible({timeout: 8000});
-  // One explicit registration saves the price-unconfirmed draft directly.
+  // Review precedes explicit approval of the price-unconfirmed draft.
   await page.getByRole("button", {name: "レシピを登録"}).click();
+ await page.getByRole("button", {name: "承認して保存",exact:true}).click();
  await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
  await page.getByRole("button", {name: "← ホーム"}).click();
   await expect(page.getByRole("region",{name:"音声操作モード"})).toBeVisible();expect(saves).toBe(1);

@@ -5,7 +5,7 @@ const draft=(materials=[material()])=>({title:"パスタ",materials,selling_pric
 async function input(page:Page,text:string){await page.getByLabel("音声認識できない場合の入力").fill(text);await page.getByRole("button",{name:"反映",exact:true}).click();}
 const gate=()=>{let release!:()=>void;const promise=new Promise<void>(r=>{release=r;});return {promise,release};};
 
-test("validated prefix appears before a delayed correction without authorizing save or consuming turns",async({page},info)=>{
+test("validated prefix appears before a delayed correction without authorizing save and parses only the remaining delta",async({page},info)=>{
  const first=gate(),second=gate();const bodies:any[]=[];let saves=0;
  await page.route("**/api/recipes/full",route=>{saves++;return route.abort();});
  await page.route("**/api/voice-recipe",async route=>{
@@ -20,8 +20,8 @@ test("validated prefix appears before a delayed correction without authorizing s
  await expect(page.getByLabel("未保存のレシピ下書き")).toContainText("パスタ");
  await expect(page.getByLabel("未反映の発話")).toBeVisible();
  await expect(page.getByRole("button",{name:"レシピを登録",exact:true})).toBeDisabled();expect(saves).toBe(0);
- expect(bodies[1].turns).toEqual(["パスタ100g","パスタは150gに訂正、トマト20gを追加"]);
- expect(bodies[1].previous).toBeUndefined();expect(bodies.every(b=>b.defer_prices===true)).toBe(true);
+ expect(bodies[1].turns).toEqual(["パスタは150gに訂正、トマト20gを追加"]);
+ expect(bodies[1].previous.materials[0].quantity).toBe("100");expect(bodies.every(b=>b.defer_prices===true)).toBe(true);
  await info.attach("fixture-prefix-timing",{body:JSON.stringify({firstResponseToPreviewMs:Date.now()-released,latestParseStillBlocked:true,realMeta:false}),contentType:"application/json"});
  second.release();await expect(page.getByLabel("未反映の発話")).toHaveCount(0);
  await expect(page.getByLabel("未保存のレシピ下書き").locator(":scope > ul > li")).toHaveCount(2);
@@ -65,14 +65,14 @@ test("settings field speech shares the root panel and clears after transcription
   }};
   Object.defineProperty(navigator.mediaDevices,"getUserMedia",{value:async()=>{const c=new AudioContext();return c.createMediaStreamDestination().stream;}});
  });
- await page.getByRole("button",{name:"🎙 仕入先名を音声入力"}).click();
+ await page.getByRole("button",{name:"🎙 仕入れ先名を音声入力"}).click();
  await expect(page.locator('.voice-status-list [data-stage="listen"]')).toBeVisible();
  await expect(page.locator(".voice-status-list")).toHaveCount(1);
  await page.waitForFunction(()=>typeof (window as any).feedField==="function");
  await page.evaluate(()=>(window as any).feedField());
  await expect(page.locator('.voice-status-list [data-stage="transcribe"]')).toBeVisible();
  transcribe.release();await expect(page.locator(".voice-status-list")).toHaveCount(0);
- await expect(page.getByLabel("仕入先名",{exact:true})).toHaveValue("Amazon");
+ await expect(page.getByRole("textbox",{name:"仕入れ先名",exact:true})).toHaveValue("Amazon");
 });
 
 test("discarding a prefix invalidates late analysis and clears its status",async({page})=>{
@@ -114,5 +114,7 @@ test("a save uttered before the complete draft is shown cannot approve it later"
  parsing.release();await expect(page.getByLabel("未保存のレシピ下書き")).toBeVisible();
  await expect(page.getByText("確認前に発話された保存指示は実行しません。",{exact:false})).toBeAttached();expect(saves).toBe(0);
  // A new utterance after presentation still uses the formal approved path.
+ await voiceInput(page,"保存してください");
+ await expect(page.getByLabel("正式登録の確認")).toBeVisible();expect(saves).toBe(0);
  await voiceInput(page,"保存してください");await expect.poll(()=>saves).toBe(1);
 });

@@ -165,6 +165,32 @@ class VoiceFullRecipeTests(unittest.TestCase):
         self.assertEqual(self.client.post("/demo/recipes/full", json=body, headers=self.headers).status_code, 422)
         self.assertEqual(self.repo.writes, 0)
 
+    def test_review_is_read_only_then_commit_reuses_master(self):
+        body = self.payload()
+        response = self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(self.repo.writes,0)
+        self.assertEqual(len(self.repo.ingredients),0)
+        self.assertTrue(all(m['action']=='create' for m in response.json()['ingredients']))
+        saved=self.client.post('/demo/recipes/full',json=body,headers=self.headers)
+        self.assertEqual(saved.status_code,201,saved.text)
+        body['request_id']=str(uuid4())
+        again=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(again.status_code,200,again.text)
+        self.assertTrue(all(m['action']=='reuse' for m in again.json()['ingredients']))
+        self.assertEqual(self.repo.writes,1)
+
+    def test_review_duplicate_master_and_invalid_quantity_never_write(self):
+        body=self.payload()
+        self.repo.find_owned_ingredients_exact=lambda owner,name:[{'id':'a'},{'id':'b'}]
+        response=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(response.status_code,409,response.text)
+        self.assertEqual(self.repo.writes,0)
+        body['materials'][0]['quantity']='NaN'
+        response=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(response.status_code,422,response.text)
+        self.assertEqual(self.repo.writes,0)
+
 
 if __name__ == "__main__":
     unittest.main()

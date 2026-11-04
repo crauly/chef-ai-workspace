@@ -2,6 +2,7 @@ import {NextRequest, NextResponse} from "next/server";
 import {previewAuthorized} from "../../../../preview-access";
 import {bindRow,enrichEntries,provisionalFor} from "../../../../price-enrichment";
 export const runtime="nodejs";
+export const maxDuration=60;
 // Deferred price enrichment for POST /api/voice-recipe with defer_prices.
 // Stateless: the caller sends the CURRENT materials snapshot plus the
 // pending entries, and every entry is re-bound here against those fresh
@@ -18,7 +19,7 @@ export async function POST(req:NextRequest){
  if(req.headers.get("origin")!==req.nextUrl.origin)return error(403);
  const key=process.env.MODEL_API_KEY;if(!key)return error(503);
  try{
-  const raw=await req.text();if(new TextEncoder().encode(raw).length>16000)return error(413);
+  const raw=await req.text();if(new TextEncoder().encode(raw).length>64000)return error(413);
   const input:unknown=JSON.parse(raw);
   if(!input||typeof input!=="object"||Array.isArray(input))return error(400);
   const body=input as Record<string,unknown>;
@@ -29,7 +30,7 @@ export async function POST(req:NextRequest){
     (m as {name:string}).name.length>200)return error(400);
    materials.push({name:(m as {name:string}).name});
   }
-  if(!Array.isArray(body.entries)||body.entries.length>3)return error(400);
+  if(!Array.isArray(body.entries)||body.entries.length>40)return error(400);
   const rawEntries:{material_name:string;request:string;material_index?:number|null;row_name?:string|null}[]=[];
   for(const e of body.entries){
    if(!e||typeof e!=="object"||Array.isArray(e))return error(400);

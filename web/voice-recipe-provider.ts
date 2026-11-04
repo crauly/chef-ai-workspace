@@ -18,23 +18,30 @@ export function normalizedDraft(raw:unknown){
 }
 export async function voiceRecipeModel(key:string,system:string,input:unknown,signal:AbortSignal,format:unknown){
  let failure:VoiceRecipeFailure=new VoiceRecipeFailure('invalid_response');
- // Two total attempts including transport retry OR schema regeneration, never nested retries.
+ // One wall-clock budget, including a quick schema repair. Never retry slow transport failures.
+ const timeout=AbortSignal.timeout(20000);
  for(let attempt=0;attempt<2;attempt++){
   if(signal.aborted)throw new VoiceRecipeFailure('cancelled');
-  const timeout=AbortSignal.timeout(25000);
+
   try{
    const response=await fetch('https://api.meta.ai/v1/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:'muse-spark-1.3',reasoning_effort:'low',max_completion_tokens:8192,response_format:format,messages:[{role:'developer',content:system+(attempt?'\nReturn a complete object matching the supplied JSON schema. Do not omit required arrays.':'')},{role:'user',content:JSON.stringify(input)}]}),cache:'no-store',redirect:'error',signal:AbortSignal.any([signal,timeout])});
-   if(!response.ok){if(![408,429,500,502,503,504].includes(response.status))throw new VoiceRecipeFailure('invalid_response');failure=new VoiceRecipeFailure('provider_unavailable');continue;}
+   if(!response.ok){if(![408,429,500,502,503,504].includes(response.status))throw new VoiceRecipeFailure('invalid_response');throw new VoiceRecipeFailure('provider_unavailable');}
    const raw=await response.text();if(raw.length>65536)throw new VoiceRecipeFailure('invalid_response');
    const data=JSON.parse(raw),choice=data?.choices?.length===1?data.choices[0]:null;
    if(choice?.finish_reason&&choice.finish_reason!=='stop')throw new VoiceRecipeFailure('invalid_response');
    if(typeof choice?.message?.content!=='string')throw new VoiceRecipeFailure('invalid_response');
    const result=normalizedDraft(JSON.parse(choice.message.content));
    if(!result)throw new VoiceRecipeFailure('invalid_response');
+   // A valid JSON shell is not a successful revision. Retain the last draft
+   // rather than replace a populated recipe with an empty model response.
+   const previous=(input as {previous_draft?:{title?:string;materials?:unknown[]}})?.previous_draft;
+   if(previous&&((previous.title?.trim()&&!result.title.trim())||
+      (previous.materials?.length&&!result.materials.length)))throw new VoiceRecipeFailure('invalid_response');
    return result;
   }catch(err){
    if(signal.aborted)throw new VoiceRecipeFailure('cancelled');
    failure=timeout.aborted?new VoiceRecipeFailure('timeout'):err instanceof VoiceRecipeFailure?err:new VoiceRecipeFailure(err instanceof SyntaxError?'invalid_response':'provider_unavailable');
+   if(failure.code!=='invalid_response')throw failure;
   }
  }
  throw failure;

@@ -10,23 +10,22 @@
 //
 // Scoping: a request naming an ingredient targets ONLY that ingredient
 // ("サフランの価格を調べて" researches saffron, never the whole draft),
-// so the route's entry cap cannot eject the named ingredient in favor of
-// unrelated lines. All unpriced materials are targeted only for an
+// and never widens that request to unrelated lines. All unpriced materials are targeted only for an
 // explicit recipe-wide request ("全食材の平均価格を調べて",
 // "all ingredients"). A deictic request naming nothing ("この食材の価格を
 // 調べて") resolves only when a single unpriced line exists; otherwise it
 // targets nothing rather than guessing. The caller keeps Muse entries
-// first and caps the total, so this path only fills gaps instead of
+// first, so this path only fills gaps instead of
 // duplicating Muse output.
 // material_index is the exact materials[] position (this detector scans
 // the draft rows, so the index is known, never guessed). The route treats
 // it as the canonical row key.
 export type ResearchTrigger = {material_name: string; request: string; material_index: number};
 
-const JA_STANDALONE = ["相場", "平均価格", "仕入価格", "仕入れ価格", "仕入値",
-  "市場価格", "参考価格", "仕入先", "仕入れ先", "最安", "平均で", "平均を"];
+const JA_STANDALONE = ["相場", "平均価格",
+  "市場価格", "参考価格", "最安", "平均で", "平均を"];
 const JA_VERBS = ["調べ", "参考に", "探し"];
-const JA_TOPICS = ["価格", "値段", "メーカー", "商品"];
+const JA_TOPICS = ["価格", "値段", "メーカー", "商品", "仕入先", "仕入れ先"];
 const EN_PHRASES = ["average price", "market price", "reference price", "check the price",
   "look up the price", "lookup the price", "find a cheaper", "cheaper supplier",
   "compare prices", "price check", "at what price"];
@@ -58,19 +57,16 @@ export function detectPriceResearch(turns: string[],
   if (!open.length) return [];
   const lowered = hits.map(t => t.toLowerCase());
   // Named ingredients first: each named line gets the turn that named it.
-  const named = open.filter(m => lowered.some(t => t.includes(m.name.trim().toLowerCase())));
-  if (named.length) {
-    return named.slice(0, 10).map(m => {
-      const turn = hits[lowered.findIndex(t => t.includes(m.name.trim().toLowerCase()))];
-      return {material_name: m.name.trim(), request: turn.trim().slice(0, 200),
-        material_index: materials.indexOf(m)};
-    });
-  }
+  if (hits.some(t=>/この.+全部/.test(t))) return [];
   if (hits.some(turnIsRecipeWide)) {
-    const request = hits[0].trim().slice(0, 200);
-    return open.slice(0, 10).map(m => ({material_name: m.name.trim(), request,
+    const request = hits.find(turnIsRecipeWide)!.trim().slice(0, 200);
+    return open.map(m => ({material_name: m.name.trim(), request,
       material_index: materials.indexOf(m)}));
   }
+  const named = open.filter(m => lowered.some(t => t.includes(m.name.trim().toLowerCase())));
+  if (named.length) return named.map(m => ({material_name:m.name.trim(),
+    request:hits[lowered.findIndex(t=>t.includes(m.name.trim().toLowerCase()))].trim().slice(0,200),
+    material_index:materials.indexOf(m)}));
   // Deictic ("この食材") with a single open line: that line is unambiguous.
   // With several open lines and no names, guessing would mis-search, so none.
   if (open.length === 1) {

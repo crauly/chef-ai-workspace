@@ -222,7 +222,7 @@ test("supplier is extracted without guessing; revision reuses the previous draft
       {turns: ["あと卵50g"], previous}));
     expect(revised.status).toBe(200);
     const sent = JSON.parse(sentBody).messages[1];
-    expect(Object.keys(JSON.parse(sent.content)).sort()).toEqual(["new_turns", "previous_draft", "unit_catalog"]);
+    expect(Object.keys(JSON.parse(sent.content)).sort()).toEqual(["new_turns", "previous_draft"]);
     expect(JSON.parse(sent.content).new_turns).toEqual(["あと卵50g"]);
     // Unrelated follow-up keeps the unresolved correction context.
     expect(JSON.parse(sent.content).previous_draft.name_corrections).toEqual(
@@ -331,7 +331,7 @@ test("explicit price research resolves against the owned ledger, never model kno
     const multiRef = (await multi.json()).price_references[0];
     expect(multiRef.status).toBe("available");
     expect(multiRef.ingredient_name).toBe("豚バラ肉");
-    // Non-exact fallback names the actual ingredient instead of merging silently.
+    // A different ingredient must never become a provisional price for this row.
     global.fetch = unitCatalogFetch((async (url: unknown) => {
       if (String(url).includes("/demo/price-reference"))
         return Response.json({query: "豚", candidates: [
@@ -349,9 +349,8 @@ test("explicit price research resolves against the owned ledger, never model kno
       {turns: ["豚100g、相場で"]}));
     expect(fuzzy.status).toBe(200);
     const fuzzyRef = (await fuzzy.json()).price_references[0];
-    expect(fuzzyRef.status).toBe("available");
-    expect(fuzzyRef.ingredient_name).toBe("豚ロース");
-    expect(fuzzyRef.text).toContain("豚ロース");
+    expect(fuzzyRef.status).toBe("none");
+    expect(fuzzyRef.ingredient_name).toBeNull();
     // material_index is strict-required (null when rowless); legacy
     // 2-key entries stay accepted for old fixtures. Bad shapes fail closed.
     const indexed = (research: unknown) => {
@@ -425,17 +424,17 @@ test("ledger lookup failures stay distinct from no-history and never fail the dr
     ref = await draftWithLedger(async () => Response.json({query: "豚バラ肉", candidates: []}));
     expect(ref.status).toBe("none");
     expect(ref.text).toContain("仕入履歴がありません");
-    // Missing unit catalog connection fails closed before invoking the model.
+    // Master availability never blocks draft display.
     delete process.env.FASTAPI_BASE_URL; delete process.env.DEMO_ACCESS_TOKEN;
     let museCalled = false;
     global.fetch = unitCatalogFetch((async () => { museCalled = true; return museOk(); }) as typeof fetch);
     const res = await parseRecipe(authed("http://localhost/api/voice-recipe",
       {turns: ["豚バラ肉100g、平均価格を調べて"]}));
-    expect(res.status).toBe(503);
-    expect(museCalled).toBe(false);
+    expect(res.status).toBe(200);
+    expect(museCalled).toBe(true);
     // Failure entries carry no prices and block nothing: notes stay empty.
     expect((await parseRecipe(authed("http://localhost/api/voice-recipe",
-      {turns: ["豚バラ肉100g"]})) ).status).toBe(503);
+      {turns: ["豚バラ肉100g"]})) ).status).toBe(200);
   } finally {
     global.fetch = previousFetch;
     if (password === undefined) delete process.env.DEMO_PREVIEW_PASSWORD; else process.env.DEMO_PREVIEW_PASSWORD = password;

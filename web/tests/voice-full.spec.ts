@@ -26,8 +26,9 @@ test("full recipe voice dialogue requires an explicit action before one atomic s
  await expect(page.getByText("仕入価格 ¥60 / 50g")).toBeVisible();
  await expect(page.getByRole("button",{name:"レシピを登録"})).toBeEnabled();
  expect(saved).toBe(0);
- // One explicit registration commits the eligible draft atomically.
+ // First request presents master reconciliation; second explicitly approves.
  await entry.fill("登録を確定");await page.getByRole("button",{name:"反映"}).click();
+ await page.getByRole("button",{name:"承認して保存",exact:true}).click();
  await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
  expect(saved).toBe(1);
 });

@@ -189,3 +189,10 @@ purchasing, monitoring schedules or thresholds are enabled.
 ## Development status
 
 Early development — Meta Global AI Developer Hackathon 2026.
+
+
+### 音声レシピの下書き・全件価格調査・承認保存
+
+下書きはマスター照合や価格検索の完了を待たず表示します。数量・食材名・メーカー・仕入先の追加入力は差分として反映します。「全部の価格を調べて」は全材料を対象に少数ずつ検索し、結果・失敗理由を行ごとに表示します。最初の「保存」は照合と確認、次の保存指示または「承認して保存」で正式登録します。未確定価格は補完しません。
+
+[実装契約と検証範囲](docs/VOICE_RECIPE_ACCEPTANCE.md) / [構造化・価格調査ADR](docs/ADR_011_STRUCTURED_OUTPUT.md)
