@@ -99,3 +99,53 @@ for each row execute function public.guard_owned_offer_adoption();
 -- Existing owner-scoped reads continue to operate under RLS.
 revoke insert,update,delete on public.offers from anon,authenticated;
 revoke insert,update,delete on public.price_observations from anon,authenticated;
+
+-- Every recipe write path (including legacy RPCs and direct service-role writes)
+-- must validate the selected purchase term independently from HTTP checks.
+create or replace function public.enforce_recipe_offer_owner()
+returns trigger language plpgsql security definer set search_path='' as $$
+declare v_line jsonb;
+declare v_offer uuid;
+begin
+ if jsonb_typeof(new.state->'materials') is distinct from 'array'
+ then raise exception 'Invalid recipe materials'; end if;
+ for v_line in select value from jsonb_array_elements(new.state->'materials') loop
+   if nullif(v_line->>'offer_id','') is not null then
+     begin
+       v_offer := (v_line->>'offer_id')::uuid;
+     exception when invalid_text_representation then
+       raise exception 'Invalid recipe offer ID';
+     end;
+     if nullif(v_line->>'ingredient_id','') is null
+        or nullif(v_line->>'supplier_id','') is null
+        or not exists(
+         select 1 from public.offers o
+         where o.id=v_offer and o.owner_id=new.owner_id
+           and o.ingredient_id=(v_line->>'ingredient_id')::uuid
+           and o.supplier_id=(v_line->>'supplier_id')::uuid
+       ) then raise exception 'Recipe offer must belong to owner, ingredient and supplier'; end if;
+   end if;
+ end loop;
+ return new;
+end $$;
+drop trigger if exists enforce_recipe_offer_owner on public.recipes;
+create trigger enforce_recipe_offer_owner
+ before insert or update of state on public.recipes
+ for each row execute function public.enforce_recipe_offer_owner();
+
+create or replace function public.protect_recipe_offer_reference()
+returns trigger language plpgsql security definer set search_path='' as $$
+begin
+ if exists(
+   select 1 from public.recipes r
+   where r.owner_id=old.owner_id and exists(
+     select 1 from jsonb_array_elements(r.state->'materials') m
+     where m->>'offer_id'=old.id::text
+   )
+ ) then raise exception 'Offer is referenced by a recipe'; end if;
+ return old;
+end $$;
+drop trigger if exists protect_recipe_offer_reference on public.offers;
+create trigger protect_recipe_offer_reference
+ before delete on public.offers
+ for each row execute function public.protect_recipe_offer_reference();
