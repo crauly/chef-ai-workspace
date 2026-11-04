@@ -126,3 +126,51 @@ pauses, a stop/error cue and capture status explain it. Accepted queued audio
 finishes before “音声操作を再開” becomes available. The draft remains in the
 page; do not reload to resume. A failed ASR segment is identified as failed
 and may need repeating; other accepted segments are not discarded with it.
+
+
+## Voice operation sequence (user operating procedure, 2026-11-04)
+
+The operator-facing rule is **choose the task, confirm the active mode (and
+recipe target for edits), then dictate**. Voice commands and the three visible
+mode buttons are two entry points to the same guarded transition. Wait for the
+mode indication and its cue before continuing with substantive dictation. The
+microphone need not be restarted when switching modes.
+
+- **Create / 登録**: select 登録 or say “レシピを登録します”; verify the
+  displayed mode is 登録, then dictate the dish name, ingredients, quantities
+  and prices. Read the unsaved draft, request review and explicitly approve
+  the unchanged draft before saving. The auxiliary typed field passes text
+  through the same Muse draft parser; it is not a structured manual form.
+- **Browse / 参照**: select 参照 or ask for a recipe by name; verify the
+  browse state and choose a unique recipe result. Browse does not change the
+  saved recipe.
+- **Edit / 編集**: **first open/select the recipe to be modified** by browsing
+  or selecting it from the library. Only then select 編集 or ask to modify that
+  recipe. On the home screen with no selected recipe, pressing 編集 alone is
+  rejected with guidance to open a recipe first. Dictate the change, inspect
+  the proposal and before/after diff, then explicitly approve before the
+  existing `/api/recipes/{id}/confirm` write. If a requested recipe search
+  is ambiguous, select a result before editing.
+
+This is an **operating sequence, not a new hard enforcement rule**. Existing
+backward-compatible direct dictation from idle may still enter create mode;
+queued voice data is not intentionally discarded merely because it started
+before the transition cue. Approval requests captured before the current
+review/mode are still rejected, and pending edits cannot silently be dropped
+by switching tasks. Do not confuse mode confirmation with permission to save.
+
+**Manual recipe entry** is separately available in the home recipe library:
+type a recipe name and create it, then edit its materials in the detail view.
+The mode buttons do not themselves implement a manual ingredient form.
+
+**Procurement UI terminology warning:** Ingredient management currently labels
+an abstract, owner-scoped Supplier as `相場参考価格` (market reference price).
+Selecting it in `仕入れ先（採用価格）` and manually entering amount / package
+quantity / unit does **not** fetch or calculate any market average. Explicit
+`価格を登録・採用` adopts that entered quote on a market-reference offer and
+updates the ingredient's shared adopted price. The separate `仕入れ先を追加`
+control only links an actual supplier to the ingredient; it does not adopt a
+price. The label can mislead operators into assuming a researched market
+quote; clarify the UI wording in a separate reviewed change without modifying
+the Supplier/Offer/Human Gate contract. See
+[`APPROVED_RECIPE_PROCUREMENT.md`](../docs/APPROVED_RECIPE_PROCUREMENT.md).
