@@ -15,3 +15,28 @@ test('an incomplete purchase tuple remains unresolved without dropping the suppl
 test('unspecified supplier is sent as null for server-side abstract supplier resolution',()=>{
  const [saved]=toSaveMaterials({materials:[{...material,supplier:''}]});assert.equal(saved.supplier,null);assert.equal(saved.price_jpy,'350');
 });
+test('known purchase facts survive unknown recipe usage; invalid nullable values never reach the API',()=>{
+ const {draftNumber,registrationIssues,parseRecipeDraft}=require('../recipe-draft-parse.ts');
+ assert.equal(draftNumber('１，２００.００'),'1200');assert.equal(draftNumber('1e-30',true),'1e-30');assert.equal(draftNumber('0',true),null);assert.equal(draftNumber('1e131072'),null);
+ const parsed=parseRecipeDraft({title:'料理',materials:[{...material,quantity:'',unit:'',price_jpy:'３５０',price_quantity:'５００',price_unit:'g'}],notes:[],selling_price_jpy:''});
+ const [saved]=toSaveMaterials(parsed);assert.equal(saved.quantity,null);assert.equal(saved.unit,null);assert.equal(saved.price_jpy,'350');assert.equal(saved.price_quantity,'500');
+ const bad={...material,quantity:'-2',price_quantity:'0',unit:'x'.repeat(33)};
+ assert.equal(toSaveMaterials({materials:[bad]})[0].quantity,null);assert.equal(toSaveMaterials({materials:[bad]})[0].price_jpy,null);
+ assert(registrationIssues({title:'料理',materials:[bad],selling_price_jpy:'0'}).some(i=>i.path==='selling_price_jpy'));
+ assert.equal(bad.price_jpy,'350'); // No changes to the retained draft facts.
+});
+test('registration errors distinguish input, conflict, service and uncertain transport failures',()=>{
+ const {registrationError}=require('../app/VoiceRecipeRegistration.tsx');
+ assert.match(registrationError({message:'422',issues:[{path:'materials.0.quantity',reason:'invalid'}]},true),/materials\.0\.quantity/);
+ assert.match(registrationError(new Error('409'),true),/競合/);assert.match(registrationError(new Error('503'),true),/サービス障害/);assert.match(registrationError(new TypeError('fetch failed'),true),/結果未確認/);
+});
+test('full-recipe proxy carries safe field paths through request errors without exposing input',async()=>{
+ const {NextRequest}=require('next/server');const {forward}=require('../app/api/proxy.ts');const {request}=require('../app/types.ts');const {registrationError}=require('../app/VoiceRecipeRegistration.tsx');
+ const oldFetch=global.fetch,env={...process.env};Object.assign(process.env,{DEMO_PREVIEW_PASSWORD:'test-only-preview-password-32-characters',FASTAPI_BASE_URL:'http://localhost:8100',DEMO_ACCESS_TOKEN:'test'});
+ try{
+  global.fetch=async()=>Response.json({detail:[{loc:['body','materials',0,'quantity'],type:'string_too_long',input:'secret',msg:'secret internal data'}]},{status:422});
+  const r=await forward(new NextRequest('http://localhost/api/recipes/full/review',{method:'POST',headers:{Origin:'http://localhost',authorization:'Basic '+Buffer.from('chef:'+process.env.DEMO_PREVIEW_PASSWORD).toString('base64')},body:'{}'}),undefined,'/full/review');
+  const body=await r.json();assert.equal(r.status,422);assert.equal(body.issues[0].path,'materials.0.quantity');assert(!JSON.stringify(body).includes('secret'));
+  global.fetch=async()=>Response.json(body,{status:422});await assert.rejects(request('/api/recipes/full/review'),e=>/materials\.0\.quantity/.test(registrationError(e,true)));
+ }finally{global.fetch=oldFetch;for(const k of Object.keys(process.env))if(!(k in env))delete process.env[k];Object.assign(process.env,env);}
+});

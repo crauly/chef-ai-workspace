@@ -7,7 +7,7 @@ the demo routes without an isolated demo owner and a long random secret.
 import hmac
 from dataclasses import asdict
 from uuid import uuid4
-from pydantic import BaseModel, Field, ConfigDict, StrictBool
+from pydantic import BaseModel, Field, ConfigDict, StrictBool, field_validator
 from .models import Recipe, TrackedValue
 from .costing import calculate_cost, unit_factor_catalog
 from .mutations import Proposal, MutationError, prepare_mutation
@@ -545,6 +545,25 @@ def create_demo_recipe(body: CreateRecipeBody, ctx=Depends(demo_context)):
 
 
 
+def _recipe_number(value,positive=False):
+    import re,unicodedata
+    from decimal import Decimal,InvalidOperation
+    if value is None:return None
+    if not isinstance(value,str):raise ValueError("Use a decimal string")
+    text=unicodedata.normalize('NFKC',value).strip()
+    if not text:return None
+    if re.fullmatch(r'[+-]?[0-9]{1,3}(,[0-9]{3})+(\.[0-9]+)?',text):text=text.replace(',','')
+    if not re.fullmatch(r'[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?',text):raise ValueError("Invalid decimal format")
+    try:number=Decimal(text)
+    except InvalidOperation as exc:raise ValueError("Number exceeds database range") from exc
+    if not number.is_finite() or number<0 or (positive and number==0):raise ValueError("Number must be positive" if positive else "Number must be nonnegative")
+    mantissa,_,exponent=text.lower().partition('e')
+    whole,_,fraction=mantissa.lstrip('+-').partition('.')
+    text='0' if number==0 else (whole.lstrip('0') or '0')+('.'+fraction.rstrip('0') if fraction.rstrip('0') else '')+('e'+exponent if exponent else '')
+    if number and (number.adjusted()>131071 or Decimal(text).as_tuple().exponent < -16383):raise ValueError("Number exceeds database range")
+    return text
+
+
 class CompleteRecipeMaterial(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ingredient_id: UUID | None=None
@@ -560,11 +579,31 @@ class CompleteRecipeMaterial(BaseModel):
     price_unit: str | None = Field(default=None, min_length=1, max_length=32)
     supplier: str | None = Field(default=None, max_length=200)
 
+    @field_validator('name',mode='before')
+    @classmethod
+    def normalize_name(cls,value):return value.strip() if isinstance(value,str) else value
+
+    @field_validator('unit','price_unit','supplier',mode='before')
+    @classmethod
+    def normalize_terms(cls,value):
+        import unicodedata
+        return unicodedata.normalize('NFKC',value).strip() or None if isinstance(value,str) else value
+
+    @field_validator('quantity','price_jpy','price_quantity',mode='before')
+    @classmethod
+    def normalize_numbers(cls,value,info):return _recipe_number(value,info.field_name=='price_quantity')
+
 
 class UnitCandidateBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     symbol: str = Field(min_length=1, max_length=32)
     dimension: str = Field(pattern=r"^(mass|volume|count|other)$")
+
+    @field_validator('symbol',mode='before')
+    @classmethod
+    def normalize_symbol(cls,value):
+        import unicodedata
+        return unicodedata.normalize('NFKC',value).strip() if isinstance(value,str) else value
 
 
 class CompleteRecipeBody(BaseModel):
@@ -573,18 +612,34 @@ class CompleteRecipeBody(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     materials: list[CompleteRecipeMaterial] = Field(max_length=40)
     unit_candidates: list[UnitCandidateBody] = Field(default_factory=list, max_length=80)
-    selling_price_jpy: str | None = None
+    selling_price_jpy: str | None = Field(default=None,max_length=30)
+
+    @field_validator('title',mode='before')
+    @classmethod
+    def normalize_title(cls,value):return value.strip() if isinstance(value,str) else value
+
+    @field_validator('selling_price_jpy',mode='before')
+    @classmethod
+    def normalize_selling_price(cls,value):return _recipe_number(value,True)
 
 
 @router.post("/recipes/full", status_code=201)
 def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_context)):
-    return _complete_demo_recipe(body, ctx)
+    return _complete_demo_recipe_request(body,ctx)
 
 
 @router.post("/recipes/full/review")
 def review_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_context)):
     """Read-only preflight; uses the same validation and owner lookup as commit."""
-    return _complete_demo_recipe(body, ctx, review_only=True)
+    return _complete_demo_recipe_request(body,ctx,review_only=True)
+
+
+def _complete_demo_recipe_request(body,ctx,review_only=False):
+    try:return _complete_demo_recipe(body,ctx,review_only)
+    except HTTPException:raise
+    except Exception:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error":"database_error"},status_code=503)
 
 
 def _complete_demo_recipe(body: CompleteRecipeBody, ctx, review_only=False):
@@ -636,40 +691,27 @@ def _complete_demo_recipe(body: CompleteRecipeBody, ctx, review_only=False):
     try:
         approvals = prepare_unit_approval(entered, known_units, dimensions)
     except ValueError as exc:
-        raise HTTPException(422, "Unresolved unit approval") from exc
+        raise HTTPException(422,[{"loc":["body","unit_candidates"],"msg":"Select the dimension of each new unit; ambiguous units require correction","type":"value_error"}]) from exc
     new_units = [{"symbol": item.symbol, "dimension": item.dimension}
                  for item in approvals if item.status == "new_candidate"]
     if any(symbol not in entered for symbol in dimensions):
         raise HTTPException(422, "Unreferenced unit candidate")
     canonical = {item.entered: item.symbol for item in approvals}
     operations = []
-    for material in body.materials:
-        if not material.name.strip():
-            raise HTTPException(422, "Ingredient name required")
-        priced = (material.price_jpy is not None and material.price_quantity is not None
-                  and material.price_unit is not None)
-        if priced:
-            if material.quantity is None or material.unit is None:
-                raise HTTPException(422, "Priced lines require quantity and unit")
-            operations.append({"op": "add_material", "material_id": str(uuid4()),
-                               "name": material.name.strip(), "quantity": material.quantity,
-                               "unit": canonical[material.unit], "price_jpy": material.price_jpy,
-                               "price_quantity": material.price_quantity,
-                               "price_unit": canonical[material.price_unit]})
-        else:
-            # Price trio is all-or-nothing: any single field (including a lone
-            # price_unit) is an explicit input error, never silently dropped.
-            if (material.price_jpy is not None or material.price_quantity is not None
-                    or material.price_unit is not None):
-                raise HTTPException(422, "Partial price fields are rejected")
-            op = {"op": "add_unpriced_material", "material_id": str(uuid4()),
-                  "name": material.name.strip()}
-            if material.quantity is not None:
-                if material.unit is None:
-                    raise HTTPException(422, "Quantity requires unit")
-                op["quantity"] = material.quantity
-                op["unit"] = canonical[material.unit]
-            operations.append(op)
+    for index,material in enumerate(body.materials):
+        def invalid(field,reason):
+            raise HTTPException(422,[{"loc":["body","materials",index,field],"msg":reason,"type":"value_error"}])
+        if not material.name.strip():invalid('name','Ingredient name required')
+        if (material.quantity is None)!=(material.unit is None):invalid('quantity','Quantity and unit must be supplied together')
+        prices=(material.price_jpy,material.price_quantity,material.price_unit)
+        if any(v is not None for v in prices) and not all(v is not None for v in prices):invalid('price_jpy','Supply price, basis quantity and price unit together')
+        material_id=str(uuid4())
+        op={"op":"add_unpriced_material","material_id":material_id,"name":material.name.strip()}
+        if material.quantity is not None:op.update(quantity=material.quantity,unit=canonical[material.unit])
+        operations.append(op)
+        if material.price_jpy is not None:
+            operations.append({"op":"set_material_price","material_id":material_id,"price_jpy":material.price_jpy,
+                               "price_quantity":material.price_quantity,"price_unit":canonical[material.price_unit]})
     if body.selling_price_jpy is not None:
         operations.append({"op": "set_selling_price", "value_jpy": body.selling_price_jpy})
     recipe = Recipe(recipe_id, TrackedValue(title, "confirmed", "user"))
@@ -678,7 +720,7 @@ def _complete_demo_recipe(body: CompleteRecipeBody, ctx, review_only=False):
             recipe = prepare_mutation(
                 recipe, Proposal(recipe_id, 0, recipe_id, tuple(operations)),
                 user_confirmed=True)
-        except (MutationError, ValueError, TypeError, KeyError) as exc:
+        except (MutationError, ValueError, TypeError, KeyError, ArithmeticError) as exc:
             raise HTTPException(422, "Invalid spoken recipe values") from exc
     # Product V1: every recipe row references a concrete owner Ingredient.
     # A recipe never owns purchase prices; approved quotes update the same

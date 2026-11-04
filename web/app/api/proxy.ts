@@ -3,8 +3,8 @@ import {safeIngredientSaveCode} from "../../ingredient-save-contract";
 import {previewAuthorized, sameOrigin} from "../../preview-access";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Action = "" | "/cost" | "/confirm" | "/confirm/review" | "/propose" | "/corrections" | "/full" | "/full/review";
-function failure(status: number,code?:string) {
-  return NextResponse.json({error: code??"Workspace request failed"}, {status, headers: {"Cache-Control": "no-store"}});
+function failure(status: number,code?:string,issues?:{path:string;reason:string}[]) {
+  return NextResponse.json({error: code??"Workspace request failed",...(issues?{issues}:{})}, {status, headers: {"Cache-Control": "no-store"}});
 }
 // Recheck access at the privileged proxy, independently of middleware.
 export async function forward(req: NextRequest, id?: string, action: Action = "") {
@@ -35,6 +35,16 @@ export async function forward(req: NextRequest, id?: string, action: Action = ""
     // Do not reflect backend/provider errors or private response headers.
     if (!response.ok){
       let data:{error?:unknown;detail?:unknown}={};try{data=await response.json();}catch{}
+      if(response.status===422&&(action==='/full'||action==='/full/review')){
+        const fields=new Set(['title','materials','name','quantity','unit','price_jpy','price_quantity','price_unit','supplier','spec','ingredient_id','new_master','selling_price_jpy','unit_candidates','symbol','dimension']);
+        const issues=(Array.isArray(data.detail)?data.detail:[]).slice(0,20).map((issue:{loc?:unknown;type?:string})=>{
+          const loc=Array.isArray(issue.loc)?issue.loc.filter(x=>x!=='body'):[];
+          const path=loc.length&&loc.every(x=>typeof x==='number'||(typeof x==='string'&&fields.has(x)))?loc.join('.'):'recipe';
+          const reason=issue.type==='string_too_long'?'文字数上限を超えています':issue.type==='missing'?'必須項目がありません':path.startsWith('unit_candidates')?'新規単位の分類を指定し、重複・曖昧な単位を確認してください':'数値・数量と単位・価格3項目の入力条件を確認してください';
+          return {path,reason};
+        });
+        return failure(422,'invalid_input',issues.length?issues:[{path:'recipe',reason:'入力契約を確認してください'}]);
+      }
       const known:Record<string,string>={"Unknown or ambiguous unit":"unit_unknown","Recipe supplier must belong to owner":"supplier_unavailable","Ingredient not owned":"ingredient_unavailable","Ingredient identity collision":"ingredient_conflict","Ambiguous purchase offer":"ingredient_conflict","Choose an ingredient master before saving":"ingredient_conflict","Ambiguous ingredient identity":"ingredient_conflict","Invalid material price or price unit":"invalid_price","Invalid purchase price":"invalid_price","Invalid material quantity":"invalid_input","Invalid quantity or unit":"invalid_input"};
       const code=safeIngredientSaveCode(data.error)??(typeof data.detail==='string'?known[data.detail]:undefined);
       return failure(response.status >= 400 && response.status < 600 ? response.status : 502,code);

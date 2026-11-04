@@ -1,4 +1,5 @@
 "use client";
+import {draftNumber,registrationIssues,type DraftIssue} from "../recipe-draft-parse";
 import MasterMatchReview,{type MasterMatch} from "./MasterMatchReview";
 import {useEffect,useImperativeHandle,useRef,useState,type Ref} from "react";
 import {useVoiceProcessingStatus,type VoiceStatusRow} from "./VoiceProcessingStatus";
@@ -36,15 +37,14 @@ function researchLabel(status:ResearchStatus,ja:boolean){
 }
 type Input={text:string;command:VoiceCommand;revision:number;approval:Draft|null;staleVoice:boolean;traceId:string};
 export type SaveMode="confirmed"|"unconfirmed";
-// Missing-entry kinds mirror web/app/api/voice-recipe/route.ts. Only a draft
-// whose gaps are all purchase prices may take the explicit unconfirmed path;
-// a missing name, quantity/unit, title, or any note keeps saving blocked.
+// Identity is required. Optional use quantities and purchase facts may remain
+// unresolved; completeness never substitutes for explicit human approval.
 const PRICE_SUFFIX="の仕入単価・基準数量・単位";
 export function saveModeFor(draft:Draft):SaveMode|null{
  // Formal registration requires an actual recipe identity and named materials,
  // not complete estimates. Unknown quantities and prices stay unresolved.
  if(!draft.title.trim()||draft.materials.some(m=>!m.name.trim()))return null;
- return draft.missing.length||draft.notes.length||
+ return registrationIssues(draft).length||draft.missing.length||draft.notes.length||
    draft.materials.some(m=>!m.quantity||!m.unit||!m.price_jpy||!m.price_quantity||!m.price_unit)
    ?"unconfirmed":"confirmed";
 }
@@ -67,13 +67,24 @@ export function toSaveMaterials(draft:Draft){
  return draft.materials.map(m=>{
   // The API accepts either quantity+unit together, or neither. An incomplete
   // purchase-price trio must be represented as unresolved, never zero.
-  const quantity=m.quantity&&m.unit?m.quantity:null;
-  const unit=quantity?m.unit:null;
-  const priced=Boolean(quantity&&unit&&m.price_jpy&&m.price_quantity&&m.price_unit);
-  return {name:m.name,quantity,unit,supplier:m.supplier?.trim()||null,
-   price_jpy:priced?m.price_jpy:null,price_quantity:priced?m.price_quantity:null,
-   price_unit:priced?m.price_unit:null};
+  const validUnit=(v:string)=>Boolean(v.trim())&&v.trim().length<=32;
+  const quantity=validUnit(m.unit)?draftNumber(m.quantity):null;
+  const unit=quantity!==null?m.unit.normalize("NFKC").trim():null;
+  const amount=draftNumber(m.price_jpy),basis=draftNumber(m.price_quantity,true);
+  const priced=amount!==null&&basis!==null&&validUnit(m.price_unit);
+  return {name:m.name.trim(),quantity,unit,supplier:m.supplier?.trim()||null,
+   price_jpy:priced?amount:null,price_quantity:priced?basis:null,
+   price_unit:priced?m.price_unit.normalize("NFKC").trim():null};
  });
+}
+
+export function registrationError(error:unknown,ja:boolean){
+ const e=error as {message?:string;issues?:DraftIssue[]};
+ const detail=e.issues?.map(i=>`${i.path}: ${i.reason}`).join(' / ');
+ if(e.message==='422')return (ja?'入力契約を確認してください。':'Check the input contract. ')+(detail??'')+(ja?' 下書きは保持しています。':' Draft retained.');
+ if(e.message==='409')return ja?'マスターの重複・保存内容の競合があります。下書きを保持しています。':'Master or save conflict. Draft retained.';
+ if(e.message==='503')return ja?'サービス障害で処理を完了できません。下書きと保存IDを保持しています。':'Service unavailable. Draft and request ID retained.';
+ return ja?'通信失敗により結果未確認です。下書きと同じ保存IDを保持しています。一覧を確認してから再試行してください。':'Communication failed; result unconfirmed. Draft and request ID retained. Check the list before retrying.';
 }
 
 function applyFoundPrices(draft:Draft):Draft{
@@ -467,9 +478,10 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   const symbols=[...new Set(materials.flatMap(m=>[m.unit,m.price_unit]).filter((x):x is string=>Boolean(x)))];
   const unit_candidates=symbols.filter(symbol=>!unitCatalog?.some(u=>[u.symbol,...(u.aliases||[])].some(a=>a.toLocaleLowerCase()===symbol.toLocaleLowerCase())))
    .map(symbol=>({symbol,dimension:unitDimensionChoices[symbol]??d.unitProposals?.find(item=>item.symbol===symbol)?.dimension??standardDimension(symbol)}));
-  if(unit_candidates.some(c=>!["mass","volume","count","other"].includes(c.dimension)))throw new Error('unresolved_unit');
+  const unresolved=unit_candidates.filter(c=>!["mass","volume","count","other"].includes(c.dimension));
+  if(unresolved.length)throw Object.assign(new Error('422'),{issues:unresolved.map(c=>({path:`unit_candidates.${c.symbol}`,reason:ja?'新規単位の分類を選択してください':'Choose a new unit dimension'}))});
   if(!requestId.current)requestId.current=crypto.randomUUID();
-  const payload={request_id:requestId.current,title:d.title,materials,unit_candidates,selling_price_jpy:d.selling_price_jpy||null};
+  const payload={request_id:requestId.current,title:d.title,materials,unit_candidates,selling_price_jpy:draftNumber(d.selling_price_jpy,true)};
   registrationPayload.current=payload;return payload;
  }
  async function showReview(traceId=""){
@@ -490,13 +502,13 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    const result=await request<MasterReview>("/api/recipes/full/review",{method:"POST",body:JSON.stringify(payload)});
    if(!alive.current||epoch.current!==reviewEpoch||revision.current!==reviewRevision||draftRef.current!==d||requestId.current!==payload.request_id)return;
    setMasterReview(result);
-  }catch{say(ja?"保存前の照合を完了できません。数量・価格・新規単位の分類、重複候補を確認して再試行してください。下書きは保持しています。":"Could not validate registration. Check values and master candidates, then retry. Draft retained.");return;}
+  }catch(error){say(registrationError(error,ja));return;}
   finally{reviewFlight.current=false;}
   reviewed.current=d;reviewMode.current=mode;approvalEpoch.current=voice.markReview();setStage("review");
   if(mode==="confirmed")
    say("確認用の下書きを表示しました。料理名・食材・数量・価格を確認し、正しければもう一度「保存してください」と話すか、承認して保存を押してください。");
   else
-   say(ja?"仕入単価が不明の項目があります（"+priceMissingNames(d).join("、")+"）。未確定の数量・価格は未確定のまま保存できます。価格を推測やゼロ埋めで補いません。よければもう一度「保存してください」と話すか、価格未確定として保存を押してください。":"Missing purchase prices: "+priceMissingNames(d).join(", ")+". You may explicitly approve saving with unresolved quantities or prices; no price will be guessed or set to zero.");
+   say((registrationIssues(d).map(i=>`${i.path}: ${i.reason}`).join(" / "))+" "+(ja?"仕入単価が不明の項目があります（"+priceMissingNames(d).join("、")+"）。未確定の数量・価格は未確定のまま保存できます。価格を推測やゼロ埋めで補いません。よければもう一度「保存してください」と話すか、価格未確定として保存を押してください。":"Missing purchase prices: "+priceMissingNames(d).join(", ")+". You may explicitly approve saving with unresolved quantities or prices; no price will be guessed or set to zero."));
  }
  // First registration request presents the checked plan; the next approves it.
  async function register(){
@@ -550,7 +562,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    // Do not leave a second, hidden success message inside the registration panel.
    if(!sharedVoice)say((mode==="confirmed"?"レシピを保存しました。":"価格未確定として保存しました。未確定の仕入単価はゼロにせず、部分原価のみ表示されます。")+(imageRetained?"":" 料理画像はこのブラウザに保存できませんでした。"));
    onCreated(recipe,mode,suppliers);
-  }catch{setStage("review");say("保存結果を確認できませんでした。再送時も同じ登録IDを使います。一覧を確認してから再試行してください。");}
+  }catch(error){setStage("review");say(registrationError(error,ja));}
   finally{if(alive.current&&!draining.current)setBusy(false);}
  }
  async function drain(){
