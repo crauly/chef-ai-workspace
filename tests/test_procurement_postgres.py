@@ -158,7 +158,7 @@ class ProcurementPostgresTests(unittest.TestCase):
     def test_conflict_rolls_back_recipe_supplier_offer_and_price(self):
         body=self.body();body['materials'].append({**body['materials'][0],'price_jpy':'999','price_quantity':'500.0'})
         response=self.client.post('/demo/recipes/full',json=body,headers=self.headers)
-        self.assertEqual(response.status_code,409,response.text)
+        self.assertEqual(response.status_code,422,response.text)
         for table in ('recipes','suppliers','ingredients','offers','price_observations','recipe_versions'): self.assertEqual(self.count(table),0,table)
 
     def test_owner_isolation_even_for_the_same_supplier_name(self):

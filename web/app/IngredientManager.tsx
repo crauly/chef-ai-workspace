@@ -1,10 +1,15 @@
 "use client";
-import {useCallback,useEffect,useState} from "react";
+import {useCallback,useEffect,useRef,useState} from "react";
 import {type Locale} from "./i18n";
 import VoiceFieldInput from "./VoiceFieldInput";
+import {ingredientSaveMessage,type IngredientSavePayload} from "../ingredient-save-contract";
 
 type Price={amount_jpy?:{value?:string|null};per_quantity?:string;per_unit?:string};
-type Ingredient={price_research_enabled?:boolean;last_research_error?:string|null;id:string;name:string;spec?:string|null;current_price?:Price|null};
+type ApprovedPrice={offer_id:string;supplier_id:string|null;supplier_name:string|null;amount_jpy:string;quantity:string|null;unit:string|null;observed_at?:string};
+type Unit={id:string;symbol:string;aliases?:string[]};
+const normalizedNumber=(value:string)=>{if(!value.trim())return "";const [a,b=""]=value.trim().split(".");return (a.replace(/^0+(?=\d)/,"")||"0")+(b.replace(/0+$/,"")?"."+b.replace(/0+$/,""):"");};
+const latest=(prices:ApprovedPrice[])=>[...prices].sort((a,b)=>(b.observed_at??"").localeCompare(a.observed_at??""))[0];
+type Ingredient={selected_offer_id?:string|null;selected_supplier_id?:string|null;price_research_enabled?:boolean;last_research_error?:string|null;id:string;name:string;spec?:string|null;current_price?:Price|null};
 export default function IngredientManager({locale}:{locale:Locale}){
  const ja=locale==="ja";
  const [items,setItems]=useState<Ingredient[]>([]);
@@ -22,6 +27,13 @@ export default function IngredientManager({locale}:{locale:Locale}){
  const [showCreate,setShowCreate]=useState(false);
  const [availableSuppliers,setAvailableSuppliers]=useState<{id:string;name:string;is_market_reference?:boolean}[]>([]);
  const [supplierLoading,setSupplierLoading]=useState(false);
+ const [units,setUnits]=useState<Unit[]>([]);
+ const [allPrices,setAllPrices]=useState<Record<string,ApprovedPrice[]>>({});
+ const [confirmation,setConfirmation]=useState<IngredientSavePayload|null>(null);
+ const attempted=useRef<{key:string;payload:IngredientSavePayload}|null>(null);
+ const uncertain=useRef(false);
+ const baseline=useRef({supplier:"",price:"",quantity:"",unit:""});
+ const editEpoch=useRef(0);
  const [page,setPage]=useState(1);
  const [sort,setSort]=useState<"name"|"price"|"supplier">("name");
  const [descending,setDescending]=useState(false);
@@ -31,31 +43,33 @@ export default function IngredientManager({locale}:{locale:Locale}){
  const [quantity,setQuantity]=useState("");
  const [unit,setUnit]=useState("");
  const [priceSupplier,setPriceSupplier]=useState("");
- const [approvedPrices,setApprovedPrices]=useState<Array<{offer_id:string;supplier_id:string|null;supplier_name:string|null;amount_jpy:string;quantity:string|null;unit:string|null}>>([]);
+ const [approvedPrices,setApprovedPrices]=useState<ApprovedPrice[]>([]);
  useEffect(()=>{
   if(!editing)return;
-  const onKey=(event:KeyboardEvent)=>{if(event.key==="Escape"&&!busy)setEditing(null);};
+  const onKey=(event:KeyboardEvent)=>{if(event.key==="Escape"&&!busy){if(confirmation)setConfirmation(null);else setEditing(null);}};
   document.addEventListener("keydown",onKey);
   return()=>document.removeEventListener("keydown",onKey);
- },[editing,busy]);
+ },[editing,busy,confirmation]);
  const load=useCallback(async()=>{
   setLoading(true);
   try{
    const r=await fetch("/api/ingredients",{cache:"no-store"});
    if(!r.ok)throw new Error("load");
-   const data=await r.json() as {items:Ingredient[];suppliers_by_ingredient?:Record<string,string[]>|null};
+   const data=await r.json() as {items:Ingredient[];suppliers_by_ingredient?:Record<string,string[]>|null;approved_prices_by_ingredient?:Record<string,ApprovedPrice[]>};
    if(!Array.isArray(data.items))throw new Error("shape");
-   setItems(data.items);setSupplierMap(data.suppliers_by_ingredient??null);setError("");
+   setItems(data.items);setAllPrices(data.approved_prices_by_ingredient??{});setSupplierMap(data.suppliers_by_ingredient??null);setError("");
   }catch{setError(ja?"食材一覧を取得できません。":"Unable to load ingredients.");}
   finally{setLoading(false);}
  },[ja]);
  useEffect(()=>{void load();},[load]);
  async function begin(item:Ingredient){
+  const version=++editEpoch.current;setConfirmation(null);attempted.current=null;uncertain.current=false;
   setEditing(item.id);setResearch(item.price_research_enabled??false);setName(item.name);setSpec(item.spec??"");setPriceSupplier("");
   setPrice(item.current_price?.amount_jpy?.value??"");
   setQuantity(item.current_price?.per_quantity??"");
   setUnit(item.current_price?.per_unit??"");
-  setError("");setSupplierLoading(true);setApprovedPrices([]);
+  baseline.current={supplier:"",price:item.current_price?.amount_jpy?.value??"",quantity:item.current_price?.per_quantity??"",unit:item.current_price?.per_unit??""};
+  setUnits([]);setAvailableSuppliers([]);setError("");setSupplierLoading(true);setApprovedPrices([]);
   try{
    const collected:{id:string;name:string;is_market_reference?:boolean}[]=[];
    for(let page=1;page<=100;page++){
@@ -66,49 +80,90 @@ export default function IngredientManager({locale}:{locale:Locale}){
     collected.push(...data.items);
     if(data.items.length<100)break;
    }
-   setAvailableSuppliers(collected);
-   setPriceSupplier(collected.find(s=>s.is_market_reference)?.id??"");
+
    const pricesResponse=await fetch(`/api/ingredients/${item.id}/offer-prices`,{cache:"no-store"});
    if(!pricesResponse.ok)throw new Error("approved prices");
    const pricing=await pricesResponse.json() as {items?:typeof approvedPrices};
    if(!Array.isArray(pricing.items))throw new Error("approved prices shape");
-   setApprovedPrices(pricing.items);
-  }catch{setError(ja?"仕入れ先一覧を取得できません。":"Could not load suppliers.");}
-  finally{setSupplierLoading(false);}
+   const unitResponse=await fetch("/api/units",{cache:"no-store"});
+   if(!unitResponse.ok)throw new Error("units");
+   const catalog=await unitResponse.json() as {items:Unit[]};
+   if(!Array.isArray(catalog.items))throw new Error("units");
+   if(version!==editEpoch.current)return;
+   setUnits(catalog.items);setAvailableSuppliers(collected);setApprovedPrices(pricing.items);
+   const quote=item.selected_offer_id?pricing.items.find(q=>q.offer_id===item.selected_offer_id):latest(pricing.items);
+   const supplier=item.selected_supplier_id??quote?.supplier_id??collected.find(s=>s.is_market_reference)?.id??"";
+   const legacy=item.selected_offer_id?null:item.current_price;
+   const value=quote?.amount_jpy??legacy?.amount_jpy?.value??"";
+   const qty=quote?.quantity??legacy?.per_quantity??"";
+   const enteredUnit=quote?.unit??legacy?.per_unit??"";
+   const u=catalog.items.find(item=>item.symbol===enteredUnit||item.aliases?.includes(enteredUnit))?.symbol??enteredUnit;
+   setPriceSupplier(supplier);setPrice(value);setQuantity(qty);setUnit(u);
+   baseline.current={supplier,price:value,quantity:qty,unit:u};
+  }catch{if(version===editEpoch.current)setError(ingredientSaveMessage("api_unavailable",ja));}
+  finally{if(version===editEpoch.current)setSupplierLoading(false);}
+ }
+ async function commit(id:string,payload:IngredientSavePayload){
+  if(busy)return;setBusy(true);setError("");
+  try{
+   const r=await fetch("/api/ingredients/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+   if(!r.ok){uncertain.current=r.status>=500;let data:{error?:unknown}={};try{data=await r.json();}catch{}setError(ingredientSaveMessage(data.error??"database_error",ja));setConfirmation(null);return;}
+   setConfirmation(null);setEditing(null);attempted.current=null;uncertain.current=false;await load();
+  }catch{uncertain.current=true;setError(ingredientSaveMessage("api_unavailable",ja));setConfirmation(null);}
+  finally{setBusy(false);}
  }
  async function save(id:string){
-  if(busy)return;
-  if(!name.trim()||name.trim().length>200){
-   setError(ja?"食材名を正しく入力してください。":"Enter a valid ingredient name.");return;
+  if(busy||supplierLoading)return;
+  if(uncertain.current&&attempted.current){
+   const pending=attempted.current.payload;
+   const purchase=pending.purchase;
+   const previous=purchase?{supplier:pending.supplier_id??"",price:purchase.amount_jpy,quantity:purchase.quantity,unit:purchase.unit}:baseline.current;
+   const sameInput=name.trim()===pending.name&&(spec.trim()||null)===pending.spec&&research===pending.price_research_enabled&&
+    priceSupplier===(purchase||pending.supplier_id?pending.supplier_id??"":previous.supplier)&&
+    normalizedNumber(price)===normalizedNumber(previous.price)&&normalizedNumber(quantity)===normalizedNumber(previous.quantity)&&unit===previous.unit;
+   if(sameInput){if(purchase)setConfirmation(pending);else void commit(id,pending);return;}
+   // Resolve the earlier approved write before interpreting edits against its old baseline.
+   // Replaying its ID waits on the existing transaction/receipt; a GET alone could race it.
+   setBusy(true);setError("");
+   try{
+    const response=await fetch("/api/ingredients/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(pending)});
+    if(!response.ok&&response.status>=500){let data:{error?:unknown}={};try{data=await response.json();}catch{}setError(ingredientSaveMessage(data.error??"database_error",ja));return;}
+    const refreshed=await fetch("/api/ingredients",{cache:"no-store"});
+    if(!refreshed.ok)throw new Error("refresh");
+    const data=await refreshed.json() as {items:Ingredient[];approved_prices_by_ingredient?:Record<string,ApprovedPrice[]>};
+    const item=data.items.find(item=>item.id===id);if(!item)throw new Error("ingredient");
+    const prices=data.approved_prices_by_ingredient?.[id]??[];
+    const quote=item.selected_offer_id?prices.find(q=>q.offer_id===item.selected_offer_id):latest(prices);
+    const legacy=item.selected_offer_id?null:item.current_price;
+    const enteredUnit=quote?.unit??legacy?.per_unit??"";
+    baseline.current={supplier:item.selected_supplier_id??quote?.supplier_id??availableSuppliers.find(s=>s.is_market_reference)?.id??"",
+     price:quote?.amount_jpy??legacy?.amount_jpy?.value??"",quantity:quote?.quantity??legacy?.per_quantity??"",
+     unit:units.find(u=>u.symbol===enteredUnit||u.aliases?.includes(enteredUnit))?.symbol??enteredUnit};
+    setApprovedPrices(prices);uncertain.current=false;attempted.current=null;
+   }catch{setError(ingredientSaveMessage("api_unavailable",ja));return;}
+   finally{setBusy(false);}
   }
-  setBusy(true);
-  try{
-   const r=await fetch("/api/ingredients/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({name:name.trim(),spec:spec.trim()||null,price_research_enabled:research})});
-   if(!r.ok)throw new Error("save");
-   setEditing(null);await load();
-  }catch{setError(ja?"食材を保存できませんでした。":"Could not save ingredient.");}
-  finally{setBusy(false);}
- }
- async function approvePrice(id:string){
-  if(busy)return;
+  if(!name.trim()||name.trim().length>200){setError(ingredientSaveMessage("invalid_input",ja));return;}
   const value=price.trim(),qty=quantity.trim(),u=unit.trim();
-  if(!value||!qty||!u||!Number.isFinite(Number(value))||Number(value)<0||
-     !Number.isFinite(Number(qty))||Number(qty)<=0){
-   setError(ja?"価格・数量・単位をすべて正しく入力してください。":"Enter a valid price, quantity and unit.");return;
+  const original=baseline.current;
+  const changed=priceSupplier!==original.supplier||normalizedNumber(value)!==normalizedNumber(original.price)||
+   normalizedNumber(qty)!==normalizedNumber(original.quantity)||u!==original.unit;
+  const hasPrice=Boolean(value||qty||u);
+  if(changed&&hasPrice&&(!/^(?:\d+)(?:\.\d+)?$/.test(value)||!/^(?:\d+)(?:\.\d+)?$/.test(qty)||
+   !Number.isFinite(Number(value))||!Number.isFinite(Number(qty))||Number(qty)<=0||!u)){
+   setError(ingredientSaveMessage("invalid_price",ja));return;
   }
-  const supplier=availableSuppliers.find(s=>s.id===priceSupplier);
-  const target=supplier?.name??(ja?"相場参考価格":"Market reference price");
-  if(!window.confirm(ja?`${target}の価格 ¥${value} / ${qty} ${u} を採用しますか？`:`Adopt ${target}: JPY ${value} / ${qty} ${u}?`))return;
-  setBusy(true);
-  try{
-   const r=await fetch("/api/offer-prices",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({ingredient_id:id,supplier_id:priceSupplier||null,
-                         amount_jpy:value,quantity:qty,unit:u})});
-   if(!r.ok)throw new Error("adopt");
-   setEditing(null);await load();
-  }catch{setError(ja?"価格を採用できませんでした。単位マスターと仕入れ条件を確認してください。":"Could not adopt price. Check units and purchase terms.");}
-  finally{setBusy(false);}
+  if(changed&&!hasPrice&&priceSupplier===original.supplier&&original.price){setError(ingredientSaveMessage("invalid_price",ja));return;}
+  if(changed&&hasPrice&&!units.some(item=>item.symbol===u||item.aliases?.includes(u))){setError(ingredientSaveMessage("unit_unknown",ja));return;}
+  if(priceSupplier&&!availableSuppliers.some(item=>item.id===priceSupplier)){setError(ingredientSaveMessage("supplier_unavailable",ja));return;}
+  const values={name:name.trim(),spec:spec.trim()||null,price_research_enabled:research,
+   supplier_id:changed?priceSupplier||null:null,purchase:changed&&hasPrice?{amount_jpy:value,quantity:qty,unit:u}:null,
+   price_confirmed:changed&&hasPrice};
+  const key=JSON.stringify(values);
+  if(attempted.current?.key!==key)attempted.current={key,payload:{request_id:crypto.randomUUID(),...values}};
+  setError("");
+  if(values.purchase)setConfirmation(attempted.current.payload);
+  else void commit(id,attempted.current.payload);
  }
  async function create(){
   if(busy||!newName.trim())return;
@@ -140,8 +195,9 @@ export default function IngredientManager({locale}:{locale:Locale}){
   const linked=supplierMap[item.id]??[];
   return nameMatches&&(supplierFilter==="unset"?linked.length===0:linked.includes(supplierFilter));
  });
+ const displayedPrice=(item:Ingredient)=>item.selected_offer_id?(allPrices[item.id]??[]).find(q=>q.offer_id===item.selected_offer_id):latest(allPrices[item.id]??[]);
  const compare=(a:Ingredient,b:Ingredient)=>{
-  if(sort==="price")return Number(a.current_price?.amount_jpy?.value??-1)-Number(b.current_price?.amount_jpy?.value??-1);
+  if(sort==="price")return Number(displayedPrice(a)?.amount_jpy??(!a.selected_offer_id?a.current_price?.amount_jpy?.value:null)??-1)-Number(displayedPrice(b)?.amount_jpy??(!b.selected_offer_id?b.current_price?.amount_jpy?.value:null)??-1);
   if(sort==="supplier")return (supplierMap?.[a.id]?.join("、")??"").localeCompare(supplierMap?.[b.id]?.join("、")??"",locale);
   return a.name.localeCompare(b.name,locale);
  };
@@ -151,23 +207,37 @@ export default function IngredientManager({locale}:{locale:Locale}){
  const effectivePage=Math.min(page,pages);
  const visible=ordered.slice((effectivePage-1)*pageSize,effectivePage*pageSize);
  const formatAmount=(raw:string)=>{const [whole,...fraction]=raw.split(".");return whole.replace(/\B(?=(\d{3})+(?!\d))/g,",")+(fraction.length?"."+fraction.join("."):"");};
- const priceLabel=(item:Ingredient)=>item.current_price?.amount_jpy?.value!=null
-  ? `¥${formatAmount(item.current_price.amount_jpy.value)} / ${item.current_price.per_quantity??""} ${item.current_price.per_unit??""}`
-  : (ja?"未設定":"Not set");
+ const priceLabel=(item:Ingredient)=>{
+  const quote=displayedPrice(item);
+  if(quote)return `${quote.supplier_name??""}: ¥${formatAmount(quote.amount_jpy)} / ${quote.quantity} ${quote.unit}`;
+  return !item.selected_offer_id&&item.current_price?.amount_jpy?.value!=null
+   ?`¥${formatAmount(item.current_price.amount_jpy.value)} / ${item.current_price.per_quantity??""} ${item.current_price.per_unit??""}`
+   :(ja?"未設定":"Not set");
+ };
  const suppliers=(item:Ingredient)=>supplierMap===null
   ? (ja?"確認できません":"Unavailable")
   : (supplierMap[item.id]?.join("、")||(ja?"仕入れ先未設定":"Not set"));
- const editor=(item:Ingredient)=><div className="name-choice-overlay ingredient-edit-overlay" key={item.id} onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setEditing(null);}}><section role="dialog" aria-modal="true" aria-label={ja?`${item.name}を編集`:`Edit ${item.name}`} className="name-choice-dialog ingredient-editor">
+ const editor=(item:Ingredient)=><div className="name-choice-overlay ingredient-edit-overlay" key={item.id} onMouseDown={e=>{if(e.target===e.currentTarget&&!busy){if(confirmation)setConfirmation(null);else setEditing(null);}}}><section role="dialog" aria-modal="true" aria-label={confirmation?(ja?"食材と価格の保存確認":"Confirm ingredient and price save"):ja?`${item.name}を編集`:`Edit ${item.name}`} className="name-choice-dialog ingredient-editor">
+  {confirmation?<>
+   <h4>{ja?"食材と仕入価格を確認":"Review ingredient and purchase price"}</h4>
+   <p>{confirmation.name} {confirmation.spec}</p>
+   <p>{ja?"仕入れ先：":"Supplier: "}{availableSuppliers.find(s=>s.id===confirmation.supplier_id)?.name??(ja?"相場参考価格":"Market reference price")}</p>
+   <p>¥{confirmation.purchase?.amount_jpy} / {confirmation.purchase?.quantity} {confirmation.purchase?.unit}</p>
+   <p>{ja?"定期価格調査：":"Scheduled research: "}{confirmation.price_research_enabled?"ON":"OFF"}</p>
+   <p>{ja?"承認すると食材情報と仕入価格をまとめて保存します。同じ仕入条件を使うレシピの現在原価に反映されます。":"Approval saves ingredient details and purchase price together, updating current costs for recipes using these purchase terms."}</p>
+   <div className="ingredient-actions"><button type="button" disabled={busy} onClick={()=>void commit(item.id,confirmation)}>{ja?"承認して保存":"Approve and save"}</button><button type="button" className="secondary" disabled={busy} onClick={()=>setConfirmation(null)}>{ja?"戻る":"Back"}</button></div>
+  </>:<>
+
   <div className="ingredient-editor-head"><h4>{ja?"食材を編集":"Edit Ingredient"} — {item.name}</h4><button type="button" className="secondary" aria-label={ja?"閉じる":"Close"} title={ja?"閉じる":"Close"} disabled={busy} onClick={()=>setEditing(null)}><span aria-hidden="true">×</span></button></div>
   <label><input type="checkbox" role="switch" checked={research} disabled={busy} onChange={e=>setResearch(e.target.checked)}/>{ja?"この食材を定期価格調査の対象にする":"Research this ingredient periodically"}</label>
   {item.last_research_error&&<p role="status">{ja?"前回の定期調査で価格を取得できませんでした。次回の調査で再試行します。":"The last scheduled research could not obtain a price. It will retry on the next interval."}</p>}
   <div className="ingredient-editor-fields">
    <label>{ja?"食材名":"Ingredient name"}<input autoFocus value={name} maxLength={200} disabled={busy} onChange={e=>setName(e.target.value)}/></label>
    <label>{ja?"規格（商品の識別用）":"Specification (identity only)"}<input value={spec} maxLength={200} disabled={busy} placeholder={ja?"例：1号缶、10個入り":"e.g. No.1 can, 10-count"} onChange={e=>setSpec(e.target.value)}/></label>
-   <label>{ja?"仕入れ先（採用価格）":"Supplier (adopted price)"}<select value={priceSupplier} disabled={busy||supplierLoading} onChange={e=>{setPriceSupplier(e.target.value);setPrice("");setQuantity("");setUnit("");}}>{!availableSuppliers.some(s=>s.is_market_reference)&&<option value="">{ja?"相場参考価格":"Market reference price"}</option>}{availableSuppliers.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select></label>
-   <label>{ja?"仕入価格（円）":"Purchase price (JPY)"}<input inputMode="decimal" value={price} disabled={busy} onChange={e=>setPrice(e.target.value)}/></label>
-   <label>{ja?"仕入数量":"Purchase quantity"}<input inputMode="decimal" value={quantity} disabled={busy} onChange={e=>setQuantity(e.target.value)}/></label>
-   <label>{ja?"仕入単位":"Purchase unit"}<input value={unit} maxLength={32} disabled={busy} onChange={e=>setUnit(e.target.value)}/></label>
+   <label>{ja?"仕入れ先（採用価格）":"Supplier (adopted price)"}<select value={priceSupplier} disabled={busy||supplierLoading} onChange={e=>{const id=e.target.value;setPriceSupplier(id);const q=latest(approvedPrices.filter(p=>p.supplier_id===id));setPrice(q?.amount_jpy??"");setQuantity(q?.quantity??"");setUnit(q?.unit??"");}}>{!availableSuppliers.some(s=>s.is_market_reference)&&<option value="">{ja?"相場参考価格":"Market reference price"}</option>}{availableSuppliers.map(s=><option value={s.id} key={s.id}>{s.name}</option>)}</select></label>
+   <label>{ja?"仕入価格（円）":"Purchase price (JPY)"}<input inputMode="decimal" value={price} disabled={busy||supplierLoading} onChange={e=>setPrice(e.target.value)}/></label>
+   <label>{ja?"仕入数量":"Purchase quantity"}<input inputMode="decimal" value={quantity} disabled={busy||supplierLoading} onChange={e=>setQuantity(e.target.value)}/></label>
+   <label>{ja?"仕入単位":"Purchase unit"}<select value={unit} disabled={busy||supplierLoading} onChange={e=>setUnit(e.target.value)}><option value="">{ja?"単位を選択":"Select a unit"}</option>{unit&&!units.some(u=>u.symbol===unit)&&<option value={unit}>{unit}（{ja?"未登録":"unregistered"}）</option>}{units.map(u=><option key={u.id} value={u.symbol}>{u.symbol}</option>)}</select></label>
   </div>
   {error&&<p role="alert" className="error">{error}</p>}
   <div className="ingredient-supplier-prices"><strong>{ja?"採用価格の比較":"Approved price comparison"}</strong>
@@ -175,9 +245,10 @@ export default function IngredientManager({locale}:{locale:Locale}){
    <ul>{approvedPrices.map(quote=><li key={quote.offer_id}>{quote.supplier_name??(ja?"相場参考価格":"Market reference price")}：¥{formatAmount(quote.amount_jpy)} / {quote.quantity} {quote.unit}</li>)}</ul>}
    <p className="ingredient-muted">{ja?"購入数量・単位が異なる価格は、そのまま高安比較しません。":"Different package quantities or units are not directly comparable."}</p>
   </div>
-  <p className="ingredient-muted">{ja?"「保存」は食材名・規格のみを更新します。価格は「価格を登録・採用」で履歴に記録して反映します。規格による自動単位換算はしません。":"Save updates identity only. Adopt price explicitly to record an observation. Specifications do not convert units."}</p>
-  <div className="ingredient-actions"><button type="button" disabled={busy||supplierLoading} onClick={()=>void approvePrice(item.id)}>{ja?"価格を登録・採用":"Record and adopt price"}</button></div>
-  <div className="ingredient-actions"><button type="button" disabled={busy} onClick={()=>void save(item.id)}>{ja?"保存":"Save"}</button><button type="button" className="secondary" disabled={busy} onClick={()=>setEditing(null)}>{ja?"キャンセル":"Cancel"}</button></div>
+  <p className="ingredient-muted">{ja?"保存で食材情報と価格をまとめて更新します。価格を変更する場合は確認画面で承認してください。規格による自動単位換算はしません。":"Save updates ingredient details and price together. Price changes require confirmation. Specifications do not convert units."}</p>
+  <p><a href="/settings?section=unit" target="_blank" rel="noopener noreferrer">{ja?"単位管理で未登録単位を登録":"Register missing units in Units"}</a> <button type="button" className="secondary" disabled={busy} onClick={()=>void fetch("/api/units",{cache:"no-store"}).then(async r=>{if(!r.ok)throw new Error();setUnits((await r.json()).items);}).catch(()=>setError(ingredientSaveMessage("api_unavailable",ja)))}>{ja?"単位一覧を更新":"Refresh units"}</button></p>
+  <div className="ingredient-actions"><button type="button" disabled={busy||supplierLoading} onClick={()=>save(item.id)}>{ja?"保存":"Save"}</button><button type="button" className="secondary" disabled={busy} onClick={()=>setEditing(null)}>{ja?"キャンセル":"Cancel"}</button></div>
+ </>}
  </section></div>;
  return <section className="ingredient-manager" aria-label={ja?"食材ライブラリ":"Ingredient library"}>
   <p className="settings-panel-description">{ja?"レシピで使用する食材と、価格・仕入れ先を管理します。":"Manage ingredients, prices and suppliers used in recipes."}</p>
