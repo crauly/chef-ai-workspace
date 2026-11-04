@@ -4,7 +4,7 @@ from dataclasses import asdict, replace
 from uuid import uuid4
 
 from chef_ai_workspace.models import Recipe, MaterialLine, TrackedValue, Ingredient, PriceQuote
-from chef_ai_workspace.mutations import Proposal
+from chef_ai_workspace.mutations import Proposal, MutationError
 from chef_ai_workspace.recipe_crud import save_recipe_crud
 
 
@@ -24,6 +24,7 @@ class Repository:
             PriceQuote(tv("400"), "1", "kg", "manual"))}
         self.receipts = {}
         self.commits = []
+        self.supplier_prices = {}
 
     def get_mutation_receipt(self, owner, request):
         return self.receipts.get(request)
@@ -43,6 +44,9 @@ class Repository:
     def find_owned_ingredients_exact(self, owner, name):
         return [{"id": i, "name": ingredient.name} for i, ingredient
                 in self.ingredients.items() if ingredient.name.casefold() == name.casefold()]
+
+    def load_owned_supplier_prices(self, owner, recipe):
+        return self.supplier_prices
 
     def list_owned_units(self, owner):
         return [{"id": str(uuid4()), "symbol": "g", "dimension": "mass",
@@ -97,6 +101,87 @@ class RecipeCrudTests(unittest.TestCase):
         self.assertEqual(saved.recipe.materials[0].quantity.value, "120")
         self.assertEqual(saved.recipe.materials[0].supplier_id, supplier)
         self.assertEqual(saved.recipe.materials[0].price_mode, "inherit")
+
+    def test_purchase_term_id_preserved_and_snapshotted(self):
+        supplier, offer = str(uuid4()), str(uuid4())
+        self.repo.supplier_prices[(self.repo.ingredient_id, f"offer:{offer}")] = PriceQuote(
+            tv("1650"), "3500", "g", "manual")
+        line = self.repo.recipe.materials[0]
+        saved = self.save({"op": "set_material_supplier", "material_id": line.id,
+                           "supplier_id": supplier, "offer_id": offer})
+        self.assertEqual(saved.recipe.materials[0].offer_id, offer)
+        self.assertEqual(self.repo.commits[-1]["state"]["materials"][0]["offer_id"], offer)
+        snapshot = self.repo.commits[-1]["cost_snapshot"]
+        self.assertFalse(snapshot["partial"])
+        self.assertEqual(snapshot["total_cost_jpy"], "47")
+        self.assertEqual(
+            snapshot["effective_quotes"][line.id]["effective_quote"]["amount_jpy"]["value"],
+            "1650")
+
+    def test_supplier_price_cannot_mutate_shared_master(self):
+        supplier = str(uuid4())
+        line = self.repo.recipe.materials[0]
+        self.repo.recipe = replace(self.repo.recipe, materials=(
+            replace(line, supplier_id=supplier),))
+        with self.assertRaises(MutationError):
+            self.save({"op": "set_material_price", "material_id": line.id,
+                       "price_jpy": "123", "price_quantity": "1", "price_unit": "kg"})
+        self.assertEqual(self.repo.ingredients[self.repo.ingredient_id].current_price.amount_jpy.value, "400")
+        self.assertEqual(self.repo.commits, [])
+
+    def test_explicit_offer_price_absent_keeps_cost_partial(self):
+        supplier, offer = str(uuid4()), str(uuid4())
+        line = self.repo.recipe.materials[0]
+        self.repo.recipe = replace(self.repo.recipe, materials=(
+            replace(line, supplier_id=supplier, offer_id=offer),))
+        saved = self.save({"op": "set_material_quantity", "material_id": line.id,
+                           "value": "120", "unit": "g"})
+        snapshot = self.repo.commits[-1]["cost_snapshot"]
+        self.assertTrue(snapshot["partial"])
+        self.assertIsNone(snapshot["total_cost_jpy"])
+        self.assertEqual(saved.recipe.materials[0].offer_id, offer)
+
+    def test_renaming_to_another_master_drops_old_purchase_identity(self):
+        old_line = self.repo.recipe.materials[0]
+        supplier, offer, other = str(uuid4()), str(uuid4()), str(uuid4())
+        self.repo.ingredients[other] = Ingredient(
+            other, "Tomato", PriceQuote(tv("300"), "1", "kg", "manual"))
+        self.repo.recipe = replace(self.repo.recipe, materials=(
+            replace(old_line, supplier_id=supplier, offer_id=offer),))
+        saved = self.save({"op": "set_material_name",
+                           "material_id": old_line.id, "value": "Tomato"})
+        line = saved.recipe.materials[0]
+        self.assertEqual(line.ingredient_id, other)
+        self.assertIsNone(line.supplier_id)
+        self.assertIsNone(line.offer_id)
+        self.assertEqual(self.repo.commits[-1]["state"]["materials"][0]["offer_id"], None)
+
+    def test_clear_supplier_and_offer_then_edit_market_price(self):
+        old_line = self.repo.recipe.materials[0]
+        self.repo.recipe = replace(self.repo.recipe, materials=(replace(
+            old_line, supplier_id=str(uuid4()), offer_id=str(uuid4())),))
+        saved = self.save(
+            {"op": "set_material_supplier", "material_id": old_line.id,
+             "supplier_id": "", "offer_id": ""},
+            {"op": "set_material_price", "material_id": old_line.id,
+             "price_jpy": "500", "price_quantity": "1", "price_unit": "kg"})
+        line = saved.recipe.materials[0]
+        self.assertIsNone(line.supplier_id)
+        self.assertIsNone(line.offer_id)
+        self.assertEqual(self.repo.ingredients[line.ingredient_id].current_price.amount_jpy.value, "500")
+        self.assertEqual(self.repo.commits[-1]["cost_snapshot"]["total_cost_jpy"], "50")
+
+    def test_switching_supplier_clears_selected_offer(self):
+        old_line = self.repo.recipe.materials[0]
+        supplier, offer, other_supplier = str(uuid4()), str(uuid4()), str(uuid4())
+        self.repo.recipe = replace(self.repo.recipe, materials=(
+            replace(old_line, supplier_id=supplier, offer_id=offer),))
+        saved = self.save({"op": "set_material_supplier", "material_id": old_line.id,
+                           "supplier_id": other_supplier})
+        line = saved.recipe.materials[0]
+        self.assertEqual(line.supplier_id, other_supplier)
+        self.assertIsNone(line.offer_id)
+        self.assertTrue(self.repo.commits[-1]["cost_snapshot"]["partial"])
 
     def test_same_name_different_ingredient_ids_update_only_selected_master(self):
         other_id = str(uuid4())

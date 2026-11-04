@@ -71,7 +71,7 @@ test("reported typo is a visible interpretation; combined review/save registers 
  await expect(page.getByRole("button",{name:"レシピを登録",exact:true})).toBeEnabled();
  // A combined review/save is one explicit authorization: it registers at once.
  await input(page,"内容を確認。登録を確定");
- await expect(page.getByText("レシピを保存しました。")).toBeVisible();
+ await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
  expect(saves).toBe(1);expect(parses).toBe(1);
 });
 
@@ -96,7 +96,7 @@ test("queued fragments coalesce and a save queued before review commits the arri
  await input(page,"内容を確認");await input(page,"保存してください");await input(page,"登録を確定");
  release();
  // The queued explicit save commits the arrived draft exactly once.
- await expect(page.getByText("レシピを保存しました。")).toBeVisible();
+ await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
  expect(saves).toBe(1);expect(parses).toBe(2);
  // Cursor fix (#101): the first parse went stale mid-flight (revisions
  // advanced while it was blocked), so no parsed draft exists yet. The
@@ -105,6 +105,8 @@ test("queued fragments coalesce and a save queued before review commits the arri
  expect(submitted[1].turns).toHaveLength(5);
  expect(submitted[1].turns).not.toContain("保存してください");
  expect(submitted[1].previous).toBeUndefined();
+ // Return from the saved detail to the manual voice fallback.
+ await page.getByRole("button", {name: "← レシピ一覧"}).click();
  // A later negative request saves nothing more; the commit happened once.
  await input(page,"保存しないでください");
  expect(saves).toBe(1);expect(parses).toBe(2);
@@ -147,5 +149,5 @@ test("audio recorded before review cannot approve the draft even when transcript
  await expect(page.getByRole("button",{name:"レシピを登録",exact:true})).toBeEnabled();
  expect(saves).toBe(0);
  await input(page,"保存してください");
- await expect(page.getByText("レシピを保存しました。")).toBeVisible();expect(saves).toBe(1);
+ await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();expect(saves).toBe(1);
 });

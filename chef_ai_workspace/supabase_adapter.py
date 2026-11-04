@@ -26,7 +26,8 @@ def decode_recipe(raw):
         ingredient_id=m.get("ingredient_id"),
         price_override=_quote(m.get("price_override")),
         price_mode=m.get("price_mode", "override"),
-        unit_id=m.get("unit_id"), supplier_id=m.get("supplier_id")) for m in raw.get("materials", ()))
+        unit_id=m.get("unit_id"), supplier_id=m.get("supplier_id"),
+        offer_id=m.get("offer_id")) for m in raw.get("materials", ()))
     return Recipe(id=raw["id"], title=_tracked(raw["title"]),
                   materials=materials,
                   selling_price_jpy=_tracked(raw["selling_price_jpy"]),
@@ -128,9 +129,9 @@ class SupabasePersistence:
                 current_price=_quote(row.get("current_price")))
         return catalog
 
-    def create_owned_ingredient_master(self, owner_id, name):
+    def create_owned_ingredient_master(self, owner_id, name, spec=None):
         result=self.client.rpc("create_owned_ingredient_master",{
-            "p_owner_id":owner_id,"p_name":name}).execute()
+            "p_owner_id":owner_id,"p_name":name,"p_spec":spec}).execute()
         return result.data
 
     def delete_owned_ingredient_master(self, owner_id, ingredient_id):
@@ -182,7 +183,7 @@ class SupabasePersistence:
         rows=[]
         while True:
             response=(self.client.table("ingredients")
-                      .select("id,name,current_price")
+                      .select("id,name,spec,current_price")
                       .eq("owner_id",owner_id)
                       .order("id").range(len(rows),len(rows)+499).execute())
             batch=response.data or []
@@ -234,12 +235,13 @@ class SupabasePersistence:
             return existing[0]["id"]
         return self.create_owned_offer(owner_id, ingredient_id, supplier_id)
 
-    def update_owned_ingredient_master(self, owner_id, ingredient_id, name, quote):
+    def update_owned_ingredient_master(self, owner_id, ingredient_id, name, quote, spec=None):
         result=self.client.rpc("update_owned_ingredient",{
             "p_owner_id":owner_id,
             "p_ingredient_id":ingredient_id,
             "p_name":name,
             "p_price":quote,
+            "p_spec":spec,
         }).execute()
         return result.data is True
 
@@ -263,11 +265,15 @@ class SupabasePersistence:
         if not isinstance(query, str) or not query.strip() or limit < 1:
             return []
         pattern = query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        response = (self.client.table("ingredients")
-                    .select("id,name,brand,spec").eq("owner_id", owner_id)
-                    .ilike("name", "%" + pattern + "%")
-                    .order("name").limit(min(limit, 50)).execute())
-        return response.data or []
+        matches = {}
+        for column in ("name", "spec"):
+            response = (self.client.table("ingredients")
+                        .select("id,name,brand,spec").eq("owner_id", owner_id)
+                        .ilike(column, "%" + pattern + "%")
+                        .order("name").limit(min(limit, 50)).execute())
+            for row in response.data or []:
+                matches[row["id"]] = row
+        return sorted(matches.values(), key=lambda row: (row.get("name") or "", row.get("spec") or "", row["id"]))[:limit]
 
     def create_owned_supplier(self, owner_id, name, note=None):
         """Minimal supplier registration. Owner is server-derived; the
@@ -316,6 +322,131 @@ class SupabasePersistence:
             if exc.code == "P0001" and exc.message == "Supplier is used by recipe materials":
                 raise ValueError("Supplier is used by recipe materials") from exc
             raise
+
+    def list_owned_approved_prices(self, owner_id, ingredient_id):
+        """Compare explicitly adopted quotes; observations not adopted are omitted."""
+        if ingredient_id not in self.load_owned_ingredients(owner_id, [ingredient_id]):
+            raise ValueError("Ingredient not owned")
+        offers = (self.client.table("offers")
+                  .select("id,ingredient_id,supplier_id,package_quantity,"
+                          "package_unit,adopted_observation_id")
+                  .eq("owner_id", owner_id).eq("ingredient_id", ingredient_id)
+                  .order("id").execute()).data or []
+        relevant = [o for o in offers if o.get("adopted_observation_id")]
+        if not relevant:
+            return []
+        observation_ids = [o["adopted_observation_id"] for o in relevant]
+        observations = (self.client.table("price_observations")
+                        .select("id,offer_id,amount_jpy,currency,confirmed,"
+                                "source,observed_at")
+                        .eq("owner_id", owner_id).in_("id", observation_ids)
+                        .execute()).data or []
+        obs_by_id = {o["id"]: o for o in observations}
+        supplier_ids = sorted({o["supplier_id"] for o in relevant
+                               if o.get("supplier_id")})
+        suppliers = (self.client.table("suppliers")
+                     .select("id,name").eq("owner_id", owner_id)
+                     .in_("id", supplier_ids).execute()).data or [] if supplier_ids else []
+        names = {s["id"]: s["name"] for s in suppliers}
+        output = []
+        for offer in relevant:
+            obs = obs_by_id.get(offer["adopted_observation_id"])
+            if not obs or obs["offer_id"] != offer["id"] or not obs["confirmed"]:
+                continue
+            output.append({
+                "offer_id": offer["id"], "supplier_id": offer.get("supplier_id"),
+                "supplier_name": names.get(offer.get("supplier_id")),
+                "amount_jpy": str(obs["amount_jpy"]), "currency": obs["currency"],
+                "quantity": offer.get("package_quantity"),
+                "unit": offer.get("package_unit"),
+                "source": obs["source"], "observed_at": obs["observed_at"],
+            })
+        return output
+
+    def set_owned_offer_price(self, owner_id, ingredient_id, supplier_id,
+                              amount_jpy, quantity, unit):
+        """Explicit chef approval: store and adopt a JPY quote atomically.
+
+        Only the SQL RPC writes the adoption pointer. An ordinary observation
+        is never adopted by sorting, guessing or reading the newest row.
+        """
+        from .models import decimal as parse_decimal
+        price, qty = parse_decimal(amount_jpy), parse_decimal(quantity)
+        if not price.is_finite() or price < 0 or not qty.is_finite() or qty <= 0:
+            raise ValueError("Invalid offer price")
+        if not isinstance(unit, str) or not 1 <= len(unit.strip()) <= 32:
+            raise ValueError("Invalid offer unit")
+        result = self.client.rpc("set_owned_offer_price", {
+            "p_owner_id": owner_id, "p_ingredient_id": ingredient_id,
+            "p_supplier_id": supplier_id, "p_amount_jpy": str(price),
+            "p_quantity": str(qty), "p_unit": unit.strip(),
+        }).execute()
+        if not result.data:
+            raise RuntimeError("Price adoption did not produce an observation")
+        return str(result.data)
+
+    def load_owned_supplier_prices(self, owner_id, recipe):
+        """Load only owner-owned adopted offers matching the selected recipe line.
+
+        Explicit offer IDs select a single purchase term; legacy supplier-only
+        selections resolve only when exactly one adopted term is available.
+        No other supplier, market reference, or newest-price fallback is allowed.
+        """
+        selections = [m for m in recipe.materials
+                      if m.price_mode == "inherit" and m.ingredient_id
+                      and (m.supplier_id or m.offer_id)]
+        if not selections:
+            return {}
+        ingredient_ids = sorted({m.ingredient_id for m in selections})
+        offers = (self.client.table("offers")
+                  .select("id,ingredient_id,supplier_id,package_quantity,"
+                          "package_unit,package_unit_id,adopted_observation_id")
+                  .eq("owner_id", owner_id)
+                  .in_("ingredient_id", ingredient_ids).execute()).data or []
+        selected = [
+            o for o in offers if o.get("adopted_observation_id") and any(
+                m.ingredient_id == o["ingredient_id"]
+                and (m.offer_id == o["id"] if m.offer_id else m.supplier_id == o.get("supplier_id"))
+                and (m.supplier_id is None or m.supplier_id == o.get("supplier_id"))
+                for m in selections)
+        ]
+        ids = sorted({o["adopted_observation_id"] for o in selected})
+        if not ids:
+            return {}
+        observations = (self.client.table("price_observations")
+                        .select("id,offer_id,amount_jpy,currency,confirmed")
+                        .eq("owner_id", owner_id).in_("id", ids).execute()).data or []
+        by_obs = {o["id"]: o for o in observations}
+        from .models import PriceQuote, TrackedValue
+        by_offer = {}
+        by_supplier = {}
+        ambiguous = set()
+        for offer in selected:
+            obs = by_obs.get(offer["adopted_observation_id"])
+            if (not obs or obs["offer_id"] != offer["id"]
+                    or obs["currency"] != "JPY" or not obs["confirmed"]
+                    or not offer.get("package_quantity")
+                    or not offer.get("package_unit")):
+                continue
+            try:
+                quote = PriceQuote(
+                    amount_jpy=TrackedValue(str(obs["amount_jpy"]), "confirmed", "user"),
+                    per_quantity=str(offer["package_quantity"]),
+                    per_unit=str(offer["package_unit"]), source="manual",
+                    per_unit_id=offer.get("package_unit_id"))
+            except (ValueError, TypeError):
+                continue
+            by_offer[(offer["ingredient_id"], f"offer:{offer['id']}")] = quote
+            key = (offer["ingredient_id"], offer.get("supplier_id"))
+            if key in by_supplier:
+                ambiguous.add(key)
+            else:
+                by_supplier[key] = quote
+        for key in ambiguous:
+            by_supplier.pop(key, None)
+        # Prefix offer keys so UUID equality across different entity types
+        # cannot accidentally select a supplier-level quote.
+        return {**by_supplier, **by_offer}
 
     def create_owned_offer(self, owner_id, ingredient_id, supplier_id=None,
                            product_url=None, package_quantity=None,

@@ -193,22 +193,40 @@ class RecipeImpact:
 def assess_impact(recipes: tuple[Recipe, ...],
                   catalog: Mapping[str, Ingredient],
                   ingredient_id: str,
-                  candidate: PriceQuote) -> tuple[RecipeImpact, ...]:
+                  candidate: PriceQuote, *,
+                  supplier_prices: Mapping[tuple[str, str], PriceQuote] | None = None,
+                  units: Mapping[str, tuple[str, Decimal | None]] | None = None,
+                  candidate_offer_id: str | None = None,
+                  candidate_supplier_id: str | None = None) -> tuple[RecipeImpact, ...]:
     """Hypothetical cost impact as if candidate were the adopted quote.
 
-    Inherit lines follow the candidate; override lines keep their own
-    quote and are reported unchanged. Unresolved lines stay partial on
-    either side. Reads only; never writes recipes or snapshots.
+    Supplier-less inherit lines follow the candidate. Selected purchase
+    terms follow only a matching candidate with a resolved adopted quote;
+    other suppliers/offers and override lines are reported unchanged.
+    Unresolved lines stay partial on either side. Reads only; never writes recipes or snapshots.
     """
     base = catalog.get(ingredient_id)
     hypo_ingredient = replace(
         base, current_price=candidate) if base is not None else Ingredient(
             ingredient_id, "", candidate)
     hypo_catalog = {**catalog, ingredient_id: hypo_ingredient}
+    prices = supplier_prices or {}
+    hypo_prices = dict(prices)
+    changed_keys: set[tuple[str, str]] = set()
+    if candidate_offer_id:
+        key = (ingredient_id, f"offer:{candidate_offer_id}")
+        if key in prices:
+            hypo_prices[key] = candidate
+            changed_keys.add(key)
+    if candidate_supplier_id and (ingredient_id, f"offer:{candidate_offer_id}") in prices:
+        key = (ingredient_id, candidate_supplier_id)
+        if key in prices:
+            hypo_prices[key] = candidate
+            changed_keys.add(key)
     out: list[RecipeImpact] = []
     for recipe in recipes:
-        current = calculate_cost(recipe, catalog)
-        hypo = calculate_cost(recipe, hypo_catalog)
+        current = calculate_cost(recipe, catalog, units, prices)
+        hypo = calculate_cost(recipe, hypo_catalog, units, hypo_prices)
         current_total = (None if current.total_cost_jpy is None
                          else str(current.total_cost_jpy))
         hypo_total = (None if hypo.total_cost_jpy is None
@@ -221,7 +239,11 @@ def assess_impact(recipes: tuple[Recipe, ...],
         for line in recipe.materials:
             if line.ingredient_id != ingredient_id:
                 continue
-            if line.price_mode == "inherit":
+            selected_key = (line.ingredient_id,
+                            f"offer:{line.offer_id}" if line.offer_id else line.supplier_id)
+            follows_candidate = ((not line.supplier_id and not line.offer_id)
+                                 or selected_key in changed_keys)
+            if line.price_mode == "inherit" and follows_candidate:
                 current_cost = current.line_costs.get(line.id)
                 hypo_cost = hypo.line_costs.get(line.id)
                 affected.append(LineImpact(

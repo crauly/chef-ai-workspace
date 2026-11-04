@@ -25,14 +25,14 @@ test("desktop settings keeps Chef brand and displays labeled ingredient table, f
  await expect(table.getByRole("columnheader",{name:/仕入れ先/})).toBeVisible();
  await expect(table.getByRole("row",{name:/牛乳/})).toContainText("A食品");
  await expect(table.getByRole("row",{name:/バター/})).toContainText("仕入れ先未設定");
- await page.getByLabel("食材名で検索").fill("牛乳");
+ await page.getByLabel("食材名と規格で検索").fill("牛乳");
  await expect(table.locator("tbody tr")).toHaveCount(1);
- await page.getByLabel("食材名で検索").fill("");
+ await page.getByLabel("食材名と規格で検索").fill("");
  await page.locator(".ingredient-supplier-filter select").selectOption("B商事");
  await expect(table.locator("tbody tr")).toHaveCount(1);
  await expect(table.getByRole("row",{name:/小麦粉/})).toBeVisible();
  await page.locator(".ingredient-supplier-filter select").selectOption("all");
- await table.getByRole("button",{name:/価格・規格/}).click();
+ await table.getByRole("button",{name:/採用価格・単位/}).click();
  await expect(table.locator("tbody tr").first()).toContainText("バター");
 });
 

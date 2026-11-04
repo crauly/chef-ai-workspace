@@ -42,7 +42,12 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
                       if op.get("op") == "link_ingredient" and op.get("ingredient_id")]
     if explicit_links:
         catalog = {**catalog, **repository.load_owned_ingredients(owner_id, explicit_links)}
-    candidate = prepare_mutation(recipe, proposal, user_confirmed=True, catalog=catalog)
+    try:
+        candidate = prepare_mutation(recipe, proposal, user_confirmed=True, catalog=catalog)
+    except (ValueError, ArithmeticError) as exc:
+        # Value-model validation errors are invalid confirmed edits (409),
+        # not missing recipe/owner lookups (404). No DB write has happened.
+        raise MutationError(str(exc)) from exc
     finder = repository.find_owned_ingredients_exact
     loader = repository.load_owned_ingredients
     entries = {}
@@ -88,6 +93,9 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
             (op.get("op") in ("set_material_price", "add_material")
              or (op.get("op") == "link_ingredient" and op.get("price_mode") == "override"))
             and op.get("material_id") == line.id for op in proposal.operations)
+        if price_edited and quote is not None and (line.supplier_id or line.offer_id):
+            raise MutationError(
+                "Supplier offer price must be adopted through the explicit offer-price approval route")
         if price_edited and quote is not None:
             effective[ingredient_id] = Ingredient(ingredient_id, ingredient.name, quote)
         metadata = ledger_by_id.get(ingredient_id, {})
@@ -101,26 +109,48 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
             if entry["current_price"] is not None and entry["current_price"] != value:
                 raise MutationError("Conflicting prices for shared ingredient")
             entry["current_price"] = value
-        normalized.append(replace(line, ingredient_id=ingredient_id,
-                                  price_mode="inherit", price_override=None))
+        # Renaming can resolve to a different ingredient master. Purchase
+        # terms belong to the old ingredient and must not travel with it.
+        purchase_identity_changed = (
+            line.ingredient_id is not None and line.ingredient_id != ingredient_id
+        )
+        normalized.append(replace(
+            line, ingredient_id=ingredient_id, price_mode="inherit",
+            price_override=None,
+            supplier_id=None if purchase_identity_changed else line.supplier_id,
+            offer_id=None if purchase_identity_changed else line.offer_id,
+        ))
     candidate = replace(candidate, materials=tuple(normalized))
     for item in prepared_ledger:
         if item["kind"] == "new" and not any(
                 line.ingredient_id == item["id"] for line in candidate.materials):
             raise MutationError("New ledger ingredient must be linked to a recipe material")
     units = unit_factor_catalog(repository.list_owned_units(owner_id))
+    price_loader = getattr(repository, "load_owned_supplier_prices", None)
+    supplier_prices = price_loader(owner_id, candidate) if callable(price_loader) else {}
     try:
-        cost = calculate_cost(candidate, effective, units)
+        cost = calculate_cost(candidate, effective, units, supplier_prices)
     except (ValueError, ArithmeticError) as exc:
         raise MutationError(str(exc)) from exc
     snapshot = asdict(cost)
     if save_version:
-        snapshot["effective_quotes"] = {
-            line.id: {"price_mode": "inherit", "ingredient_id": line.ingredient_id,
-                      "effective_quote": asdict(effective[line.ingredient_id].current_price)
-                      if effective[line.ingredient_id].current_price else None}
-            for line in candidate.materials
-        }
+        snapshots = {}
+        for line in candidate.materials:
+            if line.offer_id:
+                quote = supplier_prices.get((line.ingredient_id, f"offer:{line.offer_id}"))
+            elif line.supplier_id:
+                quote = supplier_prices.get((line.ingredient_id, line.supplier_id))
+            else:
+                ingredient = effective.get(line.ingredient_id or "")
+                quote = ingredient.current_price if ingredient else None
+            snapshots[line.id] = {
+                "price_mode": "inherit",
+                "ingredient_id": line.ingredient_id,
+                "supplier_id": line.supplier_id,
+                "offer_id": line.offer_id,
+                "effective_quote": asdict(quote) if quote is not None else None,
+            }
+        snapshot["effective_quotes"] = snapshots
     revision = repository.commit_recipe_crud(
         owner_id=owner_id, recipe_id=recipe.id, request_id=proposal.request_id,
         base_revision=proposal.base_revision, state=asdict(candidate),

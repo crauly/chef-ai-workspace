@@ -178,13 +178,16 @@ def _displayed_recipe(owner, repository, found):
     else:
         catalog = {}
     out = asdict(found)
+    price_loader = getattr(repository, "load_owned_supplier_prices", None)
+    supplier_prices = price_loader(owner, found) if callable(price_loader) else {}
     for line in out["materials"]:
         ingredient = catalog.get(line.get("ingredient_id"))
-        line["effective_price"] = (
-            asdict(ingredient.current_price)
-            if ingredient is not None and ingredient.current_price is not None
-            else line.get("price_override")
-        )
+        quote = (supplier_prices.get((line.get("ingredient_id"), f"offer:{line['offer_id']}"))
+                 if line.get("offer_id") else
+                 supplier_prices.get((line.get("ingredient_id"), line["supplier_id"]))
+                 if line.get("supplier_id") else
+                 ingredient.current_price if ingredient is not None else None)
+        line["effective_price"] = asdict(quote) if quote is not None else None
     out["display_names"] = resolve_display_names(found, catalog)
     return out
 
@@ -322,6 +325,7 @@ def link_demo_ingredient_supplier(ingredient_id:UUID, body:IngredientSupplierLin
 class IngredientMasterCreateBody(BaseModel):
     model_config=ConfigDict(extra="forbid")
     name: str=Field(min_length=1,max_length=200)
+    spec: str | None=Field(default=None,max_length=200)
 
 
 @router.post("/ingredients",status_code=201)
@@ -330,7 +334,7 @@ def create_demo_ingredient_master(body:IngredientMasterCreateBody,ctx=Depends(de
     if not body.name.strip(): raise HTTPException(422,"Ingredient name required")
     create=getattr(repo,"create_owned_ingredient_master",None)
     if not callable(create): raise HTTPException(503,"Ingredient master unavailable")
-    return {"id":str(create(owner,body.name.strip()))}
+    return {"id":str(create(owner,body.name.strip(),body.spec.strip() or None if body.spec is not None else None))}
 
 
 @router.delete("/ingredients/{ingredient_id}")
@@ -345,6 +349,7 @@ def delete_demo_ingredient_master(ingredient_id:UUID,ctx=Depends(demo_context)):
 class IngredientMasterEditBody(BaseModel):
     model_config=ConfigDict(extra="forbid")
     name: str=Field(min_length=1,max_length=200)
+    spec: str | None=Field(default=None,max_length=200)
     price_jpy: str | None=None
     price_quantity: str | None=None
     price_unit: str | None=Field(default=None,min_length=1,max_length=32)
@@ -355,24 +360,53 @@ def edit_demo_ingredient_master(ingredient_id:UUID, body:IngredientMasterEditBod
                                 ctx=Depends(demo_context)):
     """One explicitly authorized manager action changes shared master price."""
     owner, repository=ctx
-    from .models import PriceQuote
-    fields=(body.price_jpy,body.price_quantity,body.price_unit)
-    if any(value is not None for value in fields) and not all(value is not None for value in fields):
-        raise HTTPException(422,"Partial master price")
-    quote=None
-    if all(value is not None for value in fields):
-        try:
-            quote=PriceQuote(TrackedValue(body.price_jpy,"confirmed","user"),
-                             body.price_quantity,body.price_unit,"manual")
-        except (TypeError,ValueError) as exc:
-            raise HTTPException(422,"Invalid master price") from exc
+    if any(value is not None for value in (body.price_jpy,body.price_quantity,body.price_unit)):
+        raise HTTPException(422,"Use explicit offer price adoption")
     editor=getattr(repository,"update_owned_ingredient_master",None)
     if not callable(editor):
         raise HTTPException(503,"Ingredient master unavailable")
     if not editor(owner,str(ingredient_id),body.name.strip(),
-                  asdict(quote) if quote is not None else None):
+                  None,
+                  body.spec.strip() or None if body.spec is not None else None):
         raise HTTPException(404,"Ingredient not found")
     return {"id":str(ingredient_id),"name":body.name.strip(),"updated":True}
+
+
+@router.get("/ingredients/{ingredient_id}/offer-prices")
+def list_demo_approved_prices(ingredient_id: UUID, ctx=Depends(demo_context)):
+    owner, repository=ctx
+    loader=getattr(repository, "list_owned_approved_prices", None)
+    if not callable(loader):
+        raise HTTPException(503, "Supplier price comparison unavailable")
+    try:
+        return {"items": loader(owner, str(ingredient_id))}
+    except ValueError as exc:
+        raise HTTPException(404, "Ingredient not owned") from exc
+
+
+class ApprovedOfferPriceBody(BaseModel):
+    """An explicit user-approved quote, never an AI or search observation."""
+    model_config=ConfigDict(extra="forbid")
+    ingredient_id: UUID
+    supplier_id: UUID | None=None
+    amount_jpy: str
+    quantity: str
+    unit: str=Field(min_length=1,max_length=32)
+
+
+@router.post("/offer-prices", status_code=201)
+def adopt_demo_offer_price(body: ApprovedOfferPriceBody, ctx=Depends(demo_context)):
+    owner, repository=ctx
+    adopter=getattr(repository, "set_owned_offer_price", None)
+    if not callable(adopter):
+        raise HTTPException(503, "Offer price adoption unavailable")
+    try:
+        observation_id=adopter(owner, str(body.ingredient_id),
+                               str(body.supplier_id) if body.supplier_id else None,
+                               body.amount_jpy, body.quantity, body.unit)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"observation_id": observation_id, "adopted": True}
 
 
 @router.get("/ingredients/search")
@@ -616,7 +650,10 @@ def create_complete_demo_recipe(body: CompleteRecipeBody, ctx=Depends(demo_conte
     # The Supabase create_owned_recipe RPC requires initial revision 0.
     recipe = replace(recipe, revision=0)
     try:
-        snapshot = _json(asdict(calculate_cost(recipe, catalog, unit_factor_catalog(known_units))))
+        price_loader = getattr(repository, "load_owned_supplier_prices", None)
+        supplier_prices = price_loader(owner, recipe) if callable(price_loader) else {}
+        snapshot = _json(asdict(calculate_cost(
+            recipe, catalog, unit_factor_catalog(known_units), supplier_prices)))
         repository.create_owned_recipe(owner, recipe, snapshot, unit_candidates=new_units,
                                        ingredient_entries=ingredient_entries)
     except ValueError as exc:
@@ -668,7 +705,9 @@ def get_demo_recipe_cost(recipe_id: UUID, ctx=Depends(demo_context)):
                if any(m.price_mode == "inherit" for m in recipe.materials) else {})
     unit_loader = getattr(repository, "list_owned_units", None)
     units = unit_factor_catalog(unit_loader(owner)) if callable(unit_loader) else {}
-    return _json(asdict(calculate_cost(recipe, catalog, units)))
+    price_loader = getattr(repository, "load_owned_supplier_prices", None)
+    supplier_prices = price_loader(owner, recipe) if callable(price_loader) else {}
+    return _json(asdict(calculate_cost(recipe, catalog, units, supplier_prices)))
 
 
 class AIProposalBody(BaseModel):
@@ -1013,8 +1052,15 @@ def _impact_envelope(owner: str, repository, ingredient_id: str,
                      if m.price_mode == "inherit" and m.ingredient_id})
     loader = getattr(repository, "load_owned_ingredients", None)
     catalog = loader(owner, needed) if callable(loader) else {}
-    impacts = assess_impact(tuple(recipes), catalog or {},
-                            ingredient_id, quote)
+    price_loader = getattr(repository, "load_owned_supplier_prices", None)
+    units = _owned_unit_definitions(owner, repository)
+    impacts = []
+    for recipe in recipes:
+        prices = price_loader(owner, recipe) if callable(price_loader) else {}
+        impacts.extend(assess_impact(
+            (recipe,), catalog or {}, ingredient_id, quote,
+            supplier_prices=prices, units=units,
+            candidate_offer_id=obs.offer_id, candidate_supplier_id=obs.supplier_id))
     return {"basis_observation_id": str(basis_id), "comparable": True,
             "reasons": [],
             "items": [_json(asdict(impact)) for impact in impacts]}

@@ -2,6 +2,7 @@
 import copy
 import unittest
 from decimal import Decimal
+from decimal import Decimal
 from uuid import uuid4
 from fastapi.testclient import TestClient
 from chef_ai_workspace.api import app
@@ -236,6 +237,49 @@ class ImpactTests(unittest.TestCase):
         self.assertEqual(impact.affected_lines[0].hypo_line_cost, "168")
         self.assertEqual(impact.unchanged_lines, (L_OVERRIDE,))
 
+    def test_supplier_quotes_preserved_and_only_selected_offer_changes(self):
+        lines = tuple(MaterialLine(
+            name, tv("パスタ"), tv("100"), "g", ingredient_id=ING_A,
+            price_mode="inherit", supplier_id=supplier, offer_id=offer)
+            for name, supplier, offer in (("selected", SUP_A, OFF_A),
+                                          ("other", SUP_B, OFF_B)))
+        recipe = Recipe(R1, tv("Pasta"), lines, tv("1000"))
+        prices = {(ING_A, f"offer:{OFF_A}"): quote("700", "1000", "g"),
+                  (ING_A, f"offer:{OFF_B}"): quote("900", "1000", "g")}
+        before = copy.deepcopy(prices)
+        (impact,) = assess_impact(
+            (recipe,), self.catalog, ING_A, quote("800", "1000", "g"),
+            supplier_prices=prices, candidate_offer_id=OFF_A,
+            candidate_supplier_id=SUP_A)
+        self.assertEqual((impact.current_total, impact.hypo_total, impact.diff),
+                         ("160", "170", "10"))
+        self.assertEqual([line.line_id for line in impact.affected_lines], ["selected"])
+        self.assertEqual(impact.unchanged_lines, ("other",))
+        self.assertEqual(prices, before)
+        # An unavailable selected offer must remain unresolved in both scenarios.
+        (missing,) = assess_impact((recipe,), self.catalog, ING_A, self.candidate,
+                                   supplier_prices={}, candidate_offer_id=OFF_A,
+                                   candidate_supplier_id=SUP_A)
+        self.assertTrue(missing.current_partial)
+        self.assertTrue(missing.hypo_partial)
+
+    def test_supplier_impact_uses_owned_unit_factors(self):
+        line = MaterialLine("selected", tv("パスタ"), tv("100"), "g",
+                            ingredient_id=ING_A, price_mode="inherit",
+                            supplier_id=SUP_A, offer_id=OFF_A, unit_id="gram-id")
+        recipe = Recipe(R1, tv("Pasta"), (line,), tv("1000"))
+        prices = {(ING_A, f"offer:{OFF_A}"): PriceQuote(
+            tv("700"), "1", "kg", "manual", per_unit_id="kilogram-id")}
+        units = {"gram-id": ("mass", Decimal("1")),
+                 "kilogram-id": ("mass", Decimal("1000")),
+                 "kg": ("mass", Decimal("1000"))}
+        (impact,) = assess_impact(
+            (recipe,), self.catalog, ING_A, quote("800", "1", "kg"),
+            supplier_prices=prices, units=units,
+            candidate_offer_id=OFF_A, candidate_supplier_id=SUP_A)
+        self.assertEqual((impact.current_total, impact.hypo_total, impact.diff),
+                         ("70", "80", "10"))
+
     def test_inputs_and_snapshots_untouched(self):
         (r1,) = [r for r in self.repo.recipes.values() if r.id == R1]
         before_recipe = copy.deepcopy(r1)
@@ -325,6 +369,32 @@ class ApiTests(unittest.TestCase):
                                  "base_observation_id": OBS_BASE,
                                  "candidate_observation_id": OBS_BASE})
         self.assertEqual(r.status_code, 422)
+
+    def test_impact_endpoint_loads_owned_supplier_quotes(self):
+        lines = (
+            MaterialLine("selected", tv("パスタ"), tv("100"), "g",
+                         ingredient_id=ING_A, supplier_id=SUP_A, offer_id=OFF_A,
+                         price_mode="inherit"),
+            MaterialLine("other", tv("塩"), tv("100"), "g",
+                         ingredient_id=ING_B, supplier_id=SUP_B, offer_id=OFF_B,
+                         price_mode="inherit"))
+        self.repo.recipes = {R1: Recipe(R1, tv("Pasta"), lines, tv("1000"))}
+        calls = []
+        def load_prices(owner, recipe):
+            calls.append((owner, recipe.id))
+            return {(ING_A, f"offer:{OFF_A}"): quote("700", "1000", "g"),
+                    (ING_B, f"offer:{OFF_B}"): quote("900", "1000", "g")}
+        self.repo.load_owned_supplier_prices = load_prices
+        candidate = self.repo.create_owned_observation(
+            OWNER_1, OFF_A, "400", tax_note="税込", shipping_note="送料込")
+        response = self.client.get(
+            f"/demo/ingredients/{ING_A}/price-impact?observation_id={candidate}",
+            headers=self.h)
+        self.assertEqual(response.status_code, 200, response.text)
+        (impact,) = response.json()["items"]
+        self.assertEqual((impact["current_total"], impact["hypo_total"], impact["diff"]),
+                         ("160", "170", "10"))
+        self.assertEqual(calls, [(OWNER_1, R1)])
 
     def test_impact_endpoint(self):
         r = self.client.get(
