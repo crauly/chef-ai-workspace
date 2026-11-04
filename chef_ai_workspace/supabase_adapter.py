@@ -322,6 +322,46 @@ class SupabasePersistence:
                 raise ValueError("Supplier is used by recipe materials") from exc
             raise
 
+    def list_owned_approved_prices(self, owner_id, ingredient_id):
+        """Compare explicitly adopted quotes; observations not adopted are omitted."""
+        if ingredient_id not in self.load_owned_ingredients(owner_id, [ingredient_id]):
+            raise ValueError("Ingredient not owned")
+        offers = (self.client.table("offers")
+                  .select("id,ingredient_id,supplier_id,package_quantity,"
+                          "package_unit,adopted_observation_id")
+                  .eq("owner_id", owner_id).eq("ingredient_id", ingredient_id)
+                  .order("id").execute()).data or []
+        relevant = [o for o in offers if o.get("adopted_observation_id")]
+        if not relevant:
+            return []
+        observation_ids = [o["adopted_observation_id"] for o in relevant]
+        observations = (self.client.table("price_observations")
+                        .select("id,offer_id,amount_jpy,currency,confirmed,"
+                                "source,observed_at")
+                        .eq("owner_id", owner_id).in_("id", observation_ids)
+                        .execute()).data or []
+        obs_by_id = {o["id"]: o for o in observations}
+        supplier_ids = sorted({o["supplier_id"] for o in relevant
+                               if o.get("supplier_id")})
+        suppliers = (self.client.table("suppliers")
+                     .select("id,name").eq("owner_id", owner_id)
+                     .in_("id", supplier_ids).execute()).data or [] if supplier_ids else []
+        names = {s["id"]: s["name"] for s in suppliers}
+        output = []
+        for offer in relevant:
+            obs = obs_by_id.get(offer["adopted_observation_id"])
+            if not obs or obs["offer_id"] != offer["id"] or not obs["confirmed"]:
+                continue
+            output.append({
+                "offer_id": offer["id"], "supplier_id": offer.get("supplier_id"),
+                "supplier_name": names.get(offer.get("supplier_id")),
+                "amount_jpy": str(obs["amount_jpy"]), "currency": obs["currency"],
+                "quantity": offer.get("package_quantity"),
+                "unit": offer.get("package_unit"),
+                "source": obs["source"], "observed_at": obs["observed_at"],
+            })
+        return output
+
     def set_owned_offer_price(self, owner_id, ingredient_id, supplier_id,
                               amount_jpy, quantity, unit):
         """Explicit chef approval: store and adopt a JPY quote atomically.
