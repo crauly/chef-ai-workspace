@@ -119,9 +119,13 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  // A one-time navigation hint carries the requested voice-edit mode across
  // a full page load; the next render invokes the existing guarded transition.
  useEffect(()=>{
-  if(pageKind!=="detail"||!selected||new URLSearchParams(window.location.search).get("voiceEdit")!=="1")return;
+  if(pageKind!=="detail"||!selected)return;
+  const params=new URLSearchParams(window.location.search);
+  const voiceEdit=params.get("voiceEdit")==="1",aiEdit=params.get("aiEdit")==="1";
+  if(!voiceEdit&&!aiEdit)return;
   window.history.replaceState(null,"",window.location.pathname);
-  setVoiceEditRequest(value=>value+1);
+  if(voiceEdit)setVoiceEditRequest(value=>value+1);
+  if(aiEdit)setAiOpen(true);
  },[pageKind,selected?.id]);
  const [sellingPriceEdit,setSellingPriceEdit]=useState("");
  const [confirmQty,setConfirmQty]=useState(false),[confirmPrice,setConfirmPrice]=useState(false);
@@ -138,7 +142,10 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
   void sync();window.addEventListener("popstate",sync);
   return()=>{active=false;window.removeEventListener("popstate",sync);};
  },[]);
- function showDetail(recipe:Recipe,openVoiceEdit=false){window.location.assign(`/recipes/${encodeURIComponent(recipe.id)}${openVoiceEdit?"?voiceEdit=1":""}`);}
+ function showDetail(recipe:Recipe,openVoiceEdit=false,openAiEditor=false){
+  const hint=openVoiceEdit?"?voiceEdit=1":openAiEditor?"?aiEdit=1":"";
+  window.location.assign(`/recipes/${encodeURIComponent(recipe.id)}${hint}`);
+ }
  function backToLibrary(){window.location.assign("/");}
 
  const [locale,setLocale]=useState<Locale>("ja");
@@ -182,7 +189,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  async function create(e:React.FormEvent){e.preventDefault();if(!draft.trim()||guardCaptureActive())return;setBusy(true);
  try{const recipe=await request<Recipe>("/api/recipes",{method:"POST",body:JSON.stringify({title:draft.trim()})});setDraft("");if(page===1){await reload();}else{setPage(1);}showDetail(recipe);}
  catch(e){setError(String(e));}finally{setBusy(false);}}
- async function open(id:string){if(busy||guardCaptureActive())return;setBusy(true);try{const recipe=await request<Recipe>(`/api/recipes/${id}`);showDetail(recipe);setError("");}catch(e){setError(String(e));}finally{setBusy(false);}}
+ async function open(id:string,openAiEditor=false){if(busy||guardCaptureActive())return;setBusy(true);try{const recipe=await request<Recipe>(`/api/recipes/${id}`);showDetail(recipe,false,openAiEditor);setError("");}catch(e){setError(String(e));}finally{setBusy(false);}}
  async function change(e:React.FormEvent){e.preventDefault();if(!selected||!rename.trim())return;setBusy(true);
  try{const result=await request<{recipe:Recipe}>(`/api/recipes/${selected.id}/confirm`,{method:"POST",body:JSON.stringify({base_revision:selected.revision,request_id:crypto.randomUUID(),operations:[{op:"set_title",value:rename.trim()}],save_version:true})});setSelected(result.recipe);await reload();}
  catch(e){setError(String(e));}finally{setBusy(false);}}
@@ -395,7 +402,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
     <h3>{actionItem.title}</h3>
     <p className="muted">{locale==="ja"?"操作を選択してください。":"Choose an action."}</p>
     <div className="recipe-action-options">
-     <button type="button" disabled={busy} onClick={()=>{const id=actionItem.id;setActionItem(null);setAiOpen(true);void open(id);}}>{locale==="ja"?"編集":"Edit"}</button>
+     <button type="button" disabled={busy} onClick={()=>{const id=actionItem.id;setActionItem(null);void open(id,true);}}>{locale==="ja"?"編集":"Edit"}</button>
      <button type="button" disabled={busy} className="recipe-delete-action" onClick={()=>{setDeleteTarget({id:actionItem.id,title:actionItem.title});setActionItem(null);}}>{locale==="ja"?"削除":"Delete"}</button>
      <button type="button" className="secondary" onClick={()=>setActionItem(null)}>{locale==="ja"?"キャンセル":"Cancel"}</button>
     </div>
