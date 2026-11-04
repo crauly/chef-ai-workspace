@@ -100,6 +100,8 @@ test("recipe detail supports explicit deletion with confirmation",async({page})=
 test("long press on recipe list opens edit/delete without navigating",async({page})=>{
  await page.goto("/");
  const recipe=page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"});
+ await recipe.scrollIntoViewIfNeeded();
+ await expect(recipe).toBeInViewport();
  const bounds=await recipe.boundingBox();
  expect(bounds).not.toBeNull();
  await page.mouse.move(bounds!.x+bounds!.width/2,bounds!.y+bounds!.height/2);
