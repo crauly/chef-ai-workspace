@@ -81,7 +81,27 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
     working(true); setError(""); setNotice(""); setReview(null); setApproved(false);
     reviewRef.current=null;
     try {
-      const proposal = await request<AIProposal>(`/api/recipes/${base.id}/propose`, {method: "POST", body: JSON.stringify({instruction:text})});
+      // A price research instruction needs real provenance, not an AI-invented
+      // numerical mutation. Scope is resolved dynamically against live rows.
+      const researchRequested=/(調べ|検索|相場|市場価格|参考価格|仮単価|平均価格|最安|価格比較|price research|market price|average price|look up.*price|check.*price|research.*price|compare prices)/i.test(text);
+      let researchNotice="";
+      let proposal:AIProposal;
+      if(researchRequested){
+        const result=await request<{indices:number[];operations:Operation[];results:{name:string;status:string;description:string}[];ambiguous:boolean}>("/api/recipe-price-research",{
+          method:"POST",body:JSON.stringify({instruction:text,materials:base.materials.map(m=>({id:m.id,name:m.material_name.value||""}))})});
+        if(!alive.current||token!==generation.current||latestRecipe.current.id!==base.id||latestRecipe.current.revision!==base.revision)return;
+        if(result.ambiguous||!result.indices.length){
+          setNotice(locale==="ja"?"調査対象を特定できませんでした。食材名・範囲、または「すべて」を指定してください。":"Could not determine the target rows. Name ingredients, a range, or all.");
+          return;
+        }
+        const skipped=result.results.filter(item=>item.status!=="candidate");
+        researchNotice=(locale==="ja"?`調査対象${result.indices.length}品・仮単価候補${result.operations.length}品。`:`Researched ${result.indices.length} ingredients; ${result.operations.length} provisional candidates.`)+
+          (skipped.length?(locale==="ja"?" 候補未取得："+skipped.map(item=>item.name).join("、"):" No usable quote: "+skipped.map(item=>item.name).join(", ")):"");
+        if(!result.operations.length){setNotice(researchNotice);return;}
+        proposal={recipe_id:base.id,base_revision:base.revision,operations:result.operations,requires_confirmation:true};
+      }else{
+        proposal=await request<AIProposal>(`/api/recipes/${base.id}/propose`, {method: "POST", body: JSON.stringify({instruction:text})});
+      }
       if(!alive.current||token!==generation.current||latestRecipe.current.id!==base.id||latestRecipe.current.revision!==base.revision)return;
       if (proposal.requires_confirmation !== true || !Array.isArray(proposal.operations) || proposal.operations.length > 40) throw new Error("invalid");
       if (proposal.recipe_id !== base.id) throw new Error("invalid");
@@ -89,7 +109,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
       if (describe(base, proposal.operations, locale) === null) throw new Error("invalid");
       const next={proposal,instruction:text,requestId:crypto.randomUUID()};reviewRef.current=next;setReview(next);
       reviewEpoch.current=markReview?.()??-1;
-      setNotice(locale==="ja"?"変更案を表示しました。差分を確認後、もう一度「保存してください」と明示するか、確認チェックと保存ボタンを操作してください。":"Review the proposal, then explicitly request saving or use the approval controls.");
+      setNotice(researchNotice+" "+(locale==="ja"?"変更案を表示しました。差分を確認後、もう一度「保存してください」と明示するか、確認チェックと保存ボタンを操作してください。":"Review the proposal, then explicitly request saving or use the approval controls."));
     } catch (e) {report(e);} finally {working(false);}
   }
   async function confirm(voiceApproval?:Review) {
