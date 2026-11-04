@@ -68,7 +68,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  },[actionItem,deleteTarget,busy]);
  const [loadingList,setLoadingList]=useState(false);
  const [waking,setWaking]=useState(false);
- const [cost,setCost]=useState<{partial:boolean;subtotal_jpy:string;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean;unresolved_line_ids:string[]}|null>(null);
+ const [cost,setCost]=useState<{partial:boolean;subtotal_jpy:string;line_costs:Record<string,string>;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean;unresolved_line_ids:string[]}|null>(null);
  const [food,setFood]=useState(""),[qty,setQty]=useState(""),[unit,setUnit]=useState(""),[price,setPrice]=useState(""),[priceQty,setPriceQty]=useState("1"),[priceUnit,setPriceUnit]=useState("");
  const [units,setUnits]=useState<Array<{id:string;symbol:string;dimension:string;aliases:string[]}>>([]);
  const [unitsLoaded,setUnitsLoaded]=useState(false);
@@ -122,7 +122,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  const t=(key:Parameters<typeof label>[1])=>label(locale,key);
  useEffect(()=>{const current=localStorage.getItem("chef-ui-locale");if(current==="ja"||current==="en-US"){setLocale(current);document.documentElement.lang=current;}},[]);
  function switchLocale(next:Locale){setLocale(next);localStorage.setItem("chef-ui-locale",next);document.documentElement.lang=next;}
- useEffect(()=>{let active=true;setCost(null);if(selected){void request<{partial:boolean;subtotal_jpy:string;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean;unresolved_line_ids:string[]}>(`/api/recipes/${selected.id}/cost`).then(result=>{if(active)setCost(result);}).catch(()=>{if(active)setCost(null);});}return()=>{active=false;};},[selected?.id,selected?.revision]);
+ useEffect(()=>{let active=true;setCost(null);if(selected){void request<{partial:boolean;subtotal_jpy:string;line_costs:Record<string,string>;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean;unresolved_line_ids:string[]}>(`/api/recipes/${selected.id}/cost`).then(result=>{if(active)setCost(result);}).catch(()=>{if(active)setCost(null);});}return()=>{active=false;};},[selected?.id,selected?.revision]);
  const reload=useCallback(async()=>{
    const current=++listRequest.current;setWaking(false);setLoadingList(true);
    try{
@@ -275,7 +275,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  <DishImageSection key={selected.id} recipeId={selected.id} title={selected.title.value||""} names={selected.materials.map(m=>m.material_name.value?.trim()||selected.display_names?.[m.id]?.display?.trim()||"")} locale={locale} disabled={busy}/>
  <div className="detail-metrics" role="region" aria-label="Recipe cost summary">
   <div><span>{locale==="ja"?"販売価格":"Selling price"}</span><strong>{selected.selling_price_jpy.value===null?"—":`¥${selected.selling_price_jpy.value}`}</strong></div>
-  <div><span>{locale==="ja"?"材料原価":"Food cost"}</span><strong>{cost?.total_cost_jpy!=null?`¥${cost.total_cost_jpy}`:cost?.partial?`¥${cost.subtotal_jpy} (${locale==="ja"?"部分原価":"partial"})`:"—"}</strong></div>
+  <div><span>{locale==="ja"?"材料原価":"Food cost"}</span><strong>{cost?.total_cost_jpy!=null?`¥${cost.total_cost_jpy}`:cost?.partial&&Object.keys(cost.line_costs).length>0?`¥${cost.subtotal_jpy} (${locale==="ja"?"部分原価":"partial"})`:"—"}</strong></div>
   <div><span>{locale==="ja"?"原価率":"Cost rate"}</span><strong>{cost?.cost_rate_pct==null?"—":`${cost.cost_rate_pct}%`}</strong></div>
  </div>
  {cost?.partial&&<div className="detail-estimate" role="status">
