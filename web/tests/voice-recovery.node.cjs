@@ -13,9 +13,9 @@ test('bounded regeneration repairs structure and numeric representations without
  const original=global.fetch;let calls=0;global.fetch=async()=>{calls++;return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(calls===1?{materials:'invalid'}:{...draft,materials:[{...draft.materials[0],quantity:100,price_jpy:null,price_quantity:null,price_unit:null}]})}}]});};
  try{const out=await voiceRecipeModel('k','system',{},new AbortController().signal,{});assert.equal(calls,2);assert.equal(out.materials[0].quantity,'100');assert.equal(out.materials[0].price_jpy,'');assert.ok(out.missing.length);}finally{global.fetch=original;}
 });
-test('transient transport failure retries once, persistent invalid shape stops after two attempts',async()=>{
+test('transport failure stops immediately, invalid shape permits one bounded repair',async()=>{
  const original=global.fetch;let calls=0;global.fetch=async()=>{calls++;if(calls===1)throw new TypeError('network');return Response.json({choices:[{message:{content:JSON.stringify(draft)}}]});};
- try{assert.equal((await voiceRecipeModel('k','s',{},new AbortController().signal,{})).title,'パスタ');assert.equal(calls,2);calls=0;global.fetch=async()=>{calls++;return Response.json({});};await assert.rejects(voiceRecipeModel('k','s',{},new AbortController().signal,{}),e=>e.code==='invalid_response');assert.equal(calls,2);}finally{global.fetch=original;}
+ try{await assert.rejects(voiceRecipeModel('k','s',{},new AbortController().signal,{}),e=>e.code==='provider_unavailable');assert.equal(calls,1);calls=0;global.fetch=async()=>{calls++;return Response.json({});};await assert.rejects(voiceRecipeModel('k','s',{},new AbortController().signal,{}),e=>e.code==='invalid_response');assert.equal(calls,2);}finally{global.fetch=original;}
 });
 test('user cancellation never retries',async()=>{const c=new AbortController();c.abort();await assert.rejects(voiceRecipeModel('k','s',{},c.signal,{}),e=>e.code==='cancelled');});
 const {prepareRecipeTurns}=require('../recipe-turns.ts');
@@ -25,6 +25,6 @@ test('timeouts are bounded and distinct from user cancellation during a request'
  AbortSignal.timeout=()=>timeout(2);
  global.fetch=async(_,init)=>{calls++;return new Promise((_,reject)=>{init.signal.addEventListener('abort',()=>reject(init.signal.reason),{once:true});});};
  const keepAlive=setInterval(()=>{},100);
- try{await assert.rejects(voiceRecipeModel('k','s',{},new AbortController().signal,{}),e=>e.code==='timeout');assert.equal(calls,2);calls=0;const c=new AbortController();setTimeout(()=>c.abort(),0);await assert.rejects(voiceRecipeModel('k','s',{},c.signal,{}),e=>e.code==='cancelled');assert.equal(calls,1);}finally{clearInterval(keepAlive);global.fetch=original;AbortSignal.timeout=timeout;}
+ try{await assert.rejects(voiceRecipeModel('k','s',{},new AbortController().signal,{}),e=>e.code==='timeout');assert.equal(calls,1);calls=0;const c=new AbortController();setTimeout(()=>c.abort(),0);await assert.rejects(voiceRecipeModel('k','s',{},c.signal,{}),e=>e.code==='cancelled');assert.equal(calls,1);}finally{clearInterval(keepAlive);global.fetch=original;AbortSignal.timeout=timeout;}
 });
 test('numeric units are regenerated rather than invented as unit symbols',()=>{assert.equal(normalizedDraft({...draft,materials:[{...draft.materials[0],unit:100}]}),null);});

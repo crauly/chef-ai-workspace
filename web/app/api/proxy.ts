@@ -1,7 +1,7 @@
 import {NextRequest, NextResponse} from "next/server";
 import {previewAuthorized, sameOrigin} from "../../preview-access";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-type Action = "" | "/cost" | "/confirm" | "/propose" | "/corrections" | "/full";
+type Action = "" | "/cost" | "/confirm" | "/propose" | "/corrections" | "/full" | "/full/review";
 function failure(status: number) {
   return NextResponse.json({error: "Workspace request failed"}, {status, headers: {"Cache-Control": "no-store"}});
 }
@@ -21,7 +21,7 @@ export async function forward(req: NextRequest, id?: string, action: Action = ""
     if (!["https:","http:"].includes(base.protocol) || base.username || base.password) return failure(503);
     const body = req.method === "POST" ? await req.text() : undefined;
     if (body && new TextEncoder().encode(body).length > 65536) return failure(413);
-    const path = "/demo/recipes" + (id ? "/" + encodeURIComponent(id) + action : action === "/full" ? action : "");
+    const path = "/demo/recipes" + (id ? "/" + encodeURIComponent(id) + action : (action === "/full" || action === "/full/review") ? action : "");
     const url = new URL(path, base);
     if (!id) for (const name of ["page", "page_size", "q"]) {
       const value = req.nextUrl.searchParams.get(name);

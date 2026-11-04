@@ -6,6 +6,7 @@ const sessions = new WeakMap<Page, {pending: string[]; count: number}>();
 // detail intentionally hides the manual fallback form. No real mic or AI call.
 export async function voiceInput(page: Page, text: string) {
   let session = sessions.get(page);
+  if(session&&!await page.evaluate(()=>typeof (window as any).feedTestVoice==="function")){sessions.delete(page);session=undefined;}
   if (!session) {
     session = {pending: [], count: 0};
     sessions.set(page, session);

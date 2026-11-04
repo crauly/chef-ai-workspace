@@ -1,0 +1,3 @@
+import {defineConfig} from '@playwright/test';
+process.loadEnvFile('../.env');
+export default defineConfig({testDir:'./tests',testMatch:'voice-ten-ingredients.spec.ts',workers:1,use:{baseURL:'http://localhost:3102',httpCredentials:{username:'chef',password:'test-only-preview-password-32-characters'}},webServer:{command:'npm run build && npm run start -- --port 3102',url:'http://localhost:3102',timeout:180000,env:{FASTAPI_BASE_URL:'http://127.0.0.1:8102',DEMO_ACCESS_TOKEN:'isolated-live-voice-test-token-48-characters',DEMO_PREVIEW_PASSWORD:'test-only-preview-password-32-characters',MODEL_API_KEY:process.env.MODEL_API_KEY??''}}});

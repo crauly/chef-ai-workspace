@@ -22,6 +22,7 @@ test("unknown units are visible in review and registered only on explicit recipe
  await expect(page.getByLabel("束の単位分類")).toHaveValue("count");
  expect(writes).toBe(0);
  await page.getByRole("button",{name:"レシピを登録"}).click();
+ await page.getByRole("button",{name:"承認して保存",exact:true}).click();
  await expect(page.getByRole("region", {name: "レシピ詳細"})).toBeVisible();
  expect(writes).toBe(1);
  expect(approved.unit_candidates).toEqual([{symbol:"束",dimension:"count"}]);

@@ -37,5 +37,20 @@ test('failed speech survives reload, unit recovery is required before explicit s
  fail=false;await page.getByRole('button',{name:'解析を再試行'}).click();await expect(page.getByLabel('未保存のレシピ下書き')).toContainText('復旧パスタ');
  expect(bodies[1]).toEqual(bodies[0]);expect(saves).toBe(0);
  units=true;await page.getByRole('button',{name:'単位マスターを再取得'}).click();await expect(page.getByRole('button',{name:'単位マスターを再取得'})).toHaveCount(0);
- await page.getByRole('button',{name:'レシピを登録',exact:true}).click();await expect.poll(()=>saves).toBe(1);
+ await page.getByRole('button',{name:'レシピを登録',exact:true}).click();
+ await page.getByRole('button',{name:'承認して保存',exact:true}).click();await expect.poll(()=>saves).toBe(1);
+});
+test('utterances queued during analysis are persisted before that analysis finishes',async({page})=>{
+ let release!:()=>void;const blocked=new Promise<void>(resolve=>{release=resolve;});let calls=0;
+ await page.route('**/api/voice-recipe',async route=>{calls++;await blocked;await route.fulfill({json:{title:'パスタ',materials:[],selling_price_jpy:'',notes:[],missing:[]}});});
+ await page.goto('/');const input=page.getByLabel('音声認識できない場合の入力');
+ await input.fill('パスタ100g');await page.getByRole('button',{name:'反映',exact:true}).click();await expect.poll(()=>calls).toBe(1);
+ await input.fill('しめじ20gを追加');await page.getByRole('button',{name:'反映',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>new Promise(resolve=>{
+  const open=indexedDB.open('chef-ai-working-draft',1);open.onsuccess=()=>{
+   const db=open.result,r=db.transaction('draft','readonly').objectStore('draft').get('current');
+   r.onsuccess=()=>{resolve(r.result?.turns);db.close();};
+  };
+ }))).toEqual(['パスタ100g','しめじ20gを追加']);
+ release();await expect.poll(()=>calls).toBe(2);
 });

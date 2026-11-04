@@ -165,6 +165,72 @@ class VoiceFullRecipeTests(unittest.TestCase):
         self.assertEqual(self.client.post("/demo/recipes/full", json=body, headers=self.headers).status_code, 422)
         self.assertEqual(self.repo.writes, 0)
 
+    def test_review_is_read_only_then_commit_reuses_master(self):
+        body = self.payload()
+        response = self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(self.repo.writes,0)
+        self.assertEqual(len(self.repo.ingredients),0)
+        self.assertTrue(all(m['action']=='create' for m in response.json()['ingredients']))
+        saved=self.client.post('/demo/recipes/full',json=body,headers=self.headers)
+        self.assertEqual(saved.status_code,201,saved.text)
+        body['request_id']=str(uuid4())
+        again=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(again.status_code,200,again.text)
+        self.assertTrue(all(m['action']=='reuse' for m in again.json()['ingredients']))
+        self.assertEqual(self.repo.writes,1)
+
+    def test_review_duplicate_master_and_invalid_quantity_never_write(self):
+        body=self.payload()
+        self.repo.find_owned_ingredients_exact=lambda owner,name:[{'id':'a'},{'id':'b'}]
+        response=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(response.status_code,409,response.text)
+        self.assertEqual(self.repo.writes,0)
+        body['materials'][0]['quantity']='NaN'
+        response=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(response.status_code,422,response.text)
+        self.assertEqual(self.repo.writes,0)
+
+    def test_matching_saved_request_can_be_reviewed_and_retried_without_writing(self):
+        import copy
+        body=self.payload()
+        saved=self.client.post('/demo/recipes/full',json=body,headers=self.headers)
+        self.assertEqual(saved.status_code,201,saved.text)
+        from chef_ai_workspace.demo_api import CompleteRecipeBody
+        expected=CompleteRecipeBody.model_validate(copy.deepcopy(body)).model_dump(mode="json")
+        def verify(owner, recipe_id, payload):
+            if payload != expected: raise ValueError("conflicting retry")
+        self.repo.verify_owned_creation_payload=verify
+        review=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(review.status_code,200,review.text)
+        self.assertTrue(review.json()['already_saved'])
+        retry=self.client.post('/demo/recipes/full',json=body,headers=self.headers)
+        self.assertEqual(retry.status_code,201,retry.text)
+        self.assertEqual(self.repo.writes,1)
+        body['materials'][0]['quantity']='999'
+        conflict=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(conflict.status_code,409,conflict.text)
+        self.assertEqual(self.repo.writes,1)
+
+    def test_package_terms_distinguish_quotes_and_same_terms_still_conflict(self):
+        body=self.payload()
+        body['materials']=[
+            {"name":"パスタ","quantity":"100","unit":"g","supplier":"スーパーA",
+             "price_jpy":"600","price_quantity":"500","price_unit":"g"},
+            {"name":"パスタ","quantity":"100","unit":"g","supplier":"スーパーA",
+             "price_jpy":"1000","price_quantity":"1","price_unit":"kg"}]
+        self.repo.create_owned_procured_recipe=lambda *args,**kwargs:None
+        self.repo.list_owned_suppliers=lambda *args,**kwargs:[]
+        review=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(review.status_code,200,review.text)
+        body['materials'][1].update(price_quantity='500.0',price_unit='g')
+        conflict=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(conflict.status_code,422,conflict.text)
+        body['materials'][1]['price_jpy']='600.00'
+        same=self.client.post('/demo/recipes/full/review',json=body,headers=self.headers)
+        self.assertEqual(same.status_code,200,same.text)
+        self.assertEqual(self.repo.writes,0)
+
 
 if __name__ == "__main__":
     unittest.main()

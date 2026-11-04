@@ -287,7 +287,9 @@ export function summarizeGroundedCandidates(
 
 const SEARCH_INSTRUCTIONS =
   `You research current retail prices for ONE ingredient via web search. ` +
-  `Use the search tool. First line: ONLY JSON {"candidates":[...]}. ` +
+  `Use the search tool. Find 1-3 comparable offers for this ONE ingredient, then stop. ` +
+  `Use at most two search queries and only open pages needed to verify price/package. ` +
+  `Do not narrate your progress. Keep the final answer compact. First line: ONLY JSON {"candidates":[...]}. ` +
   `Each candidate: name, amount (decimal string), currency, package_quantity (decimal string), ` +
   `package_unit (g|kg|ml|L), seller, source, url, maker, spec, tax_note, shipping_note. ` +
   `Include ONLY offers whose price and package size you actually saw in the search results, ` +
@@ -343,7 +345,7 @@ export async function runGroundedSearch(args: {
         tools: [{type: "web_search", search_context_size: "low"}],
         tool_choice: "auto",
         store: false,
-        max_output_tokens: 2048,
+        max_output_tokens: 4096,
         reasoning: {effort: "low"},
       }),
       cache: "no-store",

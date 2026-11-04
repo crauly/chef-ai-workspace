@@ -24,7 +24,8 @@ from chef_ai_workspace.meta_responses import MetaResponsesProvider
 
 client = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVICE_ROLE_KEY'])
 provider = MetaResponsesProvider(os.environ['MODEL_API_KEY'])
-TABLES = ['recipes', 'recipe_versions', 'mutation_receipts', 'ingredients', 'ingredient_images', 'correction_preferences']
+TABLES = ['recipes', 'recipe_versions', 'mutation_receipts', 'ingredients', 'ingredient_images', 'correction_preferences',
+          'units', 'suppliers', 'offers', 'price_observations']
 # Establish cleanup compatibility before creating anything in the database.
 for table in TABLES:
     client.table(table).select('owner_id').limit(1).execute()

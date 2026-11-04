@@ -65,7 +65,7 @@ export async function lookupCandidates(name:string,ingredientId?:string):Promise
   const target=new URL("/demo/price-reference",url);
   target.searchParams.set("name",name);
   if(ingredientId)target.searchParams.set("ingredient_id",ingredientId);
-  const response=await fetch(target,{headers:{"X-Demo-Access":token},cache:"no-store",redirect:"error",signal:AbortSignal.timeout(15000)});
+  const response=await fetch(target,{headers:{"X-Demo-Access":token},cache:"no-store",redirect:"error",signal:AbortSignal.timeout(3000)});
   if(response.status===401||response.status===403)return {kind:"unauthorized"};
   if(!response.ok)return response.status>=500?{kind:"unavailable"}:{kind:"invalid_response"};
   const data:unknown=await response.json();
@@ -100,7 +100,7 @@ export function selectReference(materialName:string,materialIndex:number,lookup:
  const wanted=materialName.trim();
  const available=lookup.candidates.filter(c=>c.reference.available);
  const exact=available.find(c=>c.ingredient_name.trim()===wanted);
- const chosen=ingredientId?available.find(c=>c.ingredient_id===ingredientId):exact||available[0];
+ const chosen=ingredientId?available.find(c=>c.ingredient_id===ingredientId):exact;
  if(!chosen||typeof chosen.reference.average_unit_price!=="string"||
     typeof chosen.reference.unit_basis!=="string"||typeof chosen.reference.currency!=="string"){
   return {material_name:wanted,material_index:materialIndex,status:"none",origin:"ledger",ingredient_name:null,currency:null,unit_basis:null,
@@ -138,7 +138,7 @@ export function provisionalFor(index:number,material:{name:string},refs:PriceRef
 }
 
 // Muse entries first, then the narrow heuristic gap-fill for
-// still-unconfirmed lines (stated prices never match). Cap stays 3.
+// still-unconfirmed lines (stated prices never match). No target count truncation.
 export function assembleEntries(materials:DraftMaterial[],
  priceResearch:{material_name:string;request:string;material_index?:number|null}[],
  turns:string[]):ResearchEntry[]{
@@ -149,16 +149,16 @@ export function assembleEntries(materials:DraftMaterial[],
  const heuristicEntries=detectPriceResearch(turns,materials)
   .filter(h=>!coveredNames.has(h.material_name.trim())&&!coveredRows.has(h.material_index))
   .map(h=>({...h,trigger:"heuristic" as const}));
- return [...museEntries,...heuristicEntries].slice(0,3);
+ return [...museEntries,...heuristicEntries].filter((entry,index,all)=>
+  all.findIndex(other=>entry.material_index>=0?other.material_index===entry.material_index:other.material_name===entry.material_name)===index);
 }
 
 // Ledger-first per entry; grounding failures keep the ledger entry and
 // are reported in research_status, so the draft never fails and the
-// failure reason is never lost. Entries run concurrently (cap 3 bounds
-// the fan-out); result order follows entry order, never completion order.
+// failure reason is never lost. Entries run with at most three active pipelines; result order follows entry order, never completion order.
 export async function enrichEntries(apiKey:string,entries:ResearchEntry[],
  usableLedger?:(ref:PriceReferenceEntry,entry:ResearchEntry)=>boolean){
- const settled=await Promise.all(entries.map(async entry=>{
+ const run=async (entry:ResearchEntry)=>{
   const row=entry.material_index;
   const ledgerEntry=selectReference(entry.material_name,row,await lookupCandidates(entry.material_name,entry.ingredient_id),entry.ingredient_id);
   if(ledgerEntry.status==="available"&&(!usableLedger||usableLedger(ledgerEntry,entry))){
@@ -177,6 +177,12 @@ export async function enrichEntries(apiKey:string,entries:ResearchEntry[],
   return {ref:ledgerEntry,
    status:{material_name:entry.material_name,material_index:row,request:entry.request,
     trigger:entry.trigger,ledger:ledgerEntry.status,web:outcome.kind,provisional:false} as ResearchStatus};
+ };
+ // At most three ledger/search pipelines, all targets eventually run.
+ const settled:Awaited<ReturnType<typeof run>>[]=new Array(entries.length);
+ let cursor=0;
+ await Promise.all(Array.from({length:Math.min(3,entries.length)},async()=>{
+  while(cursor<entries.length){const index=cursor++;settled[index]=await run(entries[index]);}
  }));
  return {priceReferences:settled.map(s=>s.ref),
   researchStatus:settled.map(s=>s.status)};
