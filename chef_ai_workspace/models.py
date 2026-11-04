@@ -81,7 +81,7 @@ class MaterialLine:
     offer_id: str | None = None
 
     def __post_init__(self):
-        if self.offer_id is not None and (not self.ingredient_id or self.price_mode != "inherit"):
+        if self.offer_id is not None and (not self.ingredient_id or not self.supplier_id or self.price_mode != "inherit"):
             raise ValueError("Offer selection requires an inherited linked ingredient")
         if self.price_mode not in ("override", "inherit"):
             raise ValueError("Invalid price mode")
