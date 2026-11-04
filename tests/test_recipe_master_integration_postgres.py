@@ -95,7 +95,7 @@ class RecipeMasterIntegrationTests(__import__('unittest').TestCase):
         response=self.client.post(self.path,json=body,headers=self.headers);self.assertEqual(response.status_code,409,response.text)
         self.assertEqual(self.fixture.count('price_observations'),before);self.assertEqual(self.repo.load_owned_recipe(self.owner,self.recipe['id']).revision,0)
 
-    def test_legacy_price_entry_fails_instead_of_silently_ignoring_price(self):
+    def test_price_writes_require_procurement_contract(self):
         from dataclasses import asdict,replace
         before=self.fixture.count('price_observations')
         state=asdict(replace(self.repo.load_owned_recipe(self.owner,self.recipe['id']),revision=1))
@@ -103,6 +103,6 @@ class RecipeMasterIntegrationTests(__import__('unittest').TestCase):
             self.repo.commit_recipe_crud(owner_id=self.owner,recipe_id=self.recipe['id'],request_id=str(uuid4()),base_revision=0,
                 state=state,title='旧APIの保存',cost_snapshot={},payload_hash='a'*64,save_version=False,
                 ingredient_entries=[{'id':self.material['ingredient_id'],'name':'パスタ','current_price':{'amount_jpy':{'value':'400','status':'confirmed','origin':'user'},'per_quantity':'500','per_unit':'g','source':'manual'}}])
-        self.assertIn('Updated API required',str(error.exception))
+        self.assertIn('Invalid ingredient entry',str(error.exception))
         self.assertEqual(self.repo.load_owned_recipe(self.owner,self.recipe['id']).revision,0)
         self.assertEqual(self.fixture.count('price_observations'),before)

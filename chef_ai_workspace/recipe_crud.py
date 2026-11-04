@@ -107,12 +107,10 @@ def save_recipe_crud(*, owner_id, proposal, repository, save_version=True, ledge
         entry = entries.setdefault(ingredient_id, {
             "id": ingredient_id, "name": ingredient.name,
             "brand": metadata.get("brand"), "spec": metadata.get("spec"),
-            "current_price": None, "purchases":[],
+            "purchases":[],
         })
         if price_edited and quote is not None:
             entry["purchases"].append({"material_id":line.id,"supplier_id":line.supplier_id,"quote":asdict(quote)})
-            # Compatibility snapshot for repositories without supplier-price support.
-            if not (line.supplier_id or line.offer_id): entry["current_price"]=asdict(quote)
         # Renaming can resolve to a different ingredient master. Purchase
         # terms belong to the old ingredient and must not travel with it.
         purchase_identity_changed = (

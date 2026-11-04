@@ -208,5 +208,5 @@ Recipe creation and editing share ingredient master matching and explicit reuse
 choices. Recipe confirmation adopts supplier prices through the existing Offer
 transaction, preserves history and updates costs for matching purchase terms.
 Unpriced additions are supported. See [ADR-018](docs/ADR_018_RECIPE_MASTER_PROCUREMENT.md)
-for schema compatibility, migrations, the real PostgreSQL flow and live Muse
+for required migrations, the real PostgreSQL flow and live Muse
 verification limits.

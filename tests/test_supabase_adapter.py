@@ -168,24 +168,3 @@ class ProcurementAdapterTests(unittest.TestCase):
         repo=SupabasePersistence(c)
         with self.assertRaises(ValueError):
             repo.list_ingredient_offers("user-a","foreign-id")
-
-class IngredientMasterCompatibilityTests(unittest.TestCase):
-    def test_missing_optional_selection_column_does_not_hide_any_ingredient(self):
-        from postgrest.exceptions import APIError
-        class Q(Query):
-            def select(self,fields): self.fields=fields;return self
-            def range(self,start,end):self.start=start;return self
-            def execute(self):
-                if 'selected_offer_id' in self.fields:raise APIError({'code':'42703','message':'column ingredients.selected_offer_id does not exist','details':None,'hint':None})
-                return SimpleNamespace(data=[] if self.start else [{'id':'guanciale','name':'自家製グアンチャーレ','spec':None,'current_price':None}])
-        class C:
-            def table(self,name):return Q(None)
-        rows=SupabasePersistence(C()).list_owned_ingredient_master('owner')
-        self.assertEqual(len(rows),1);self.assertEqual(rows[0]['name'],'自家製グアンチャーレ');self.assertIsNone(rows[0]['selected_supplier_id'])
-    def test_other_database_errors_are_not_hidden_by_compatibility(self):
-        from postgrest.exceptions import APIError
-        class Q(Query):
-            def execute(self):raise APIError({'code':'42501','message':'permission denied','details':None,'hint':None})
-        class C:
-            def table(self,name):return Q(None)
-        with self.assertRaises(APIError):SupabasePersistence(C()).list_owned_ingredient_master('owner')

@@ -18,7 +18,6 @@ declare v_lines jsonb := '[]'::jsonb;
 declare v_state jsonb := p_new_state;
 declare v_id uuid;
 declare v_name text;
-declare v_price jsonb;
 declare v_unit uuid;
 declare v_existing public.ingredients%rowtype;
 declare plan jsonb; quote jsonb; supplier uuid; observation uuid; offer uuid;
@@ -50,17 +49,10 @@ begin
  for v_item in select value from jsonb_array_elements(p_ingredient_entries) loop
    v_id := (v_item->>'id')::uuid;
    v_name := btrim(coalesce(v_item->>'name',''));
-   v_price := v_item->'current_price';
    if v_id is null or length(v_name) not between 1 and 200
-      or (v_price is not null and jsonb_typeof(v_price) not in ('object','null'))
+      or jsonb_typeof(v_item->'purchases') is distinct from 'array'
+      or v_item ? 'current_price'
    then raise exception 'Invalid ingredient entry'; end if;
-   if jsonb_typeof(v_price)='object' and not (v_item ? 'purchases') then
-     raise exception 'Updated API required for approved price procurement';
-   end if;
-   if jsonb_typeof(v_price)='object' then
-     v_unit := public.resolve_owned_unit_id(p_owner_id,v_price->>'per_unit');
-     v_price := jsonb_set(v_price,'{per_unit_id}',to_jsonb(v_unit::text),true);
-   end if;
    select * into v_existing from public.ingredients where id=v_id for update;
    if found then
      if v_existing.owner_id<>p_owner_id then raise exception 'Foreign ingredient'; end if;

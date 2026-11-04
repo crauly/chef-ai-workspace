@@ -58,7 +58,7 @@ class Repository:
         self.commits.append(kwargs)
         for entry in kwargs["ingredient_entries"]:
             ingredient = self.ingredients.get(entry["id"])
-            quote = entry["current_price"]
+            quote = next((p["quote"] for p in entry["purchases"] if not p["supplier_id"]),None)
             if quote:
                 from chef_ai_workspace.supabase_adapter import _quote
                 new_quote = _quote(quote)
@@ -126,7 +126,7 @@ class RecipeCrudTests(unittest.TestCase):
         self.save({"op":"set_material_price","material_id":line.id,"price_jpy":"123","price_quantity":"1","price_unit":"kg"})
         self.assertEqual(self.repo.ingredients[self.repo.ingredient_id].current_price.amount_jpy.value,"400")
         entry=self.repo.commits[0]["ingredient_entries"][0]
-        self.assertIsNone(entry["current_price"])
+        self.assertNotIn("current_price",entry)
         self.assertEqual(entry["purchases"][0]["supplier_id"],supplier)
         self.assertEqual(entry["purchases"][0]["quote"]["amount_jpy"]["value"],"123")
 
@@ -196,8 +196,8 @@ class RecipeCrudTests(unittest.TestCase):
                            "material_id": self.repo.recipe.materials[1].id,
                            "price_jpy": "900", "price_quantity": "1", "price_unit": "kg"})
         writes = {entry["id"]: entry for entry in self.repo.commits[0]["ingredient_entries"]}
-        self.assertIsNone(writes[self.repo.ingredient_id]["current_price"])
-        self.assertEqual(writes[other_id]["current_price"]["amount_jpy"]["value"], "900")
+        self.assertFalse(writes[self.repo.ingredient_id]["purchases"])
+        self.assertEqual(writes[other_id]["purchases"][0]["quote"]["amount_jpy"]["value"], "900")
         self.assertEqual(self.repo.ingredients[self.repo.ingredient_id].current_price.amount_jpy.value, "400")
         self.assertEqual(self.repo.ingredients[other_id].current_price.amount_jpy.value, "900")
 
