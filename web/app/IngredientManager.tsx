@@ -157,7 +157,7 @@ export default function IngredientManager({locale}:{locale:Locale}){
   ? (ja?"確認できません":"Unavailable")
   : (supplierMap[item.id]?.join("、")||(ja?"仕入れ先未設定":"Not set"));
  const editor=(item:Ingredient)=><div className="name-choice-overlay ingredient-edit-overlay" key={item.id} onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setEditing(null);}}><section role="dialog" aria-modal="true" aria-label={ja?`${item.name}を編集`:`Edit ${item.name}`} className="name-choice-dialog ingredient-editor">
-  <div className="ingredient-editor-head"><h4>{ja?"食材を編集":"Edit Ingredient"} — {item.name}</h4><button type="button" className="secondary" disabled={busy} onClick={()=>setEditing(null)}>{ja?"閉じる":"Close"}</button></div>
+  <div className="ingredient-editor-head"><h4>{ja?"食材を編集":"Edit Ingredient"} — {item.name}</h4><button type="button" className="secondary" aria-label={ja?"閉じる":"Close"} title={ja?"閉じる":"Close"} disabled={busy} onClick={()=>setEditing(null)}><span aria-hidden="true">×</span></button></div>
   <div className="ingredient-editor-fields">
    <label>{ja?"食材名":"Ingredient name"}<input autoFocus value={name} maxLength={200} disabled={busy} onChange={e=>setName(e.target.value)}/></label>
    <label>{ja?"規格（商品の識別用）":"Specification (identity only)"}<input value={spec} maxLength={200} disabled={busy} placeholder={ja?"例：1号缶、10個入り":"e.g. No.1 can, 10-count"} onChange={e=>setSpec(e.target.value)}/></label>
