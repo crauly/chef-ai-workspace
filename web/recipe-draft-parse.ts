@@ -41,7 +41,7 @@ export type NameCorrection={material_name:string;heard:string;candidates:{name:s
 export type PriceResearch={material_name:string;request:string;material_index?:number|null};
 export type UnitProposal={symbol:string;dimension:"mass"|"volume"|"count"|"other"};
 export type RecipeDraft={unitProposals:UnitProposal[];title:string;materials:DraftMaterial[];selling_price_jpy:string;notes:string[];missing:string[];interpretations:{source:string;suggestion:string;reason:string}[];priceResearch:PriceResearch[];nameCorrections:NameCorrection[]};
-export function parseRecipeDraft(raw:unknown,issues:DraftIssue[]=[]):RecipeDraft|null {
+export function parseRecipeDraft(raw:unknown,issues:DraftIssue[]=[],options:{normalizeNumbers?:boolean}={}):RecipeDraft|null {
  const invalid=(path:string,reason:string)=>{issues.push({path,reason});return null;};
  if(!raw||typeof raw!=="object"||Array.isArray(raw))return null;
  const o=raw as Record<string,unknown>;
@@ -108,7 +108,7 @@ export function parseRecipeDraft(raw:unknown,issues:DraftIssue[]=[]):RecipeDraft
   for(const [field,value] of Object.entries(m))if(typeof value!=="string"||(['name','supplier'].includes(field)&&value.length>200))return invalid(`materials.${index}.${field}`,"名前・仕入先は200文字以内、各フィールドは文字列で指定してください");
   const row={...m} as DraftMaterial;
   for(const key of ['name','supplier','unit','price_unit'] as const)row[key]=row[key].normalize('NFKC').trim();
-  for(const key of ['quantity','price_jpy','price_quantity'] as const)row[key]=draftNumber(row[key],key==='price_quantity')??row[key];
+  for(const key of ['quantity','price_jpy','price_quantity'] as const)row[key]=options.normalizeNumbers===false?row[key].normalize('NFKC').trim():(draftNumber(row[key],key==='price_quantity')??row[key]);
   materials.push(row);
  }
  const missing:string[]=registrationIssues({title:o.title as string,selling_price_jpy:o.selling_price_jpy as string,materials}).map(i=>i.path+": "+i.reason);
@@ -120,5 +120,5 @@ export function parseRecipeDraft(raw:unknown,issues:DraftIssue[]=[]):RecipeDraft
   if(draftNumber(m.price_jpy)===null||draftNumber(m.price_quantity,true)===null||!validUnit(m.price_unit))
    missing.push(`${m.name||"食材"}の仕入単価・基準数量・単位`);
  }
- return {unitProposals:unitProposals as UnitProposal[],title:(o.title as string).trim(),materials,selling_price_jpy:draftNumber(o.selling_price_jpy,true)??o.selling_price_jpy as string,notes:o.notes as string[],missing,interpretations:interpretations as RecipeDraft["interpretations"],priceResearch:priceResearch as PriceResearch[],nameCorrections:nameCorrections as NameCorrection[]};
+ return {unitProposals:unitProposals as UnitProposal[],title:(o.title as string).trim(),materials,selling_price_jpy:options.normalizeNumbers===false?(o.selling_price_jpy as string).normalize('NFKC').trim():(draftNumber(o.selling_price_jpy,true)??o.selling_price_jpy as string),notes:o.notes as string[],missing,interpretations:interpretations as RecipeDraft["interpretations"],priceResearch:priceResearch as PriceResearch[],nameCorrections:(nameCorrections as NameCorrection[]).map(c=>({...c,material_name:c.material_name.normalize('NFKC').trim()}))};
 }

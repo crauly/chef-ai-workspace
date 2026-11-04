@@ -40,3 +40,8 @@ test('full-recipe proxy carries safe field paths through request errors without 
   global.fetch=async()=>Response.json(body,{status:422});await assert.rejects(request('/api/recipes/full/review'),e=>/materials\.0\.quantity/.test(registrationError(e,true)));
  }finally{global.fetch=oldFetch;for(const k of Object.keys(process.env))if(!(k in env))delete process.env[k];Object.assign(process.env,env);}
 });
+test('NFKC material normalization keeps name-correction references bound to their row',()=>{
+ const {parseRecipeDraft}=require('../recipe-draft-parse.ts');
+ const result=parseRecipeDraft({title:'料理',materials:[{...material,name:' ｼﾒｼﾞ '}],selling_price_jpy:'',notes:[],name_corrections:[{material_name:' ｼﾒｼﾞ ',heard:'ｼﾒｼﾞ',candidates:[{name:'しめじ',reason:'確認候補'}]}]});
+ const correction=result.nameCorrections[0];assert.equal(correction.material_name,'シメジ');assert.equal(result.materials.findIndex(m=>m.name===correction.material_name),0);assert.equal(correction.heard,'ｼﾒｼﾞ');assert.equal(correction.candidates[0].name,'しめじ');
+});
