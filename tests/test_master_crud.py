@@ -10,8 +10,8 @@ if not any(getattr(route,"path",None)=="/demo/ingredients" for route in app.rout
 
 class MasterRepo:
     def __init__(self): self.calls=[]
-    def create_owned_ingredient_master(self,owner,name):
-        self.calls.append(("ingredient_create",owner,name));return str(uuid4())
+    def create_owned_ingredient_master(self,owner,name,spec=None):
+        self.calls.append(("ingredient_create",owner,name,spec));return str(uuid4())
     def delete_owned_ingredient_master(self,owner,id):
         self.calls.append(("ingredient_delete",owner,id));return True
     def create_owned_unit_master(self,owner,symbol,dimension):
@@ -41,7 +41,7 @@ class MasterCrudBoundaryTests(unittest.TestCase):
     def test_owner_is_derived_from_server_not_request(self):
         self.assertEqual(self.client.post("/demo/ingredients",json={"name":"Salt"},headers=self.headers).status_code,201)
         self.assertEqual(self.client.post("/demo/units",json={"symbol":"g","dimension":"mass"},headers=self.headers).status_code,201)
-        self.assertEqual(self.repo.calls,[("ingredient_create",self.owner,"Salt"),("unit_create",self.owner,"g","mass")])
+        self.assertEqual(self.repo.calls,[("ingredient_create",self.owner,"Salt",None),("unit_create",self.owner,"g","mass")])
     def test_invalid_inputs_are_rejected(self):
         for path,body in (("/demo/ingredients",{"name":""}),("/demo/units",{"symbol":"g","dimension":"invalid"}),("/demo/units",{"symbol":"g","dimension":"mass","owner_id":str(uuid4())})):
             self.assertEqual(self.client.post(path,json=body,headers=self.headers).status_code,422)
