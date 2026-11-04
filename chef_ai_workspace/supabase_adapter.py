@@ -264,11 +264,15 @@ class SupabasePersistence:
         if not isinstance(query, str) or not query.strip() or limit < 1:
             return []
         pattern = query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        response = (self.client.table("ingredients")
-                    .select("id,name,brand,spec").eq("owner_id", owner_id)
-                    .ilike("name", "%" + pattern + "%")
-                    .order("name").limit(min(limit, 50)).execute())
-        return response.data or []
+        matches = {}
+        for column in ("name", "spec"):
+            response = (self.client.table("ingredients")
+                        .select("id,name,brand,spec").eq("owner_id", owner_id)
+                        .ilike(column, "%" + pattern + "%")
+                        .order("name").limit(min(limit, 50)).execute())
+            for row in response.data or []:
+                matches[row["id"]] = row
+        return sorted(matches.values(), key=lambda row: (row.get("name") or "", row.get("spec") or "", row["id"]))[:limit]
 
     def create_owned_supplier(self, owner_id, name, note=None):
         """Minimal supplier registration. Owner is server-derived; the
