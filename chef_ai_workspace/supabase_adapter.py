@@ -1131,6 +1131,7 @@ class SupabasePersistence:
 
     def save_owned_dish_image(self, owner_id, recipe_id, mime_type, image_bytes):
         from uuid import uuid4
+        from datetime import datetime, timezone
         if not self._owned_dish_recipe(owner_id, recipe_id):
             raise ValueError("Recipe not found")
         ext = {"image/png":"png", "image/jpeg":"jpg", "image/webp":"webp"}[mime_type]
@@ -1148,7 +1149,7 @@ class SupabasePersistence:
             self.client.table("recipe_dish_images").upsert({
                 "owner_id":owner_id,"recipe_id":recipe_id,
                 "storage_path":path,"mime_type":mime_type,
-                "updated_at":"now()"
+                "updated_at":datetime.now(timezone.utc).isoformat()
             },on_conflict="recipe_id").execute()
         except Exception:
             storage.remove([path])
