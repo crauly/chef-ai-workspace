@@ -310,3 +310,53 @@ test("long-press edit action opens the actual detail editor",async({page})=>{
  await expect(page.getByRole("heading",{name:"片栗粉のレシピ"})).toBeVisible();
  await expect(page.getByLabel("料理人の指示",{exact:true})).toBeVisible();
 });
+
+
+test("detail bulk price research proposes every selected row but cannot save without approval",async({page})=>{
+ const recipeId="11111111-1111-4111-8111-111111111111";
+ let confirmations=0;
+ await page.route(`**/api/recipes/${recipeId}`,async route=>{
+  const recipe=await (await route.fetch()).json();
+  recipe.materials=[
+   {...recipe.materials[0],id:"22222222-2222-4222-8222-222222222222",material_name:{value:"小麦粉",status:"confirmed"}},
+   {...recipe.materials[0],id:"33333333-3333-4333-8333-333333333333",material_name:{value:"バター",status:"confirmed"}},
+   {...recipe.materials[0],id:"44444444-4444-4444-8444-444444444444",material_name:{value:"牛乳",status:"confirmed"}},
+  ];
+  await route.fulfill({json:recipe});
+ });
+ await page.route("**/api/recipe-price-research",async route=>{
+  const body=route.request().postDataJSON();
+  expect(body.instruction).toContain("すべて");
+  expect(body.materials.map((m:{name:string})=>m.name)).toEqual(["小麦粉","バター","牛乳"]);
+  await route.fulfill({json:{
+   ambiguous:false,indices:[0,1,2],
+   operations:[
+    {op:"set_material_price",material_id:body.materials[0].id,price_jpy:"0.8",price_quantity:"1",price_unit:"g"},
+    {op:"set_material_price",material_id:body.materials[1].id,price_jpy:"2",price_quantity:"1",price_unit:"g"},
+    {op:"set_material_price",material_id:body.materials[2].id,price_jpy:"0.3",price_quantity:"1",price_unit:"ml"}
+   ],
+   results:body.materials.map((m:{name:string})=>({name:m.name,status:"candidate",description:"仕入調査の参考価格・要確認"}))
+  }});
+ });
+ await page.route(`**/api/recipes/${recipeId}/confirm`,route=>{
+  confirmations++;return route.fulfill({status:409,json:{detail:"Not expected before approval"}});
+ });
+ const detail=await openDetail(page);
+ await detail.getByRole("button",{name:"◇ AIに変更相談"}).click();
+ await page.locator("#ai-instruction").fill("すべての材料の市場価格を調べて仮単価を入れて");
+ await page.locator(".instruction-form button").last().click();
+ await expect(page.locator(".proposal ol li")).toHaveCount(3);
+ await expect(page.getByText("調査根拠・未取得の理由")).toBeVisible();
+ expect(confirmations).toBe(0);
+ await expect(page.locator(".proposal button").first()).toBeDisabled();
+});
+
+test("detail price scope ambiguity creates no mutation proposal",async({page})=>{
+ await page.route("**/api/recipe-price-research",route=>route.fulfill({json:{indices:[],operations:[],results:[],ambiguous:true}}));
+ const detail=await openDetail(page);
+ await detail.getByRole("button",{name:"◇ AIに変更相談"}).click();
+ await page.locator("#ai-instruction").fill("この材料の価格を調べて");
+ await page.locator(".instruction-form button").last().click();
+ await expect(page.getByText(/調査対象を特定できませんでした/)).toBeVisible();
+ await expect(page.locator(".proposal")).toHaveCount(0);
+});
