@@ -74,3 +74,28 @@ revoke all on function public.set_owned_offer_price(uuid,uuid,uuid,numeric,numer
   from public,anon,authenticated;
 grant execute on function public.set_owned_offer_price(uuid,uuid,uuid,numeric,numeric,text)
   to service_role;
+
+-- Owner and offer identity must also be enforced against direct table writes.
+create or replace function public.guard_owned_offer_adoption()
+returns trigger language plpgsql security definer set search_path='' as $$
+begin
+ if new.package_unit_id is not null and not exists(
+   select 1 from public.units u
+   where u.id=new.package_unit_id and u.owner_id=new.owner_id
+ ) then raise exception 'Offer unit not owned by caller'; end if;
+ if new.adopted_observation_id is not null and not exists(
+   select 1 from public.price_observations p
+   where p.id=new.adopted_observation_id
+     and p.owner_id=new.owner_id and p.offer_id=new.id
+     and p.currency='JPY' and p.confirmed=true
+ ) then raise exception 'Adopted observation does not belong to offer'; end if;
+ return new;
+end $$;
+create trigger offers_guard_approved_price
+before insert or update on public.offers
+for each row execute function public.guard_owned_offer_adoption();
+
+-- The only write path for price adoption is a server-only RPC.
+-- Existing owner-scoped reads continue to operate under RLS.
+revoke insert,update,delete on public.offers from anon,authenticated;
+revoke insert,update,delete on public.price_observations from anon,authenticated;
