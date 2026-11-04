@@ -92,14 +92,16 @@ test("390px mobile layout without overflow, edit flow intact", async ({page}) =>
 
 test("generated image is retained in cloud across reloads", async ({page}) => {
  let stored=false;
+ let saveCalls=0;
  await page.route("**/api/recipe-images/*",route=>{
-  if(route.request().method()==="POST"){stored=true;return route.fulfill({json:{saved:true}});}
+  if(route.request().method()==="POST"){saveCalls++;stored=true;return route.fulfill({json:{saved:true}});}
   return stored?route.fulfill({json:{image:IMG}}):route.fulfill({status:404,json:{error:"Not found"}});
  });
  await page.route("**/api/dish-image",route=>route.fulfill({json:{image:IMG,mode:"generate"}}));
  const detail=await openRecipe(page,"片栗粉のレシピ");
  const section=detail.getByRole("region",{name:"料理イメージ"});
  await section.getByRole("button",{name:"✦ 料理画像を生成"}).click();
+ await expect.poll(()=>saveCalls,{message:"Cloud image POST must be invoked once"}).toBe(1);
  await expect(section.getByText("クラウドに保存済み · 他端末でも表示できます")).toBeVisible();
  await page.reload();
  await expect(page.getByRole("region",{name:"料理イメージ"}).getByRole("img",{name:"生成した料理イメージ"})).toBeVisible();
