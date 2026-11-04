@@ -1163,7 +1163,10 @@ class SupabasePersistence:
                 "updated_at":datetime.now(timezone.utc).isoformat()
             },on_conflict="recipe_id").execute()
         except Exception:
-            storage.remove([path])
+            try:
+                storage.remove([path])
+            except Exception:
+                pass
             raise
         # Cleanup is best-effort; never fail the confirmed new image because
         # obsolete-object cleanup fails.
