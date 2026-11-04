@@ -17,7 +17,7 @@ test("empty state shows placeholder, generate succeeds, enlarge closes", async (
   const detail = await openRecipe(page, "片栗粉のレシピ");
   const section = detail.getByRole("region", {name: "料理イメージ"});
   await expect(section.getByText("料理画像はまだありません")).toBeVisible();
-  await expect(section.getByText("レシピのクラウド保存とは別のプレビューです")).toBeVisible();
+  await expect(section.getByText("レシピとは別に画像を保存します")).toBeVisible();
   await expect(section.locator("img")).toHaveCount(0);
   await section.getByRole("button", {name: "✦ 料理画像を生成"}).click();
   await expect(section.getByRole("img", {name: "生成した料理イメージ"})).toBeVisible();
@@ -64,7 +64,7 @@ test("stale response from a previous recipe is discarded on switch", async ({pag
   await section.getByRole("button", {name: "✦ 料理画像を生成"}).click();
   await expect(section.getByText("画像を生成中")).toBeVisible();
   // Switch recipes while the first flight is still pending.
-  await detail.getByRole("button", {name: "← レシピ一覧"}).click();
+  await detail.getByRole("button", {name: "← ホーム"}).click();
   await page.getByRole("button", {name: "ミートソースパスタの詳細を開く"}).click();
   const pasta = page.locator("section.recipe-detail");
   await expect(pasta.getByRole("heading", {name: "ミートソースパスタ"})).toBeVisible();
@@ -90,12 +90,17 @@ test("390px mobile layout without overflow, edit flow intact", async ({page}) =>
   await expect(page.getByRole("dialog", {name: "牛乳を編集"})).toBeVisible();
 });
 
-test("generated image is retained on this device after page reload", async ({page}) => {
+test("generated image is retained in cloud across reloads", async ({page}) => {
+ let stored=false;
+ await page.route("**/api/recipe-images/*",route=>{
+  if(route.request().method()==="POST"){stored=true;return route.fulfill({json:{saved:true}});}
+  return stored?route.fulfill({json:{image:IMG}}):route.fulfill({status:404,json:{error:"Not found"}});
+ });
  await page.route("**/api/dish-image",route=>route.fulfill({json:{image:IMG,mode:"generate"}}));
  const detail=await openRecipe(page,"片栗粉のレシピ");
  const section=detail.getByRole("region",{name:"料理イメージ"});
  await section.getByRole("button",{name:"✦ 料理画像を生成"}).click();
- await expect(section.getByText("このブラウザに自動保存済み")).toBeVisible();
+ await expect(section.getByText("クラウドに保存済み · 他端末でも表示できます")).toBeVisible();
  await page.reload();
  await expect(page.getByRole("region",{name:"料理イメージ"}).getByRole("img",{name:"生成した料理イメージ"})).toBeVisible();
 });
