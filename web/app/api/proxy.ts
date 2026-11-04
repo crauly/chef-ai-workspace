@@ -9,7 +9,7 @@ function failure(status: number) {
 export async function forward(req: NextRequest, id?: string, action: Action = "") {
   if (!await previewAuthorized(req)) return failure(403);
   if (id !== undefined && !uuid.test(id)) return failure(400);
-  if (req.method === "POST" && !sameOrigin(req)) return failure(403);
+  if ((req.method === "POST" || req.method === "DELETE") && !sameOrigin(req)) return failure(403);
   // Browser tests use only the loopback mock; production never falls back to Render.
   const localMock = process.env.FASTAPI_BASE_URL;
   const api = process.env.CHEF_FASTAPI_INTERNAL_URL ||

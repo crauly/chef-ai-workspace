@@ -133,6 +133,21 @@ def list_demo_recipes(page: int = 1, page_size: int = 20,
             "page":page, "page_size":page_size}
 
 
+@router.delete("/recipes/{recipe_id}")
+def delete_demo_recipe(recipe_id:UUID, ctx=Depends(demo_context)):
+    owner, repository=ctx
+    deleter=getattr(repository,"delete_owned_recipe",None)
+    if not callable(deleter):
+        raise HTTPException(503,"Recipe deletion unavailable")
+    try:
+        deleted=deleter(owner,str(recipe_id))
+    except ValueError:
+        raise HTTPException(404,"Recipe not found")
+    if not deleted:
+        raise HTTPException(404,"Recipe not found")
+    return {"deleted":True}
+
+
 @router.get("/recipes/{recipe_id}")
 def get_demo_recipe(recipe_id: UUID, ctx=Depends(demo_context)):
     owner, repository=ctx

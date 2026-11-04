@@ -13,6 +13,9 @@ class FakeRepo:
         from chef_ai_workspace.models import Recipe, TrackedValue
         self.calls.append(("recipe",owner,recipe_id))
         return Recipe(recipe_id,TrackedValue("Risotto","confirmed","user"))
+    def delete_owned_recipe(self, owner, recipe_id):
+        self.calls.append(("delete",owner,recipe_id))
+        return True
     def create_owned_recipe(self, owner, recipe, snapshot):
         self.created.append((owner,recipe,snapshot))
     def list_owned_recipes(self, owner, *, offset, limit, search=""):
@@ -33,6 +36,17 @@ class DemoLibraryTests(unittest.TestCase):
         del app.state.demo_access_token
         del app.state.repository_factory
         self.client.close()
+    def test_recipe_deletion_requires_demo_auth_and_scopes_to_owner(self):
+        rid=str(uuid4())
+        denied=self.client.delete(f"/demo/recipes/{rid}")
+        self.assertEqual(denied.status_code,403)
+        self.assertEqual(self.repo.calls,[])
+        accepted=self.client.delete(f"/demo/recipes/{rid}",
+            headers={"X-Demo-Access":"a-secret-known-only-to-presenter"})
+        self.assertEqual(accepted.status_code,200)
+        self.assertEqual(accepted.json(),{"deleted":True})
+        self.assertEqual(self.repo.calls,[("delete",self.owner,rid)])
+
     def test_cost_endpoint_requires_access_and_returns_deterministic_snapshot(self):
         rid=str(uuid4())
         self.assertEqual(self.client.get(f"/demo/recipes/{rid}/cost").status_code,403)

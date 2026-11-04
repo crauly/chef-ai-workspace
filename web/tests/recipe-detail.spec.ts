@@ -69,10 +69,72 @@ test("recipe detail has standalone URL, clean top viewport, and supports reload 
  await page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"}).click();
  await expect(page).toHaveURL(/\/recipes\/[^/]+$/);
  await expect(page.getByRole("heading",{name:"片栗粉のレシピ"})).toBeVisible();
- await expect(page.getByRole("heading",{name:"音声操作"})).toBeVisible();
+ await expect(page.locator("#voice-controls")).toBeHidden();
+ await expect(page.locator("img[src='/chef-ai-mark.svg']")).toBeVisible();
  await page.reload();
  await expect(page.getByRole("heading",{name:"片栗粉のレシピ"})).toBeVisible();
  await page.getByRole("button",{name:"← レシピ一覧"}).click();
  await expect(page).toHaveURL("/");
  await expect(page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"})).toBeVisible();
+});
+
+test("recipe detail supports explicit deletion with confirmation",async({page})=>{
+ const detail=await openDetail(page);
+ let calls=0;
+ await page.route("**/api/recipes/*",async route=>{
+  if(route.request().method()==="DELETE"){calls++;return route.fulfill({json:{deleted:true}});}
+  return route.continue();
+ });
+ await detail.getByRole("button",{name:"レシピを削除"}).click();
+ const dialog=page.getByRole("dialog",{name:"レシピ削除の確認"});
+ await expect(dialog).toBeVisible();
+ expect(calls).toBe(0);
+ await dialog.getByRole("button",{name:"キャンセル"}).click();
+ expect(calls).toBe(0);
+ await detail.getByRole("button",{name:"レシピを削除"}).click();
+ await dialog.getByRole("button",{name:"削除する"}).click();
+ await expect.poll(()=>calls).toBe(1);
+ await expect(page).toHaveURL("/");
+});
+
+test("long press on recipe list opens edit/delete without navigating",async({page})=>{
+ await page.goto("/");
+ const recipe=page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"});
+ await recipe.scrollIntoViewIfNeeded();
+ await expect(recipe).toBeInViewport();
+ const bounds=await recipe.boundingBox();
+ expect(bounds).not.toBeNull();
+ await page.mouse.move(bounds!.x+bounds!.width/2,bounds!.y+bounds!.height/2);
+ await page.mouse.down();
+ await page.waitForTimeout(650);
+ await page.mouse.up();
+ const actions=page.getByRole("dialog",{name:"レシピの操作"});
+ await expect(actions).toBeVisible();
+ await expect(page).toHaveURL("/");
+ await expect(actions.getByRole("button",{name:"編集"})).toBeVisible();
+ await expect(actions.getByRole("button",{name:"削除"})).toBeVisible();
+ await actions.getByRole("button",{name:"キャンセル"}).click();
+ await recipe.click();
+ await expect(page).toHaveURL(/\/recipes\/[^/]+$/);
+});
+
+test("ongoing recording stays stoppable after opening a recipe on desktop",async({page})=>{
+ await page.setViewportSize({width:1280,height:800});
+ await page.addInitScript(()=>{
+  Object.defineProperty(navigator.mediaDevices,"getUserMedia",{value:async()=>{
+   const context=new AudioContext(),oscillator=context.createOscillator(),gain=context.createGain();
+   const destination=context.createMediaStreamDestination();
+   oscillator.connect(gain);gain.connect(destination);gain.gain.value=.0001;
+   oscillator.start();await context.resume();return destination.stream;
+  }});
+ });
+ await page.goto("/");
+ await page.getByRole("button",{name:/音声操作を開始/}).click();
+ await expect(page.getByRole("button",{name:"■ マイクを停止"})).toBeVisible();
+ await page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"}).click();
+ await expect(page.locator("#voice-controls")).toBeHidden();
+ const recording=page.locator(".recipe-voice-capture-status");
+ await expect(recording).toBeVisible();
+ await recording.getByRole("button",{name:"マイクを停止"}).click();
+ await expect(recording).toBeHidden();
 });

@@ -33,6 +33,39 @@ export default function Library(){
  const editor=useRef<EditorHandle|null>(null),reviewBoundary=useRef<(()=>number)|null>(null);
  const browseWaiter=useRef<((recipe:Recipe|null)=>void)|null>(null);
  useEffect(()=>{if(selected&&browseWaiter.current){browseWaiter.current(selected);browseWaiter.current=null;}},[selected]);
+ const [actionItem,setActionItem]=useState<Item|null>(null);
+ const [deleteTarget,setDeleteTarget]=useState<{id:string;title:string}|null>(null);
+ const longPressTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+ const longPressPoint=useRef<{x:number;y:number}|null>(null);
+ const longPressTriggered=useRef(false);
+ function cancelLongPress(){if(longPressTimer.current!==null)clearTimeout(longPressTimer.current);longPressTimer.current=null;longPressPoint.current=null;}
+ function beginLongPress(item:Item,event:React.PointerEvent){
+  if(event.pointerType==="mouse"&&event.button!==0)return;
+  cancelLongPress();longPressTriggered.current=false;
+  longPressPoint.current={x:event.clientX,y:event.clientY};
+  longPressTimer.current=setTimeout(()=>{longPressTimer.current=null;longPressTriggered.current=true;setActionItem(item);},550);
+ }
+ function trackLongPress(event:React.PointerEvent){
+  if(longPressPoint.current&&Math.hypot(event.clientX-longPressPoint.current.x,event.clientY-longPressPoint.current.y)>12)cancelLongPress();
+ }
+ async function deleteRecipe(target:{id:string;title:string}){
+  if(busy)return;
+  setBusy(true);setError("");
+  try{
+   await request<{deleted:boolean}>(`/api/recipes/${encodeURIComponent(target.id)}`,{method:"DELETE"});
+   setDeleteTarget(null);setActionItem(null);setEditingId(null);
+   if(selected?.id===target.id)backToLibrary();
+   if(items.length===1&&page>1)setPage(p=>Math.max(1,p-1));
+   else await reload();
+  }catch(e){setError(String(e));}
+  finally{setBusy(false);}
+ }
+ useEffect(()=>{
+  if(!actionItem&&!deleteTarget)return;
+  const onKey=(event:KeyboardEvent)=>{if(event.key==="Escape"&&!busy){setActionItem(null);setDeleteTarget(null);}};
+  document.addEventListener("keydown",onKey);
+  return()=>document.removeEventListener("keydown",onKey);
+ },[actionItem,deleteTarget,busy]);
  const [loadingList,setLoadingList]=useState(false);
  const [waking,setWaking]=useState(false);
  const [cost,setCost]=useState<{partial:boolean;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean}|null>(null);
@@ -187,7 +220,7 @@ export default function Library(){
   browseWaiter.current?.(null);
   return new Promise(resolve=>{browseWaiter.current=resolve;search(target,true);});
  }
- return <main id="top" className={selected?"recipe-detail-page":""}><div><header className="chef-header"><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><PriceBell locale={locale}/><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">Japanese</option><option value="en-US">English</option></select></label></div><div className="chef-brand"><img src="/chef-ai-mark.svg" alt="" width="58" height="58"/><h1>Chef AI</h1></div><p className="muted">{t("intro")}</p></header>
+ return <main id="top" className={selected?"recipe-detail-page":""}><div><header className="chef-header"><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><PriceBell locale={locale}/><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">Japanese</option><option value="en-US">English</option></select></label></div><div className="chef-brand"><img src="/chef-ai-mark.svg" alt="" width="58" height="58"/><h1>Chef AI</h1></div>{!selected&&<p className="muted">{t("intro")}</p>}</header>
  </div><div><VoiceWorkspace locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} editRequest={voiceEditRequest} onCreated={recipe=>{showDetail(recipe);setError("");void reload();}}/></div>
  <div hidden={Boolean(selected)}>
  <section className="workspace-section recipe-library-section" aria-labelledby="recipe-library-heading">
@@ -201,7 +234,11 @@ export default function Library(){
  {query&&<p role="status">{locale==="ja"?"検索中の料理名":"Recipe search"}: {query}</p>}
  {waking&&<p role="status" aria-live="polite">{locale==="ja"?"サーバーを起動しています。接続を再試行しています…":"Starting the server. Retrying connection…"}</p>}
  {error&&<p role="alert" className="error">{error}</p>}
- <div id="recipes" className="recipe-list" aria-busy={loadingList}>{items.map(item=><button key={item.id} className="recipe-list-item" disabled={busy} onClick={()=>void open(item.id)} aria-label={locale==="ja"?`${item.title}の詳細を開く`:`View ${item.title}`}>
+ <div id="recipes" className="recipe-list" aria-busy={loadingList}>{items.map(item=><button key={item.id} className="recipe-list-item" disabled={busy}
+  onPointerDown={e=>beginLongPress(item,e)} onPointerMove={trackLongPress} onPointerUp={cancelLongPress} onPointerLeave={cancelLongPress} onPointerCancel={cancelLongPress}
+  onContextMenu={e=>{e.preventDefault();cancelLongPress();longPressTriggered.current=true;setActionItem(item);}}
+  onClick={()=>{if(longPressTriggered.current){longPressTriggered.current=false;return;}void open(item.id);}}
+  aria-label={locale==="ja"?`${item.title}の詳細を開く`:`View ${item.title}`}>
   <span className="recipe-list-thumbnail" aria-hidden="true">{thumbnails[item.id]?<img src={thumbnails[item.id]} alt="" loading="lazy" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span>♨</span>}</span>
   <span className="recipe-list-copy"><strong>{item.title}</strong><small>{locale==="ja"?"レシピ":"Recipe"} · Rev {item.revision}</small></span>
   <span className="recipe-list-chevron" aria-hidden="true">›</span>
@@ -212,7 +249,7 @@ export default function Library(){
 
  </div>
  {selected&&<section className="recipe-detail" ref={detailRef} aria-label={t("detail")}> 
- <div className="detail-topbar"><button type="button" className="detail-back" onClick={backToLibrary}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button><span className="detail-revision">REV {selected.revision}</span></div>
+ <div className="detail-topbar"><button type="button" className="detail-back" onClick={backToLibrary}>{locale==="ja"?"← レシピ一覧":"← Recipes"}</button><span className="detail-revision">REV {selected.revision}</span><button type="button" className="secondary recipe-delete-action" disabled={busy} onClick={()=>setDeleteTarget({id:selected.id,title:selected.title.value||""})}>{locale==="ja"?"レシピを削除":"Delete recipe"}</button></div>
  {error&&<p role="alert" className="error">{error}</p>}
  <div className="detail-heading"><p className="detail-eyebrow">{locale==="ja"?"RECIPE DETAIL":"RECIPE DETAIL"}</p><h2>{selected.title.value||t("detail")}</h2></div>
  {recipeGaps(selected).length>0&&<details className="recipe-gap-disclosure">
@@ -287,5 +324,28 @@ export default function Library(){
  <p className="muted">{locale==="ja"?"編集モードへ切り替わります。マイクをオンにして変更内容を話してください。変更案を確認・承認してから保存します。":"Edit mode opens automatically. Enable the microphone and describe changes. Review and approve before saving."}</p>
  <button type="button" disabled={busy} aria-expanded={aiOpen} onClick={()=>setAiOpen(v=>!v)} className="detail-ai-button">{locale==="ja"?"◇ AIに変更相談":"◇ Ask AI to edit"}</button>
  <div hidden={!aiOpen}><AIEditor key={selected.id} recipe={selected} locale={locale} control={editor} markReview={()=>reviewBoundary.current?.()??-1} onBusy={b=>{setBusy(b);if(b)setAiOpen(true);}} onSaved={recipe=>{setSelected(recipe);setRename(recipe.title.value||"");void reload();}} /></div>
- </section>}</main>;
+ </section>}
+ {actionItem&&<div className="name-choice-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setActionItem(null);}}>
+   <section role="dialog" aria-modal="true" aria-label={locale==="ja"?"レシピの操作":"Recipe actions"} className="name-choice-dialog recipe-action-dialog">
+    <h3>{actionItem.title}</h3>
+    <p className="muted">{locale==="ja"?"操作を選択してください。":"Choose an action."}</p>
+    <div className="recipe-action-options">
+     <button type="button" disabled={busy} onClick={()=>{const id=actionItem.id;setActionItem(null);setAiOpen(true);void open(id);}}>{locale==="ja"?"編集":"Edit"}</button>
+     <button type="button" disabled={busy} className="recipe-delete-action" onClick={()=>{setDeleteTarget({id:actionItem.id,title:actionItem.title});setActionItem(null);}}>{locale==="ja"?"削除":"Delete"}</button>
+     <button type="button" className="secondary" onClick={()=>setActionItem(null)}>{locale==="ja"?"キャンセル":"Cancel"}</button>
+    </div>
+   </section>
+ </div>}
+ {deleteTarget&&<div className="name-choice-overlay" onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setDeleteTarget(null);}}>
+   <section role="dialog" aria-modal="true" aria-label={locale==="ja"?"レシピ削除の確認":"Confirm recipe deletion"} className="name-choice-dialog recipe-action-dialog">
+    <h3>{locale==="ja"?"レシピを削除":"Delete recipe"}</h3>
+    <p>{locale==="ja"?`「${deleteTarget.title}」を削除しますか？この操作は取り消せません。`:`Permanently delete "${deleteTarget.title}"? This cannot be undone.`}</p>
+    {error&&<p role="alert" className="error">{error}</p>}
+    <div className="recipe-action-options">
+     <button type="button" disabled={busy} className="recipe-delete-action" onClick={()=>void deleteRecipe(deleteTarget)}>{locale==="ja"?"削除する":"Delete permanently"}</button>
+     <button type="button" disabled={busy} className="secondary" onClick={()=>setDeleteTarget(null)}>{locale==="ja"?"キャンセル":"Cancel"}</button>
+    </div>
+   </section>
+ </div>}
+ </main>;
 }

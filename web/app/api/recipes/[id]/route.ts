@@ -3,3 +3,6 @@ import {forward} from "../../proxy";
 export async function GET(req: NextRequest, {params}: {params: Promise<{id: string}>}) {
   return forward(req, (await params).id);
 }
+export async function DELETE(req: NextRequest, {params}: {params: Promise<{id: string}>}) {
+  return forward(req, (await params).id);
+}

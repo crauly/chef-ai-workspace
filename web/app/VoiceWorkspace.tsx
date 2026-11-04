@@ -233,7 +233,11 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
   finally{running.current=false;if(alive.current)setRouting(false);}
  }
  return <>
-  <section id="voice-controls" aria-label={locale==="ja"?"音声操作モード":"Voice operation mode"} className="voice-mode-panel">
+  {selected&&(micRecording||micBusy)&&mode!=="edit"&&<div className="recipe-voice-capture-status" role="status">
+    <span>{micRecording?(locale==="ja"?"音声録音中":"Microphone recording"):(locale==="ja"?"音声処理中":"Processing audio")}</span>
+    {micRecording&&<button type="button" onClick={toggleMic}>{locale==="ja"?"マイクを停止":"Stop microphone"}</button>}
+   </div>}
+  <section id="voice-controls" hidden={Boolean(selected)&&mode!=="edit"} aria-label={locale==="ja"?"音声操作モード":"Voice operation mode"} className="voice-mode-panel">
    <div className="voice-heading"><h2>{locale==="ja"?"音声操作":"Voice control"}</h2><button type="button" className="voice-settings-button" aria-label={locale==="ja"?"設定を開く":"Open settings"} aria-expanded={settingsOpen} onClick={()=>setSettingsOpen(v=>!v)}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M10 2h4l.7 2.5 2 1.1 2.5-.6 2 3.5-1.8 1.9v2.2l1.8 1.9-2 3.5-2.5-.6-2 1.1L14 22h-4l-.7-2.5-2-1.1-2.5.6-2-3.5 1.8-1.9v-2.2L2.8 9.5l2-3.5 2.5.6 2-1.1L10 2z"/></svg></button></div>
    <p>{locale==="ja"?"現在のモード: ":"Current mode: "}<strong>{locale==="ja"?labels[mode]:({idle:"Idle",create:"Create",browse:"Browse",edit:"Edit"} as const)[mode]}</strong>{mode==="edit"&&selected?` — ${selected.title.value}`:""}</p>
    {draftPending&&mode!=="create"&&<p role="status">{locale==="ja"?"登録途中の下書きを保持しています。":"Your unfinished recipe draft is preserved."}<button type="button" onClick={()=>void (async()=>{await navigate({mode:"create",target:""});if(currentMode.current!=="create")return;registration.current?.requestReview();feedback("保持していた下書きを確認します。");})()}>{locale==="ja"?"下書きに戻る":"Return to draft"}</button></p>}
