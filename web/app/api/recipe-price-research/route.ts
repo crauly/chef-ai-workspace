@@ -61,9 +61,11 @@ export async function POST(req:NextRequest){
     const row=materials[batch[j].material_index];
     const usable=ref.status==="available"&&ref.currency==="JPY"&&
      typeof ref.average_unit_price==="string"&&/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/.test(ref.average_unit_price)&&Number(ref.average_unit_price)>0&&
-     typeof ref.unit_basis==="string"&&/^[\\p{L}\\p{N}µμ%°]{1,24}$/u.test(ref.unit_basis)&&\n     !row.supplier_id&&!row.offer_id;
+     typeof ref.unit_basis==="string"&&/^[\\p{L}\\p{N}µμ%°]{1,24}$/u.test(ref.unit_basis)&&
+     !row.supplier_id&&!row.offer_id;
     results.push({index:batch[j].material_index,name:row.name,
-     status:usable?"candidate":row.supplier_id||row.offer_id?"linked_supplier":ref.status==="available"?"unsupported_unit":ref.status,\n     description:row.supplier_id||row.offer_id?`${row.name}：仕入先または購入条件が紐づいているため、単価の上書き候補は生成しません。仕入条件を確認してください。`:ref.text});
+     status:usable?"candidate":row.supplier_id||row.offer_id?"linked_supplier":ref.status==="available"?"unsupported_unit":ref.status,
+     description:row.supplier_id||row.offer_id?`${row.name}：仕入先または購入条件が紐づいているため、単価の上書き候補は生成しません。仕入条件を確認してください。`:ref.text});
     if(usable)operations.push({op:"set_material_price",material_id:row.id,
      price_jpy:ref.average_unit_price!,price_quantity:"1",price_unit:ref.unit_basis!});
    });
