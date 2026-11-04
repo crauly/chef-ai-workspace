@@ -69,8 +69,8 @@ class CostTests(unittest.TestCase):
                             ingredient_id="i1", supplier_id="sup-a",
                             offer_id="offer-2", price_mode="inherit")
         product = Ingredient("i1", "トマト水煮", quote("999", "3500", "g"))
-        selected = {("i1", "offer-1"): quote("1800", "3500", "g"),
-                    ("i1", "offer-2"): quote("1650", "3500", "g")}
+        selected = {("i1", "offer:offer-1"): quote("1800", "3500", "g"),
+                    ("i1", "offer:offer-2"): quote("1650", "3500", "g")}
         result = _calculate_cost(recipe(line), {"i1": product}, UNITS, selected)
         self.assertFalse(result.partial)
         self.assertEqual(result.line_costs["m1"], Decimal("500") * Decimal("1650") / 3500)
