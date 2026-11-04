@@ -1561,7 +1561,7 @@ def update_demo_notification(notification_id: UUID,
 # recipe's business mutations). Demo owner is verified by demo_context.
 class DishImageBody(BaseModel):
     model_config=ConfigDict(extra="forbid")
-    image: str = Field(min_length=40,max_length=5600000)
+    image: str = Field(min_length=40,max_length=4200000)
 
 
 @router.get("/recipes/{recipe_id}/dish-image")
@@ -1594,7 +1594,7 @@ def save_demo_dish_image(recipe_id:UUID,body:DishImageBody,ctx=Depends(demo_cont
         image=base64.b64decode(match.group(2),validate=True)
     except (ValueError,binascii.Error):
         raise HTTPException(422,"Invalid image")
-    if not image or len(image)>4194304:
+    if not image or len(image)>3145728:
         raise HTTPException(413,"Image too large")
     mime=match.group(1)
     if not ((mime=="image/png" and image.startswith(b"\\x89PNG\\r\\n\\x1a\\n")) or
