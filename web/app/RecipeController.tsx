@@ -35,6 +35,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  const [draft,setDraft]=useState(""),[rename,setRename]=useState(""),[error,setError]=useState("");
  const [busy,setBusy]=useState(false),[page,setPage]=useState(1);
  const [query,setQuery]=useState(""),[searchInput,setSearchInput]=useState("");
+ const [detailCandidatesActive,setDetailCandidatesActive]=useState(false);
  const listRequest=useRef(0);
  const voiceTarget=useRef<string|null>(null);
  const voiceSearchForEdit=useRef(false);
@@ -161,7 +162,8 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  useEffect(()=>{const current=localStorage.getItem("chef-ui-locale");if(current==="ja"||current==="en-US"){setLocale(current);document.documentElement.lang=current;}},[]);
  function switchLocale(next:Locale){setLocale(next);localStorage.setItem("chef-ui-locale",next);document.documentElement.lang=next;}
  useEffect(()=>{let active=true;setCost(null);setCostError(false);if(selected){void request<{partial:boolean;subtotal_jpy:string;line_costs:Record<string,string>;total_cost_jpy:string|null;cost_rate_pct:string|null;estimated:boolean;unresolved_line_ids:string[]}>(`/api/recipes/${selected.id}/cost`).then(result=>{if(active){setCost(result);setCostError(false);}}).catch(()=>{if(active){setCost(null);setCostError(true);}});}return()=>{active=false;};},[selected?.id,selected?.revision]);
- const reload=useCallback(async()=>{
+ const reload=useCallback(async(preserveDetailCandidates=false)=>{
+   if(pageKind==="detail"&&!preserveDetailCandidates)setDetailCandidatesActive(false);
    const current=++listRequest.current;setWaking(false);setLoadingList(true);
    try{
      const result=await startupRead<{items:Item[]}>(`/api/recipes?page=${page}&page_size=20&q=${encodeURIComponent(query)}`,()=>{if(current===listRequest.current)setWaking(true);});
@@ -173,22 +175,24 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
          const recipe=await request<Recipe>(`/api/recipes/${result.items[0].id}`);
          if(current===listRequest.current){
            const openVoiceEdit=voiceSearchForEdit.current;
+           if(pageKind==="detail")setDetailCandidatesActive(false);
            voiceSearchForEdit.current=false;editSelectionPending.current=false;
            browseWaiter.current?.(recipe);browseWaiter.current=null;
            showDetail(recipe,openVoiceEdit);
          }
        }
        if(fromVoice&&result.items.length!==1){
+         if(pageKind==="detail")setDetailCandidatesActive(result.items.length>1);
          editSelectionPending.current=result.items.length>1&&voiceSearchForEdit.current;
          voiceSearchForEdit.current=false;
          browseWaiter.current?.(null);browseWaiter.current=null;
          if(pageKind==="detail")setSelected(searchFallback.current);
        }
      }
-   }catch(e){if(current===listRequest.current){setError(String(e));const voiceFailed=voiceTarget.current===query||voiceSearchForEdit.current;if(voiceFailed){voiceTarget.current=null;voiceSearchForEdit.current=false;editSelectionPending.current=false;if(pageKind==="detail")setSelected(searchFallback.current);}browseWaiter.current?.(null);browseWaiter.current=null;}}
+   }catch(e){if(current===listRequest.current){setError(String(e));const voiceFailed=voiceTarget.current===query||voiceSearchForEdit.current;if(voiceFailed){voiceTarget.current=null;voiceSearchForEdit.current=false;editSelectionPending.current=false;if(pageKind==="detail"){setSelected(searchFallback.current);setDetailCandidatesActive(false);}}browseWaiter.current?.(null);browseWaiter.current=null;}}
    finally{if(current===listRequest.current){setWaking(false);setLoadingList(false);}}
- },[page,query]);
- useEffect(()=>{const voiceOnly=pendingVoiceSearch.current;pendingVoiceSearch.current=false;if(pageKind==="home"||voiceOnly)void reload();return()=>{listRequest.current++;};},[reload,pageKind]);
+ },[page,query,pageKind]);
+ useEffect(()=>{const voiceOnly=pendingVoiceSearch.current;pendingVoiceSearch.current=false;if(pageKind==="home"||voiceOnly)void reload(voiceOnly);return()=>{listRequest.current++;};},[reload,pageKind]);
  function search(name:string,fromVoice=false,openVoiceEdit=false){
    if(!fromVoice){browseWaiter.current?.(null);browseWaiter.current=null;}
    if(fromVoice)searchFallback.current=selected;
@@ -202,7 +206,11 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
    // the user. The list is home-only; detail keeps showing its recipe.
    if(pageKind==="home"){setItems([]);setSelected(null);}
    setSearchInput(name.trim());setQuery(name.trim());
-   if(page===1&&query===name.trim())void reload();
+   if(page===1&&query===name.trim())void reload(fromVoice);
+ }
+ function loadDetailCandidatePage(nextPage:number){
+  if(loadingList||nextPage<1)return;
+  setItems([]);pendingVoiceSearch.current=true;setPage(nextPage);
  }
  async function create(e:React.FormEvent){e.preventDefault();if(!draft.trim()||guardCaptureActive())return;setBusy(true);
  try{const recipe=await request<Recipe>("/api/recipes",{method:"POST",body:JSON.stringify({title:draft.trim()})});setDraft("");if(page===1){await reload();}else{setPage(1);}showDetail(recipe);}
@@ -293,11 +301,12 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  }
  return <main id="top" className={pageKind==="detail"?"recipe-detail-page":""}><div><header className="chef-header"><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><PriceBell locale={locale}/><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">Japanese</option><option value="en-US">English</option></select></label></div><div className="chef-brand"><img src="/chef-ai-mark.svg" alt="" width="58" height="58"/><h1>Chef AI</h1></div>{pageKind==="home"&&<p className="muted">{t("intro")}</p>}</header>
  </div>{(pageKind==="home"||selected)&&<div><VoiceWorkspace captureActiveRef={captureActive} detailOnly={pageKind==="detail"} locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} setEditTargetSelectionPending={pending=>{editSelectionPending.current=pending;}} editRequest={voiceEditRequest} onCreated={recipe=>{showDetail(recipe);setError("");void reload();}}/></div>}
- {pageKind==="detail"&&items.length>1&&<section className="workspace-section" aria-label={locale==="ja"?"レシピ検索結果":"Recipe search results"}>
+ {pageKind==="detail"&&detailCandidatesActive&&<section className="workspace-section" aria-label={locale==="ja"?"レシピ検索結果":"Recipe search results"} aria-busy={loadingList}>
   <h2>{locale==="ja"?"候補からレシピを選択":"Choose a recipe"}</h2>
-  <div className="recipe-list">{items.map(item=><button key={item.id} className="recipe-list-item" disabled={busy} onClick={()=>void open(item.id)} aria-label={locale==="ja"?`${item.title}の詳細を開く`:`View ${item.title}`}>
+  {items.length===0?<p role="status">{loadingList?(locale==="ja"?"検索しています…":"Searching…"):(locale==="ja"?"このページに候補はありません。":"No recipes on this page.")}</p>:<div className="recipe-list">{items.map(item=><button key={item.id} className="recipe-list-item" disabled={busy||loadingList} onClick={()=>void open(item.id)} aria-label={locale==="ja"?`${item.title}の詳細を開く`:`View ${item.title}`}>
    <span className="recipe-list-copy"><strong>{item.title}</strong><small>{locale==="ja"?"レシピ":"Recipe"}</small></span><span className="recipe-list-chevron" aria-hidden="true">›</span>
-  </button>)}</div>
+  </button>)}</div>}
+  <div className="toolbar"><button type="button" disabled={busy||loadingList||page<=1} onClick={()=>loadDetailCandidatePage(page-1)}>{t("previous")}</button><span>{t("page")} {page}</span><button type="button" disabled={busy||loadingList||items.length<20} onClick={()=>loadDetailCandidatePage(page+1)}>{t("next")}</button></div>
  </section>}
  {pageKind==="home"&&<div>
  <section className="workspace-section recipe-library-section" aria-labelledby="recipe-library-heading">

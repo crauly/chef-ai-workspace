@@ -326,6 +326,42 @@ test("detail voice edit with multiple matches lets the user choose a target", as
   await expect(page.locator("#voice-controls")).toContainText("きのこのクリームスープ");
 });
 
+test("detail voice edit candidates paginate beyond the first 20 results",async({page,request})=>{
+ await request.post("http://127.0.0.1:8100/test/search-fixtures");
+ await page.setViewportSize({width:390,height:844});
+ await microphone(page);
+ await page.route("**/api/voice/transcribe",route=>route.fulfill({json:{transcript:"別の料理を編集して"}}));
+ await page.goto("/recipes/11111111-1111-4111-8111-111111111111");
+ await expect(page.getByRole("heading",{name:"片栗粉のレシピ"})).toBeVisible();
+ await page.getByRole("button",{name:"下部の音声操作"}).click();
+ await expect(page.getByRole("button",{name:/マイクを停止/}).first()).toBeVisible();
+ await page.waitForTimeout(2500);
+ await page.getByRole("button",{name:/マイクを停止/}).first().click();
+ const results=page.getByRole("region",{name:"レシピ検索結果"});
+ await expect(results.getByRole("button",{name:/の詳細を開く/})).toHaveCount(20);
+ await expect(results.getByRole("button",{name:"次へ"})).toBeEnabled();
+ await results.getByRole("button",{name:"次へ"}).click();
+ await expect(results.getByRole("button",{name:/の詳細を開く/})).toHaveCount(1);
+ await expect(results).toContainText("別の料理20");
+ await expect(results).toContainText("ページ 2");
+ const state=await (await request.get("http://127.0.0.1:8100/test/state")).json();
+ expect(state.listQueries).toContainEqual({q:"別の料理",page:2});
+});
+
+test("ordinary detail reload after rename does not show unrelated recipe candidates",async({page,request})=>{
+ const detail=await openDetail(page);
+ const before=await (await request.get("http://127.0.0.1:8100/test/state")).json();
+ const rename=detail.locator("details.detail-action").filter({hasText:"料理名を変更"});
+ await rename.locator("summary").click();
+ await rename.locator("form input").fill("片栗粉のレシピ 改訂");
+ await rename.locator("form button").click();
+ await expect.poll(async()=>{
+  const current=await (await request.get("http://127.0.0.1:8100/test/state")).json();
+  return current.listQueries.length;
+ }).toBeGreaterThan(before.listQueries.length);
+ await expect(page.getByRole("region",{name:"レシピ検索結果"})).toHaveCount(0);
+});
+
 
 test("missing detail recipe shows an error and a usable return path",async({page})=>{
  await page.goto("/recipes/99999999-9999-4999-8999-999999999999");
