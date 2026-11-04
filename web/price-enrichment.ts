@@ -9,7 +9,7 @@ import type {GroundedSample} from "./price-web-search";
 import {detectPriceResearch} from "./price-research-intent";
 import {backendUrl} from "./app/api/backend-url";
 
-export type ReferenceSummary={available:boolean;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null};
+export type ReferenceSummary={available:boolean;currency?:string;unit_basis?:string;average_unit_price?:string;observation_count?:number;observed_to?:string|null;observation_ids?:string[]};
 export type ReferenceCandidate={ingredient_id:string;ingredient_name:string;reference:ReferenceSummary;observations?:unknown[]};
 export type LedgerLookup={kind:"ok";candidates:ReferenceCandidate[]}|{kind:"unavailable"|"unauthorized"|"invalid_response"};
 export type ResearchStatus={material_name:string;material_index:number;request:string;trigger:"muse"|"heuristic";
@@ -20,8 +20,8 @@ export type ProvisionalPrice={material_index:number;material_name:string;origin:
  price_jpy:string;price_quantity:string;price_unit:string;currency:string;observation_count:number;
  sources:{url:string;title:string}[];samples:GroundedSample[];fetched_at:string|null;
  status:"provisional";approval:"unapproved";text:string};
-export type PriceReferenceEntry={material_name:string;material_index:number;status:"available"|"none"|"unavailable"|"unauthorized"|"invalid_response";origin:"ledger"|"external";ingredient_name:string|null;currency:string|null;unit_basis:string|null;average_unit_price:string|null;observation_count:number|null;observed_to:string|null;sources?:{url:string;title:string}[];fetched_at?:string;samples?:{name:string;seller:string;source:string;amount:string;package:string;url?:string;fetched_at?:string;tax_note?:string;shipping_note?:string;maker?:string;spec?:string}[];text:string};
-export type ResearchEntry={material_name:string;request:string;trigger:"muse"|"heuristic";material_index:number};
+export type PriceReferenceEntry={material_name:string;material_index:number;status:"available"|"none"|"unavailable"|"unauthorized"|"invalid_response";origin:"ledger"|"external";ingredient_name:string|null;currency:string|null;unit_basis:string|null;average_unit_price:string|null;observation_count:number|null;observed_to:string|null;sources?:{url:string;title:string}[];fetched_at?:string;samples?:{name:string;seller:string;source:string;amount:string;package:string;package_quantity?:string;package_unit?:string;url?:string;fetched_at?:string;tax_note?:string;shipping_note?:string;maker?:string;spec?:string}[];text:string;ingredient_id?:string;observations?:unknown[]};
+export type ResearchEntry={material_name:string;request:string;trigger:"muse"|"heuristic";material_index:number;ingredient_id?:string};
 export type DraftMaterial={name:string;price_jpy:string;price_quantity:string;price_unit:string};
 
 // Canonical row key: an exact row-name match beats a contradictory
@@ -56,7 +56,7 @@ export function rowIndexFor(materials:{name:string}[],name:string,idx:number|nul
  return at;
 }
 
-export async function lookupCandidates(name:string):Promise<LedgerLookup>{
+export async function lookupCandidates(name:string,ingredientId?:string):Promise<LedgerLookup>{
  const url=backendUrl(),token=process.env.DEMO_ACCESS_TOKEN;
  // No connection means configured: the ledger cannot be reached, which is
  // NOT the same as "no history". Never report this as not-found.
@@ -64,6 +64,7 @@ export async function lookupCandidates(name:string):Promise<LedgerLookup>{
  try{
   const target=new URL("/demo/price-reference",url);
   target.searchParams.set("name",name);
+  if(ingredientId)target.searchParams.set("ingredient_id",ingredientId);
   const response=await fetch(target,{headers:{"X-Demo-Access":token},cache:"no-store",redirect:"error",signal:AbortSignal.timeout(15000)});
   if(response.status===401||response.status===403)return {kind:"unauthorized"};
   if(!response.ok)return response.status>=500?{kind:"unavailable"}:{kind:"invalid_response"};
@@ -94,12 +95,12 @@ function lookupFailure(materialName:string,materialIndex:number,kind:"unavailabl
   text:`確認できません：${wanted}の仕入履歴は${reason}参照できませんでした（価格未確定のまま保存できます）`};
 }
 
-export function selectReference(materialName:string,materialIndex:number,lookup:LedgerLookup):PriceReferenceEntry{
+export function selectReference(materialName:string,materialIndex:number,lookup:LedgerLookup,ingredientId?:string):PriceReferenceEntry{
  if(lookup.kind!=="ok")return lookupFailure(materialName,materialIndex,lookup.kind);
  const wanted=materialName.trim();
  const available=lookup.candidates.filter(c=>c.reference.available);
  const exact=available.find(c=>c.ingredient_name.trim()===wanted);
- const chosen=exact||available[0];
+ const chosen=ingredientId?available.find(c=>c.ingredient_id===ingredientId):exact||available[0];
  if(!chosen||typeof chosen.reference.average_unit_price!=="string"||
     typeof chosen.reference.unit_basis!=="string"||typeof chosen.reference.currency!=="string"){
   return {material_name:wanted,material_index:materialIndex,status:"none",origin:"ledger",ingredient_name:null,currency:null,unit_basis:null,
@@ -115,6 +116,7 @@ export function selectReference(materialName:string,materialIndex:number,lookup:
  const prefix=chosen.ingredient_name.trim()===wanted?`参考価格：${chosen.ingredient_name}は`:
   `参考価格（完全一致なし・${chosen.ingredient_name}の履歴を参考）：`;
  return {material_name:wanted,material_index:materialIndex,status:"available",origin:"ledger",ingredient_name:chosen.ingredient_name,
+  ingredient_id:chosen.ingredient_id,observations:chosen.observations?.filter(obs=>!ref.observation_ids||!!obs&&typeof obs==="object"&&ref.observation_ids.includes(String((obs as {observation_id?:unknown}).observation_id))),
   currency,unit_basis:basis,average_unit_price:average,
   observation_count:count,observed_to:typeof ref.observed_to==="string"?ref.observed_to:null,
   text:`${prefix}${formatAmount(average,basis,currency)}（あなたの仕入履歴${count}件${when}・推定・要確認）`};
@@ -154,11 +156,12 @@ export function assembleEntries(materials:DraftMaterial[],
 // are reported in research_status, so the draft never fails and the
 // failure reason is never lost. Entries run concurrently (cap 3 bounds
 // the fan-out); result order follows entry order, never completion order.
-export async function enrichEntries(apiKey:string,entries:ResearchEntry[]){
+export async function enrichEntries(apiKey:string,entries:ResearchEntry[],
+ usableLedger?:(ref:PriceReferenceEntry,entry:ResearchEntry)=>boolean){
  const settled=await Promise.all(entries.map(async entry=>{
   const row=entry.material_index;
-  const ledgerEntry=selectReference(entry.material_name,row,await lookupCandidates(entry.material_name));
-  if(ledgerEntry.status==="available"){
+  const ledgerEntry=selectReference(entry.material_name,row,await lookupCandidates(entry.material_name,entry.ingredient_id),entry.ingredient_id);
+  if(ledgerEntry.status==="available"&&(!usableLedger||usableLedger(ledgerEntry,entry))){
    // Owned ledger wins: no web search when usable history exists.
    return {ref:ledgerEntry,
     status:{material_name:entry.material_name,material_index:row,request:entry.request,

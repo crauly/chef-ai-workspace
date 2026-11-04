@@ -2,6 +2,8 @@
 import {useEffect,useImperativeHandle,useRef,useState,type Ref} from "react";
 import {label, type Locale} from "./i18n";
 import VoiceInput from "./VoiceInput";
+import ResearchEvidence from "./ResearchEvidence";
+import {isPriceResearchRequest,combineResearch,type RecipeResearch,type ResearchResult} from "../recipe-price-research";
 import {request, type AIProposal, type Operation, type Recipe} from "./types";
 import {voiceCommand} from "./voice-commands";
 import type {VoiceCaptureMeta} from "./useVoiceCapture";
@@ -24,8 +26,8 @@ function describe(recipe: Recipe, operations: Operation[], locale: Locale): stri
         lines.set(line.id, {...line, quantity: {value: op.value, status: "assumed"}, unit: op.unit}); break;
       case "set_material_price": {
         if (!line) return null;
-        const p = line.price_override;
-        const before = line.price_mode === "inherit" ? (ja ? "共通食材の単価" : "Shared ingredient price") : p ? `¥${p.amount_jpy.value ?? "—"} / ${p.per_quantity} ${p.per_unit}` : "—";
+        const p = line.effective_price??line.price_override;
+        const before = line.price_mode === "inherit" && !p ? (ja ? "共通食材の単価" : "Shared ingredient price") : p ? `¥${p.amount_jpy.value ?? "—"} / ${p.per_quantity} ${p.per_unit}` : "—";
         changes.push(`${line.material_name.value || label(locale, "unnamed")} · ${ja ? "単価" : "Price"}: ${before} → ¥${op.price_jpy} / ${op.price_quantity} ${op.price_unit}`);
         lines.set(line.id, {...line, price_mode: "override", price_override: {amount_jpy: {value: op.price_jpy, status: "assumed"}, per_quantity: op.price_quantity, per_unit: op.price_unit}}); break;
       }
@@ -51,12 +53,13 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [researchResults,setResearchResults]=useState<ResearchResult[]>([]);
   const [heard, setHeard] = useState(""), [preferred, setPreferred] = useState("");
   const lock = useRef(false);
   const reviewRef=useRef<Review|null>(null),reviewEpoch=useRef(-1),generation=useRef(0),alive=useRef(true);
   const voiceHistory=useRef<string[]>([]),latestRecipe=useRef(recipe);latestRecipe.current=recipe;
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;generation.current++;};},[]);
-  function invalidate(){generation.current++;reviewRef.current=null;setReview(null);setApproved(false);}
+  function invalidate(){generation.current++;reviewRef.current=null;setReview(null);setApproved(false);setResearchResults([]);}
   useEffect(()=>{invalidate();voiceHistory.current=[];},[recipe.id,recipe.revision]);
   useImperativeHandle(control,()=>({submit:voiceSubmit,hasPending:()=>Boolean(reviewRef.current||voiceHistory.current.length||instruction.trim()),invalidate,isBusy:()=>lock.current}));
   const changes = review ? describe(recipe, review.proposal.operations, locale) : null;
@@ -70,6 +73,8 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
   function working(value: boolean) {lock.current = value; setBusy(value); onBusy(value);}
   function report(e: unknown, uncertainSave = false) {
     const status = e instanceof Error ? e.message : "";
+    if(status==="Too many operations; split the edits"){setError(locale==="ja"?"1回の承認は40操作までです。調査対象と他の変更を分けてください。":"Approval supports 40 operations. Split the research and other edits.");return;}
+    if(status==="unsupported combined edit"){setError(locale==="ja"?"食材の追加などは価格調査と分けて指示してください。保存していません。":"Request ingredient additions separately from price research. Nothing was saved.");return;}
     setError(t(status === "409" ? "staleProposal" : !uncertainSave && (status === "502" || status === "503") ? "aiUnavailable" : "failure"));
   }
   async function propose(e: React.FormEvent) {
@@ -78,19 +83,47 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
   async function proposeText(text:string) {
     if (lock.current || !text.trim()) return;
     const token=++generation.current,base=latestRecipe.current;
-    working(true); setError(""); setNotice(""); setReview(null); setApproved(false);
+    working(true); setError(""); setNotice(""); setReview(null); setApproved(false);setResearchResults([]);
     reviewRef.current=null;
     try {
-      const proposal = await request<AIProposal>(`/api/recipes/${base.id}/propose`, {method: "POST", body: JSON.stringify({instruction:text})});
+      // A price research instruction needs real provenance, not an AI-invented
+      // numerical mutation. Scope is resolved dynamically against live rows.
+      const researchRequested=isPriceResearchRequest(text);
+      let researchNotice="";
+      let proposal:AIProposal;
+      if(researchRequested){
+        const result=await request<RecipeResearch>("/api/recipe-price-research",{
+          method:"POST",body:JSON.stringify({instruction:text,recipe_id:base.id,base_revision:base.revision})});
+        if(!alive.current||token!==generation.current||latestRecipe.current.id!==base.id||latestRecipe.current.revision!==base.revision)return;
+        setResearchResults(result.results);
+        if((result.ambiguous||!result.indices.length)&&!result.edit_instruction){
+          setNotice(locale==="ja"?"調査対象を特定できませんでした。食材名・範囲、または「すべて」を指定してください。":"Could not determine the target rows. Name ingredients, a range, or all.");
+          return;
+        }
+        const skipped=result.results.filter(item=>item.status!=="candidate");
+        researchNotice=(locale==="ja"?`調査対象${result.indices.length}品・仮単価候補${result.operations.length}品。`:`Researched ${result.indices.length} ingredients; ${result.operations.length} provisional candidates.`)+
+          (skipped.length?(locale==="ja"?" 適用候補なし："+skipped.map(item=>item.name).join("、"):" No directly applicable quote: "+skipped.map(item=>item.name).join(", ")):"");
+        const edit=result.edit_instruction?.trim()?await request<AIProposal>(`/api/recipes/${base.id}/propose`,{
+          method:"POST",body:JSON.stringify({instruction:result.edit_instruction})}):undefined;
+        proposal=combineResearch(base,result,edit);
+        if(!proposal.operations.length){setNotice(researchNotice);return;}
+      }else{
+        proposal=await request<AIProposal>(`/api/recipes/${base.id}/propose`, {method: "POST", body: JSON.stringify({instruction:text})});
+      }
       if(!alive.current||token!==generation.current||latestRecipe.current.id!==base.id||latestRecipe.current.revision!==base.revision)return;
       if (proposal.requires_confirmation !== true || !Array.isArray(proposal.operations) || proposal.operations.length > 40) throw new Error("invalid");
       if (proposal.recipe_id !== base.id) throw new Error("invalid");
       if (proposal.base_revision !== base.revision) {await refreshAfterConflict(); return;}
       if (describe(base, proposal.operations, locale) === null) throw new Error("invalid");
-      const next={proposal,instruction:text,requestId:crypto.randomUUID()};reviewRef.current=next;setReview(next);
+      const next:Review={proposal,instruction:text,requestId:crypto.randomUUID()};reviewRef.current=next;setReview(next);
       reviewEpoch.current=markReview?.()??-1;
-      setNotice(locale==="ja"?"変更案を表示しました。差分を確認後、もう一度「保存してください」と明示するか、確認チェックと保存ボタンを操作してください。":"Review the proposal, then explicitly request saving or use the approval controls.");
-    } catch (e) {report(e);} finally {working(false);}
+      setNotice(researchNotice+" "+(locale==="ja"?"変更案を表示しました。差分を確認後、もう一度「保存してください」と明示するか、確認チェックと保存ボタンを操作してください。":"Review the proposal, then explicitly request saving or use the approval controls."));
+    } catch (e) {
+      report(e);
+      if(e instanceof Error&&e.message==="409"&&alive.current&&token===generation.current&&latestRecipe.current.id===base.id){
+        try{await refreshAfterConflict();}catch{setError(t("failure"));}
+      }
+    } finally {working(false);}
   }
   async function confirm(voiceApproval?:Review) {
     const current=voiceApproval??review;
@@ -143,6 +176,7 @@ export default function AIEditor({recipe, locale, onSaved, onBusy,control,markRe
     </form>
     {error && <p className="error" role="alert">{error}</p>}
     <p role="status">{notice}</p>
+    <ResearchEvidence results={researchResults} locale={locale}/>
     {review && <section className="proposal" aria-label={t("proposalDiff")}>
       <h3>{t("proposalDiff")}</h3><p className="muted">{t("originalInstruction")}: {review.instruction}</p>
       {review.proposal.provider && <p className="tag">{review.proposal.provider.name === "meta_responses" ? "Meta Muse" : (locale === "ja" ? "代替モデル" : "Substitute model")} · {review.proposal.provider.model}</p>}

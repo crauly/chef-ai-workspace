@@ -87,7 +87,7 @@ test("saving clears the preview so it cannot cross into the next recipe", async 
   await expect(page.getByAltText("生成した料理イメージ")).toBeVisible();
   await dictate(page, "登録を確定");
   await expect(page.getByRole("region", {name: "レシピ詳細"}).getByRole("heading", {name: "カルボナーラ"})).toBeVisible();
-  await page.getByRole("button", {name: "← レシピ一覧"}).click();
+  await page.getByRole("button", {name: "← ホーム"}).click();
   // Saving switches the workspace to browse mode; return to create mode.
   // The next recipe starts clean: no stale preview from the saved one.
   await page.getByRole("button", {name: "登録", exact: true}).click();

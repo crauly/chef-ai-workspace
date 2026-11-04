@@ -1,4 +1,5 @@
 "use client";
+import {isPriceResearchRequest} from "../recipe-price-research";
 import NavIcon from "./NavIcon";
 
 import {useEffect,useRef,useState,type RefObject} from "react";
@@ -214,7 +215,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    let nav=voiceNavigation(input.text);
    // Only navigation paraphrases need an intent call. Material dictation and
    // approval controls stay on their existing paths without another model hop.
-   if(!nav&&voiceCommand(input.text)==="data"&&/(?:モード|レシピ.*(?:登録|参照|呼び出|検索|見たい|編集)|メニュー.*(?:登録|作成)|探したい|呼び出したい)/.test(input.text)&&!/[0-9０-９]/.test(input.text)){
+   if(!nav&&!isPriceResearchRequest(input.text)&&voiceCommand(input.text)==="data"&&/(?:モード|レシピ.*(?:登録|参照|呼び出|検索|見たい|編集)|メニュー.*(?:登録|作成)|探したい|呼び出したい)/.test(input.text)&&!/[0-9０-９]/.test(input.text)){
     if(/しない|しません|ではなく|じゃなく|やめ/.test(input.text)){feedback("切り替えずに現在の内容を保持しています。希望する操作をもう一度教えてください。",true);continue;}
     const result=await request<{intent:string;target:string}>("/api/intent",{method:"POST",body:JSON.stringify({utterance:input.text,current_mode:currentMode.current})});
     if(!["create","browse","edit"].includes(result.intent)||typeof result.target!=="string"){

@@ -32,7 +32,7 @@ export type GroundedCandidate = {
 };
 export type GroundedSample = {
   name: string; seller: string; source: string;
-  amount: string; package: string;
+  amount: string; package: string; package_quantity?:string; package_unit?:string;
   url?: string; fetched_at?: string;
   tax_note?: string; shipping_note?: string;
   maker?: string; spec?: string;
@@ -263,6 +263,7 @@ export function summarizeGroundedCandidates(
       name: item.name, seller: item.seller, source: item.source,
       amount: item.amount,
       package: item.package_quantity + item.package_unit,
+      package_quantity:item.package_quantity,package_unit:item.package_unit,
       // The candidate's own observation time wins; otherwise the shared
       // search time (genuine for this grounding call, never an estimate).
       fetched_at: item.fetched_at ?? fetchedAt,

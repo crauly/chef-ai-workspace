@@ -26,7 +26,7 @@ test("Japanese chef reviews, explicitly approves, saves, recalculates and record
   // Reload restores the standalone recipe URL directly with the saved values.
   await page.reload();
   await expect(page.locator("section.recipe-detail")).toContainText("¥15");
-  await page.getByRole("button", {name: "← レシピ一覧"}).click();
+  await page.getByRole("button", {name: "← ホーム"}).click();
   await page.getByRole("button", {name: /の詳細を開く/}).first().click();
   await expect(page.locator("section.recipe-detail")).toContainText("¥15");
 });
