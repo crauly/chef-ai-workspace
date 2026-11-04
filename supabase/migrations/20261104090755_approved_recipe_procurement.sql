@@ -223,7 +223,7 @@ create function public.create_owned_procured_recipe(
 ) returns uuid language plpgsql security definer set search_path='' as $$
 declare r public.recipes%rowtype; st jsonb; m jsonb; plan jsonb; lines jsonb:='[]'; quote jsonb;
 declare supplier uuid; obs uuid; offer uuid; n integer; supplier_name text;
-declare seen jsonb:='{}'; key text;
+declare seen jsonb:='{}'; key text; line_index integer;
 begin
  if p_owner_id is null or p_payload_hash is null or p_payload_hash !~ '^[0-9a-f]{64}$'
   or jsonb_typeof(p_procurement) is distinct from 'array' then raise exception 'Invalid procurement'; end if;
@@ -239,7 +239,16 @@ begin
  perform public.ensure_market_reference_supplier(p_owner_id);
  select state into st from public.recipes where id=p_recipe_id and owner_id=p_owner_id;
  if jsonb_array_length(p_procurement)<>jsonb_array_length(st->'materials') then raise exception 'Procurement coverage mismatch'; end if;
- for m in select value from jsonb_array_elements(st->'materials') loop
+ -- Adopt all submitted quotes before consulting shared-price fallbacks.
+ -- Keep the original indices so procurement order never changes recipe order.
+ lines:=st->'materials';
+ for m,line_index in
+  select original.value,(original.ordinality-1)::integer
+  from jsonb_array_elements(st->'materials') with ordinality original
+  order by exists(select 1 from jsonb_array_elements(p_procurement) submitted
+    where submitted->>'material_id'=original.value->>'id'
+      and jsonb_typeof(submitted->'quote')='object') desc,original.ordinality
+ loop
   select count(*) into n from jsonb_array_elements(p_procurement) e where e->>'material_id'=m->>'id';
   if n<>1 then raise exception 'Procurement identity mismatch'; end if;
   select value into plan from jsonb_array_elements(p_procurement) where value->>'material_id'=m->>'id';
@@ -284,7 +293,7 @@ begin
    end if;
   end if;
   m:=m||jsonb_build_object('supplier_id',supplier,'offer_id',offer);
-  lines:=lines||jsonb_build_array(m);
+  lines:=jsonb_set(lines,array[line_index::text],m);
  end loop;
  st:=jsonb_set(st,'{materials}',lines);
  update public.recipes set state=st,creation_payload_hash=p_payload_hash where id=p_recipe_id and owner_id=p_owner_id;

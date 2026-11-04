@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import unittest
+from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
 from fastapi.testclient import TestClient
@@ -119,6 +120,33 @@ class ProcurementPostgresTests(unittest.TestCase):
         self.assertEqual(str(calculate_cost(legacy,{ingredient.id:ingredient}).total_cost_jpy),'70')
         self.client.get('/demo/suppliers',headers=self.headers); self.client.get('/demo/suppliers',headers=self.headers)
         self.assertEqual(self.count('suppliers'),1)
+
+    def test_explicit_market_update_precedes_inherited_price_in_either_order(self):
+        for priced_first in (False, True):
+            with self.subTest(priced_first=priced_first):
+                self.save(self.body(None))  # Previously approved market price: 350/500g.
+                body=self.body(None,None)
+                inherited=body['materials'][0]
+                explicit={**inherited,'supplier':'相場参考価格','quantity':'50',
+                          'price_jpy':'400','price_quantity':'500','price_unit':'g'}
+                body['materials']=[explicit,inherited] if priced_first else [inherited,explicit]
+                saved=self.save(body)
+                lines=saved['materials']
+                self.assertEqual([line['quantity']['value'] for line in lines],
+                                 ['50','100'] if priced_first else ['100','50'])
+                self.assertEqual(len({line['offer_id'] for line in lines}),1)
+                self.assertTrue(lines[0]['offer_id'])
+                self.assertEqual([line['effective_price']['amount_jpy']['value'] for line in lines],['400','400'])
+                current=self.client.get('/demo/recipes/'+saved['id']+'/cost',headers=self.headers).json()
+                snapshot=sql(f"select cost_snapshot from public.recipe_versions where recipe_id={literal(saved['id'])};")
+                for cost in (current,snapshot):
+                    self.assertFalse(cost['partial'])
+                    self.assertEqual(cost['total_cost_jpy'],'120')
+                    self.assertEqual({key:Decimal(value) for key,value in cost['line_costs'].items()},
+                                     {line['id']:40 if line['quantity']['value']=='50' else 80 for line in lines})
+                observations=self.count('price_observations')
+                self.save(body)
+                self.assertEqual(self.count('price_observations'),observations)
 
     def test_multiple_terms_remain_partial_without_exact_offer(self):
         self.save(self.body())
