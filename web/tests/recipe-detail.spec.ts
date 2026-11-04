@@ -1,5 +1,15 @@
 import {test, expect, type Page} from "@playwright/test";
 
+async function microphone(page: Page) {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {value: async () => {
+      const context = new AudioContext(), source = context.createOscillator(), gain = context.createGain(), output = context.createMediaStreamDestination();
+      gain.gain.value = .1; source.connect(gain); gain.connect(output); source.start(); await context.resume();
+      return output.stream;
+    }});
+  });
+}
+
 test.beforeEach(async ({request}) => {await request.post("http://127.0.0.1:8100/test/reset");});
 
 async function openDetail(page: Page) {
@@ -118,7 +128,10 @@ test("long press on recipe list opens edit/delete without navigating",async({pag
  await expect(page).toHaveURL(/\/recipes\/[^/]+$/);
 });
 
-test("ongoing recording stays stoppable after opening a recipe on desktop",async({page})=>{
+// Real routes unmount the voice capture, so opening a recipe mid-recording
+// must refuse with a notice instead of silently discarding in-flight audio.
+// The recording stays stoppable on the current page; opening works after stop.
+test("opening a recipe mid-recording refuses safely and stays stoppable",async({page})=>{
  await page.setViewportSize({width:1280,height:800});
  await page.addInitScript(()=>{
   Object.defineProperty(navigator.mediaDevices,"getUserMedia",{value:async()=>{
@@ -132,11 +145,11 @@ test("ongoing recording stays stoppable after opening a recipe on desktop",async
  await page.getByRole("button",{name:/音声操作を開始/}).click();
  await expect(page.getByRole("button",{name:"■ マイクを停止"})).toBeVisible();
  await page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"}).click();
- await expect(page.locator("#voice-controls")).toBeHidden();
- const recording=page.locator(".recipe-voice-capture-status");
- await expect(recording).toBeVisible();
- await recording.getByRole("button",{name:"マイクを停止"}).click();
- await expect(recording).toBeHidden();
+ await expect(page).toHaveURL("http://localhost:3100/");
+ await expect(page.getByText("録音・音声処理中はレシピを開けません。")).toBeVisible();
+ await page.getByRole("button",{name:"■ マイクを停止"}).first().click();
+ await page.getByRole("button",{name:"片栗粉のレシピの詳細を開く"}).click();
+ await expect(page).toHaveURL(/\/recipes\/[^/]+$/);
 });
 
 test("clearing a supplier applies before the market price edit", async ({page}) => {
@@ -195,4 +208,63 @@ test("independent detail route keeps selected recipe bound to voice edit", async
  await page.reload();
  await expect(page.locator(".recipe-library-section")).toHaveCount(0);
  await expect(page.getByRole("heading", {name: "片栗粉のレシピ"})).toBeVisible();
+});
+
+test("detail voice edit by another recipe name navigates on single match", async ({page}) => {
+  await page.setViewportSize({width: 390, height: 844});
+  await microphone(page);
+  await page.route("**/api/voice/transcribe", route => route.fulfill({json: {transcript: "ミートソースパスタを編集して"}}));
+  const detail = await openDetail(page);
+  await expect(detail.getByRole("heading", {name: "片栗粉のレシピ"})).toBeVisible();
+  await page.getByRole("button", {name: "下部の音声操作"}).click();
+  await expect(page.getByRole("button", {name: /マイクを停止/}).first()).toBeVisible();
+  // The mocked mic streams silence until the audio worklet delivers voiced
+  // frames; stopping instantly would correctly drop an empty capture with no
+  // transcription. Settle briefly so the stop carries actual audio.
+  await page.waitForTimeout(2500);
+  await page.getByRole("button", {name: /マイクを停止/}).first().click();
+  await expect(page.getByRole("heading", {name: "ミートソースパスタ"})).toBeVisible();
+  await expect(page).toHaveURL(/\/recipes\/[^/]+$/);
+});
+
+test("detail voice edit with no match keeps the current recipe", async ({page}) => {
+  await page.setViewportSize({width: 390, height: 844});
+  await microphone(page);
+  await page.route("**/api/voice/transcribe", route => route.fulfill({json: {transcript: "存在しない料理を編集して"}}));
+  const detail = await openDetail(page);
+  const url = page.url();
+  await expect(detail.getByRole("heading", {name: "片栗粉のレシピ"})).toBeVisible();
+  await page.getByRole("button", {name: "下部の音声操作"}).click();
+  await expect(page.getByRole("button", {name: /マイクを停止/}).first()).toBeVisible();
+  // The mocked mic streams silence until the audio worklet delivers voiced
+  // frames; stopping instantly would correctly drop an empty capture with no
+  // transcription. Settle briefly so the stop carries actual audio.
+  await page.waitForTimeout(2500);
+  await page.getByRole("button", {name: /マイクを停止/}).first().click();
+  await expect(page.getByText("編集対象を一つに絞れませんでした。検索結果から選んでください。")).toBeVisible();
+  await expect(page.locator("#voice-controls")).toBeHidden();
+  await expect(page).toHaveURL(url);
+  await expect(detail.getByRole("heading", {name: "片栗粉のレシピ"})).toBeVisible();
+});
+
+test("detail voice edit with multiple matches keeps the current recipe", async ({page}) => {
+  // "ス" matches both ミートソースパスタ and きのこのクリームスープ, sharing the
+  // same length!==1 branch as the no-match case: feedback, no navigation, waiter released.
+  await page.setViewportSize({width: 390, height: 844});
+  await microphone(page);
+  await page.route("**/api/voice/transcribe", route => route.fulfill({json: {transcript: "スを編集して"}}));
+  const detail = await openDetail(page);
+  const url = page.url();
+  await expect(detail.getByRole("heading", {name: "片栗粉のレシピ"})).toBeVisible();
+  await page.getByRole("button", {name: "下部の音声操作"}).click();
+  await expect(page.getByRole("button", {name: /マイクを停止/}).first()).toBeVisible();
+  // The mocked mic streams silence until the audio worklet delivers voiced
+  // frames; stopping instantly would correctly drop an empty capture with no
+  // transcription. Settle briefly so the stop carries actual audio.
+  await page.waitForTimeout(2500);
+  await page.getByRole("button", {name: /マイクを停止/}).first().click();
+  await expect(page.getByText("編集対象を一つに絞れませんでした。検索結果から選んでください。")).toBeVisible();
+  await expect(page.locator("#voice-controls")).toBeHidden();
+  await expect(page).toHaveURL(url);
+  await expect(detail.getByRole("heading", {name: "片栗粉のレシピ"})).toBeVisible();
 });

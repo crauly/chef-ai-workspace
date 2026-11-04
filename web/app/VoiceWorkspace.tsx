@@ -18,13 +18,14 @@ function MicrophoneGlyph(){return <svg width="36" height="36" viewBox="0 0 24 24
 function ListeningWave({active}:{active:boolean}){return <div className={"listening-wave"+(active?" is-active":"")} aria-hidden="true">{[.32,.65,1,.55,.88,.42,.7,.96,.6,.35,.72,.4].map((v,i)=><span key={i} style={{"--bar-scale":v,"--bar-delay":`${i*65}ms`} as React.CSSProperties}/>)}</div>;}
 
 const voiceMessagesEn:Record<string,string> = {"参照モードです。表示中のレシピの変更内容を話すと編集へ進みます。":"Browse mode. Describe a change to edit the displayed recipe.","保存・変更処理中です。完了後に切り替えてください。":"Saving or editing is in progress. Switch modes after it finishes.","未保存の変更案があります。保存するか、「変更案を破棄」と話してから切り替えてください。":"You have unsaved proposed changes. Save or discard them before switching.","編集対象のレシピを検索しています。":"Searching for the recipe to edit.","編集対象を一つに絞れませんでした。検索結果から選んでください。":"Could not identify a unique recipe. Select one from the search results.","編集するレシピを先に呼び出してください。":"Open a recipe before editing.","登録モードです。保持していた下書きを続けます。":"Create mode. Continuing your saved draft.","登録モードです。料理名・食材・分量・仕入単価をどうぞ。":"Create mode. Tell me the dish, ingredients, quantities and purchase prices.","編集モードです。変更内容を話してください。保存には変更案の確認と明示承認が必要です。":"Edit mode. Describe the changes. Review and explicitly approve proposals before saving.","承認された下書きを保存中です。完了後に続きをお願いします。":"Saving the approved draft. Continue after it finishes.","切り替え前の承認は適用していません。現在のモードを確認して、もう一度お願いします。":"Approval from a previous mode was not applied. Check the current mode and try again.","処理待ちの発話が多すぎます。処理完了後に再度お願いします。":"Too many queued utterances. Try again when processing completes.","切り替え前の承認は適用していません。もう一度お願いします。":"An earlier approval was ignored. Please repeat the request.","保持していた下書きを確認します。":"Reviewing your preserved draft.","変更案を破棄しました。レシピ自体は変更していません。":"Proposed changes discarded. The recipe was not changed.","切り替えずに現在の内容を保持しています。希望する操作をもう一度教えてください。":"Kept the current mode and content. Please clarify your request.","切り替え先を確認できませんでした。登録・参照・編集のどれかを教えてください。":"Could not determine the requested mode. Choose create, browse or edit.","登録モードです。料理の内容を下書きにします。":"Create mode. Starting a recipe draft.","対象のレシピを呼び出してください。候補が複数なら画面で選んでください。":"Open the target recipe. If several match, select one on screen.","参照中です。変更内容を話すと編集へ進みます。保存はしません。":"Browsing. Describe a change to enter edit mode; nothing will be saved yet.","変更せず、参照モードのままです。":"No changes made. Staying in browse mode.","参照モードのままです。変更する場合は、対象と変更内容を教えてください。":"Still in browse mode. Specify the target and desired change to edit.","編集モードです。変更案を作成します。":"Edit mode. Preparing a proposed change.","操作を完了できませんでした。現在の内容を確認して、もう一度お願いします。":"Could not complete the operation. Check the current state and try again."};
-export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreated,reviewBoundary,editRequest,detailOnly=false}:{
+export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreated,reviewBoundary,editRequest,detailOnly=false,captureActiveRef}:{
  locale:Locale;selected:Recipe|null;editor:RefObject<EditorHandle|null>;onBrowse:(target:string)=>Promise<Recipe|null>;
- onCreated:(recipe:Recipe)=>void;reviewBoundary:RefObject<(()=>number)|null>;editRequest:number;detailOnly?:boolean;
+ onCreated:(recipe:Recipe)=>void;reviewBoundary:RefObject<(()=>number)|null>;editRequest:number;detailOnly?:boolean;captureActiveRef?:RefObject<boolean|null>;
 }){
  const [mode,setMode]=useState<VoiceMode>("idle"),[volume,setVolume]=useState(.5),[manual,setManual]=useState("");
  const [message,setMessage]=useState(locale==="ja"?"登録・呼び出し・修正を一つのマイクで続けられます。":"Create, browse and edit with one microphone."),[heard,setHeard]=useState("");
  const [routing,setRouting]=useState(false);
+ const [feedbackError,setFeedbackError]=useState(false);
  const [supplierMemo,setSupplierMemo]=useState("");
  const [settingsOpen,setSettingsOpen]=useState(false);
  // The initial guidance is state, so changing locale must update it explicitly.
@@ -51,6 +52,10 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
  const realtimeActive=resolveTransport(realtimeConfigured,realtimeFailed)==="realtime";
  const micRecording=realtimeActive?realtime.recording:voice.recording;
  const micBusy=!realtimeActive&&voice.busy;
+ // A real route change unmounts the capture, so the controller must not
+ // navigate away while audio is being recorded or processed. The ref lets
+ // tap-driven navigation refuse safely instead of silently killing speech.
+ useEffect(()=>{if(captureActiveRef)captureActiveRef.current=micRecording||micBusy||routing;},[captureActiveRef,micRecording,micBusy,routing]);
  const micError=realtimeActive?realtime.error:voice.error;
  const micNotice=realtimeActive?realtime.notice:voice.notice;
  useEffect(()=>{
@@ -100,7 +105,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
   });
  },[editRequest]);
  const labels={idle:"待機",create:"登録",browse:"参照",edit:"編集"};
- function feedback(text:string,error=false){setMessage(locale==="ja"?text:(voiceMessagesEn[text]??text));if(error&&volume>0)playVoiceCue("error",volume);}
+ function feedback(text:string,error=false){setFeedbackError(error);setMessage(locale==="ja"?text:(voiceMessagesEn[text]??text));if(error&&volume>0)playVoiceCue("error",volume);}
  function transition(next:VoiceMode,traceId=""){
   if(currentMode.current===next)return;
   if(next==="create")setSupplierMemo("");
@@ -116,8 +121,14 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    logVoiceEvent("mode.transition.rejected","unsaved edit proposal",traceId);feedback("未保存の変更案があります。保存するか、「変更案を破棄」と話してから切り替えてください。",true);return;
   }
   if(nav.mode==="edit"&&nav.target&&selectedRef.current?.title.value!==nav.target){
-   transition("browse");feedback("編集対象のレシピを検索しています。");selectedRef.current=await onBrowse(nav.target);
-   if(!selectedRef.current){feedback("編集対象を一つに絞れませんでした。検索結果から選んでください。",true);return;}
+   const previousRecipe=selectedRef.current;
+   transition("browse");feedback("編集対象のレシピを検索しています。");
+   const match=await onBrowse(nav.target);
+   if(!match){
+    selectedRef.current=previousRecipe;
+    feedback("編集対象を一つに絞れませんでした。検索結果から選んでください。",true);return;
+   }
+   selectedRef.current=match;
   }
   if(nav.mode==="edit"&&!selectedRef.current){feedback("編集するレシピを先に呼び出してください。",true);return;}
   transition(nav.mode,traceId);
@@ -233,8 +244,15 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
   }}catch{feedback("操作を完了できませんでした。現在の内容を確認して、もう一度お願いします。",true);}
   finally{running.current=false;if(alive.current)setRouting(false);}
  }
+ const detachedFeedback=detailOnly&&Boolean(selected)&&mode!=="edit"&&feedbackError;
  return <>
-  {selected&&(micRecording||micBusy)&&mode!=="edit"&&<div className="recipe-voice-capture-status" role="status">
+  {/* Detail hides browse controls; failed lookup feedback must remain visible
+      without switching the user into editing a different, unresolved target. */}
+  {detachedFeedback&&<p role="alert">{message}</p>}
+  {/* No role=status here: the floating voice-status-list below is the single
+   announcer for the same recording/processing state. This block keeps only
+   the stop control to avoid double announcements. */}
+  {selected&&(micRecording||micBusy)&&mode!=="edit"&&<div className="recipe-voice-capture-status">
     <span>{micRecording?(locale==="ja"?"音声録音中":"Microphone recording"):(locale==="ja"?"音声処理中":"Processing audio")}</span>
     {micRecording&&<button type="button" onClick={toggleMic}>{locale==="ja"?"マイクを停止":"Stop microphone"}</button>}
    </div>}
@@ -248,7 +266,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,onCreate
    {micNotice&&<p role="status">{micNotice}</p>}
    {realtimeActive&&realtime.partial&&<p role="status">{locale==="ja"?"認識中：":"Recognizing: "}{realtime.partial}</p>}
    {supplierMemo&&<p className="muted">{supplierMemo}</p>}
-   <p aria-live="polite">{micRecording?(locale==="ja"?"聞き取り中… ":"Listening… "):""}{micBusy?(locale==="ja"?"音声を文字にしています… ":"Transcribing… "):""}{routing?(locale==="ja"?"操作を処理中… ":"Processing… "):""}{message}</p>
+   {!detachedFeedback&&<p aria-live="polite">{micRecording?(locale==="ja"?"聞き取り中… ":"Listening… "):""}{micBusy?(locale==="ja"?"音声を文字にしています… ":"Transcribing… "):""}{routing?(locale==="ja"?"操作を処理中… ":"Processing… "):""}{message}</p>}
    {micError&&<p role="alert">{micError}</p>}
    <form onSubmit={event=>{event.preventDefault();receive(manual,{reviewEpoch:boundary.current,source:"manual"});setManual("");}}>
     <input aria-label={locale==="ja"?"音声認識できない場合の入力":"Manual input when voice recognition is unavailable"} value={manual} onChange={event=>setManual(event.target.value)} placeholder={locale==="ja"?"音声認識できないときの補助入力":"Type when voice recognition is unavailable"}/>

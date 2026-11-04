@@ -30,6 +30,20 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
  const [query,setQuery]=useState(""),[searchInput,setSearchInput]=useState("");
  const listRequest=useRef(0);
  const voiceTarget=useRef<string|null>(null);
+ const captureActive=useRef<boolean|null>(null);
+ // Real routes unmount the voice capture: opening another recipe mid-speech
+ // would silently discard in-flight audio, so refuse with a notice and keep
+ // the recording stoppable on this page.
+ function guardCaptureActive(){
+  if(!captureActive.current)return false;
+  setError(locale==="ja"?"録音・音声処理中はレシピを開けません。マイクを停止してから開いてください。":"Stop recording before opening a recipe.");
+  return true;
+ }
+ // Detail pages never load the recipe list, so a voice search started there
+ // must still resolve: pendingVoiceSearch lets the reload effect run once for
+ // it, and searchFallback restores the displayed recipe when no single match
+ // is found instead of leaving the detail blank with a hung waiter.
+ const searchFallback=useRef<Recipe|null>(null),pendingVoiceSearch=useRef(false);
  const editor=useRef<EditorHandle|null>(null),reviewBoundary=useRef<(()=>number)|null>(null);
  const browseWaiter=useRef<((recipe:Recipe|null)=>void)|null>(null);
  useEffect(()=>{if(selected&&browseWaiter.current){browseWaiter.current(selected);browseWaiter.current=null;}},[selected]);
@@ -136,23 +150,30 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
          const recipe=await request<Recipe>(`/api/recipes/${result.items[0].id}`);
          if(current===listRequest.current){showDetail(recipe);}
        }
-       if(fromVoice&&result.items.length!==1){browseWaiter.current?.(null);browseWaiter.current=null;}
+       if(fromVoice&&result.items.length!==1){browseWaiter.current?.(null);browseWaiter.current=null;if(pageKind==="detail")setSelected(searchFallback.current);}
      }
-   }catch(e){if(current===listRequest.current){setError(String(e));browseWaiter.current?.(null);browseWaiter.current=null;}}
+   }catch(e){if(current===listRequest.current){setError(String(e));const voiceFailed=voiceTarget.current===query;if(voiceFailed){voiceTarget.current=null;if(pageKind==="detail")setSelected(searchFallback.current);}browseWaiter.current?.(null);browseWaiter.current=null;}}
    finally{if(current===listRequest.current){setWaking(false);setLoadingList(false);}}
  },[page,query]);
- useEffect(()=>{if(pageKind==="home")void reload();return()=>{listRequest.current++;};},[reload,pageKind]);
+ useEffect(()=>{const voiceOnly=pendingVoiceSearch.current;pendingVoiceSearch.current=false;if(pageKind==="home"||voiceOnly)void reload();return()=>{listRequest.current++;};},[reload,pageKind]);
  function search(name:string,fromVoice=false){
    if(!fromVoice){browseWaiter.current?.(null);browseWaiter.current=null;}
+   if(fromVoice)searchFallback.current=selected;
+   pendingVoiceSearch.current=fromVoice;
    voiceTarget.current=fromVoice?name.trim():null;
-   listRequest.current++;setItems([]);setSelected(null);setPage(1);setLoadingList(true);
+   listRequest.current++;setPage(1);setLoadingList(true);
+   // Detail pages resolve a voice search in the background: blanking the
+   // displayed recipe here would unmount VoiceWorkspace mid-flow, so the
+   // no-match/match continuation (feedback + waiter release) never reaches
+   // the user. The list is home-only; detail keeps showing its recipe.
+   if(pageKind==="home"){setItems([]);setSelected(null);}
    setSearchInput(name.trim());setQuery(name.trim());
    if(page===1&&query===name.trim())void reload();
  }
- async function create(e:React.FormEvent){e.preventDefault();if(!draft.trim())return;setBusy(true);
+ async function create(e:React.FormEvent){e.preventDefault();if(!draft.trim()||guardCaptureActive())return;setBusy(true);
  try{const recipe=await request<Recipe>("/api/recipes",{method:"POST",body:JSON.stringify({title:draft.trim()})});setDraft("");if(page===1){await reload();}else{setPage(1);}showDetail(recipe);}
  catch(e){setError(String(e));}finally{setBusy(false);}}
- async function open(id:string){if(busy)return;setBusy(true);try{const recipe=await request<Recipe>(`/api/recipes/${id}`);showDetail(recipe);setError("");}catch(e){setError(String(e));}finally{setBusy(false);}}
+ async function open(id:string){if(busy||guardCaptureActive())return;setBusy(true);try{const recipe=await request<Recipe>(`/api/recipes/${id}`);showDetail(recipe);setError("");}catch(e){setError(String(e));}finally{setBusy(false);}}
  async function change(e:React.FormEvent){e.preventDefault();if(!selected||!rename.trim())return;setBusy(true);
  try{const result=await request<{recipe:Recipe}>(`/api/recipes/${selected.id}/confirm`,{method:"POST",body:JSON.stringify({base_revision:selected.revision,request_id:crypto.randomUUID(),operations:[{op:"set_title",value:rename.trim()}],save_version:true})});setSelected(result.recipe);await reload();}
  catch(e){setError(String(e));}finally{setBusy(false);}}
@@ -237,7 +258,7 @@ export default function RecipeController({pageKind}:{pageKind:"home"|"detail"}){
   return new Promise(resolve=>{browseWaiter.current=resolve;search(target,true);});
  }
  return <main id="top" className={pageKind==="detail"?"recipe-detail-page":""}><div><header className="chef-header"><div className="toolbar"><p className="tag">CHEF AI WORKSPACE</p><PriceBell locale={locale}/><label className="language-picker"><span>Language</span><select aria-label="Display language" value={locale} onChange={e=>switchLocale(e.target.value as Locale)}><option value="ja">Japanese</option><option value="en-US">English</option></select></label></div><div className="chef-brand"><img src="/chef-ai-mark.svg" alt="" width="58" height="58"/><h1>Chef AI</h1></div>{pageKind==="home"&&<p className="muted">{t("intro")}</p>}</header>
- </div>{(pageKind==="home"||selected)&&<div><VoiceWorkspace detailOnly={pageKind==="detail"} locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} editRequest={voiceEditRequest} onCreated={recipe=>{showDetail(recipe);setError("");void reload();}}/></div>}
+ </div>{(pageKind==="home"||selected)&&<div><VoiceWorkspace captureActiveRef={captureActive} detailOnly={pageKind==="detail"} locale={locale} selected={selected} editor={editor} reviewBoundary={reviewBoundary} onBrowse={browseByVoice} editRequest={voiceEditRequest} onCreated={recipe=>{showDetail(recipe);setError("");void reload();}}/></div>}
  {pageKind==="home"&&<div>
  <section className="workspace-section recipe-library-section" aria-labelledby="recipe-library-heading">
  <div className="workspace-section-head"><div><h2 id="recipe-library-heading">{locale==="ja"?"レシピ一覧":"Recipes"}</h2><p>{locale==="ja"?"保存したレシピを検索・閲覧":"Search and browse saved recipes"}</p></div></div>
