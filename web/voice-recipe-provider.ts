@@ -1,6 +1,40 @@
+import {MUSE_TOOLS,MUSE_TOOL_INSTRUCTIONS,ownedMuseTools} from './muse-tools';
 import {parseRecipeDraft,draftNumber,type DraftIssue} from './recipe-draft-parse';
 export class VoiceRecipeFailure extends Error {
  constructor(public code:'cancelled'|'timeout'|'provider_unavailable'|'invalid_response',public issues:DraftIssue[]=[]){super(code);}
+}
+// Shared Chat Completions tool loop for registration and navigation. All
+// calls share the caller's wall-clock budget; no transport retries or writes.
+export async function museConversation(key:string,messages:Record<string,unknown>[],format:unknown,signal:AbortSignal,maxTokens=8192,session={execute:ownedMuseTools(),rounds:0}){
+ const seen=new Set<string>();
+ for(;;){
+  signal.throwIfAborted();
+  const response=await fetch('https://api.meta.ai/v1/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:'muse-spark-1.3',reasoning_effort:'low',max_completion_tokens:maxTokens,response_format:format,tools:MUSE_TOOLS,tool_choice:'auto',messages:messages.map((m,i)=>i===0?{...m,content:String(m.content)+'\n'+MUSE_TOOL_INSTRUCTIONS}:m)}),cache:'no-store',redirect:'error',signal});
+  if(!response.ok){console.error(`muse upstream_status=${response.status}`);throw new VoiceRecipeFailure('provider_unavailable');}
+  const raw=await response.text();if(raw.length>65536)throw new VoiceRecipeFailure('invalid_response');
+  const data=JSON.parse(raw),choice=data?.choices?.length===1?data.choices[0]:null,message=choice?.message;
+  if(!message||message.refusal||message.role&&message.role!=='assistant')throw new VoiceRecipeFailure('invalid_response');
+  const calls=message.tool_calls;
+  if(calls!==undefined&&(!Array.isArray(calls)||calls.length>4))throw new VoiceRecipeFailure('invalid_response');
+  if(calls?.length){
+   if(choice.finish_reason!=='tool_calls'||session.rounds>=2)throw new VoiceRecipeFailure('provider_unavailable');
+   for(const call of calls){
+    if(call?.type!=='function'||typeof call.id!=='string'||!call.id||seen.has(call.id)||typeof call.function?.name!=='string'||typeof call.function?.arguments!=='string'||call.function.arguments.length>4096||!MUSE_TOOLS.some(t=>t.function.name===call.function.name))throw new VoiceRecipeFailure('provider_unavailable');
+    seen.add(call.id);
+   }
+   session.rounds++;
+   messages.push({role:'assistant',content:message.content??null,tool_calls:calls});
+   for(const call of calls){
+    let result:unknown;
+    try{result=await session.execute(call.function.name,JSON.parse(call.function.arguments),signal);}
+    catch(error){if(error instanceof SyntaxError)result={error:'invalid_arguments'};else throw error;}
+    messages.push({role:'tool',tool_call_id:call.id,content:JSON.stringify(result)});
+   }
+   continue;
+  }
+  if(choice.finish_reason&&choice.finish_reason!=='stop'||typeof message.content!=='string')throw new VoiceRecipeFailure('invalid_response');
+  return message.content as string;
+ }
 }
 // Only lossless representation changes. Unknown facts stay blank; no inferred prices/units.
 export function normalizedDraft(raw:unknown,issues:DraftIssue[]=[]){
@@ -22,17 +56,13 @@ export async function voiceRecipeModel(key:string,system:string,input:unknown,si
  let failure:VoiceRecipeFailure=new VoiceRecipeFailure('invalid_response');
  // One wall-clock budget, including a quick schema repair. Never retry slow transport failures.
  const timeout=AbortSignal.timeout(20000);
+ const session={execute:ownedMuseTools(),rounds:0};
  for(let attempt=0;attempt<2;attempt++){
   if(signal.aborted)throw new VoiceRecipeFailure('cancelled');
 
   try{
-   const response=await fetch('https://api.meta.ai/v1/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:'muse-spark-1.3',reasoning_effort:'low',max_completion_tokens:8192,response_format:format,messages:[{role:'developer',content:system+(attempt?'\nRepair only the reported invalid fields of repair. Preserve every other known fact and material order. Unknown optional facts remain empty. Return the complete schema object.':'')},{role:'user',content:JSON.stringify(attempt?{input,repair,issues:failure.issues}:input)}]}),cache:'no-store',redirect:'error',signal:AbortSignal.any([signal,timeout])});
-   if(!response.ok)throw new VoiceRecipeFailure('provider_unavailable');
-   const raw=await response.text();if(raw.length>65536)throw new VoiceRecipeFailure('invalid_response');
-   const data=JSON.parse(raw),choice=data?.choices?.length===1?data.choices[0]:null;
-   if(choice?.finish_reason&&choice.finish_reason!=='stop')throw new VoiceRecipeFailure('invalid_response');
-   if(typeof choice?.message?.content!=='string')throw new VoiceRecipeFailure('invalid_response');
-   const rawDraft=JSON.parse(choice.message.content);
+   const content=await museConversation(key,[{role:'developer',content:system+(attempt?'\nRepair only the reported invalid fields of repair. Preserve every other known fact and material order. Unknown optional facts remain empty. Return the complete schema object.':'')},{role:'user',content:JSON.stringify(attempt?{input,repair,issues:failure.issues}:input)}],format,AbortSignal.any([signal,timeout]),8192,session);
+   const rawDraft=JSON.parse(content);
    const changes=rawDraft?.material_changes??[];
    if(!Array.isArray(changes)||changes.length>40||changes.some(c=>!c||Object.keys(c).sort().join('|')!=='action|previous_name|replacement_name'||
       typeof c.previous_name!=='string'||!c.previous_name.trim()||c.previous_name.length>200||!['remove','rename'].includes(c.action)||typeof c.replacement_name!=='string'||c.replacement_name.length>200))throw new VoiceRecipeFailure('invalid_response');

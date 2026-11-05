@@ -49,6 +49,16 @@ SEARCH_OWNED_INGREDIENTS_TOOL = {
 }
 
 LEDGER_TOOLS = [SEARCH_OWNED_INGREDIENTS_TOOL]
+WORKSPACE_TOOLS = LEDGER_TOOLS + [
+    {"type": "function", "name": name, "description": description,
+     "parameters": {"type": "object", "properties": {key: {"type": "string"}},
+                    "required": [key], "additionalProperties": False}}
+    for name, key, description in [
+        ("search_recipes", "query", "Search the chef's saved recipes; read only."),
+        ("get_recipe", "recipe_id", "Read an owned recipe found by search_recipes; use as reference, never change it."),
+        ("get_price_reference", "query", "Read owned ledger price evidence. A reference is not an adopted price; only propose prices explicitly requested by the chef for review."),
+    ]
+]
 
 
 class ToolLedgerError(Exception):
@@ -112,9 +122,14 @@ def execute_search_owned_ingredients(args: Any, search: Callable[[str, int], Any
     return {"ingredients": items}
 
 
-def execute_tool(name: Any, args: Any, search: Callable[[str, int], Any]) -> dict:
+def execute_tool(name: Any, args: Any, search: Callable[[str, int], Any], read: Callable | None = None) -> dict:
     """Dispatch one validated tool call. Unknown tool names raise: answering
     them would let the model steer execution outside the owned ledger."""
+    if read is not None and name in {"search_recipes", "get_recipe", "get_price_reference"}:
+        key = "recipe_id" if name == "get_recipe" else "query"
+        if not isinstance(args, dict) or set(args) != {key} or _valid_query(args.get(key)) is None:
+            return {"error": "invalid_arguments"}
+        return read(name, args[key])
     if name != TOOL_NAME:
         raise ToolLedgerError(f"Unknown tool: {name!r}")
     return execute_search_owned_ingredients(args, search)

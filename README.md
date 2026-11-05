@@ -93,11 +93,13 @@ Cost calculation and data validation remain deterministic application responsibi
 - **Search Grounding — Responses `web_search`.** Price research is ledger-first;
   grounding failures keep the ledger entry and stay labeled, never invented
   (`web/price-web-search.ts`, `chef_ai_workspace/price_web_search.py`).
-- **Tool Calling — one read-only tool (Block 1, opt-in).**
-  `POST /demo/recipes/{id}/propose?tools=ledger` lets the model call
-  `search_owned_ingredients` (owner-scoped); the app validates arguments and
-  returned IDs fail-closed, and the result still needs explicit approval.
-  The default path is unchanged ([ADR-012](docs/ADR_012_TOOL_CALLING_BLOCK1.md)).
+- **Tool Calling — normal voice registration, search, reference and editing.**
+  Muse can choose `search_recipes`, `get_recipe`, `search_owned_ingredients`,
+  and `get_price_reference`. Existing owner-scoped read APIs execute them;
+  results return to Muse before the final structured draft/navigation/proposal.
+  The edit proxy selects the existing `propose_with_tools` path automatically.
+  Tools never save or adopt prices; existing explicit approval and persistence
+  APIs remain authoritative ([ADR-012](docs/ADR_012_TOOL_CALLING_BLOCK1.md)).
 - **Image Understanding — photo plus memo to draft (Block 2).**
   `POST /api/image-recipe` (image-capable `muse-spark-1.3`); quantities, prices
   and selling price read from the photo alone are reset server-side and only

@@ -358,7 +358,7 @@ class ToolEndpointWiringTests(unittest.TestCase):
 
         class Provider:
             identity = {"name": "meta_responses", "model": "muse-spark-1.3"}
-            def propose_with_tools(self, instruction, context, search):
+            def propose_with_tools(self, instruction, context, search, **kwargs):
                 return search("トマト", 8) and []
 
         repo = Repo()
@@ -392,7 +392,7 @@ class ToolEndpointWiringTests(unittest.TestCase):
 
         class Provider:
             identity = {"name": "meta_responses", "model": "muse-spark-1.3"}
-            def propose_with_tools(self, instruction, context, search):
+            def propose_with_tools(self, instruction, context, search, **kwargs):
                 found = search("トマト", 8)
                 return [{"op": "link_ingredient", "material_id": "mat-1",
                          "ingredient_id": found[0]["id"], "price_mode": "inherit"}]
@@ -424,7 +424,7 @@ class ToolEndpointWiringTests(unittest.TestCase):
 
         class Provider:
             identity = {"name": "meta_responses", "model": "muse-spark-1.3"}
-            def propose_with_tools(self, instruction, context, search):
+            def propose_with_tools(self, instruction, context, search, **kwargs):
                 seen["result"] = search("トマト", 8)
                 return []
 
@@ -440,3 +440,47 @@ class ToolEndpointWiringTests(unittest.TestCase):
             client.close()
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(seen["result"], [{"id": "ing-t", "name": "トマト"}])
+
+    def test_normal_edit_tool_endpoint_reuses_owned_recipe_and_price_handlers(self):
+        seen = []
+        class Repo:
+            def load_owned_recipe(self, owner, recipe_id):
+                seen.append(("recipe", owner))
+                return self.recipe
+            def list_owned_recipes(self, owner, **kwargs):
+                seen.append(("search", owner))
+                return [{"id": self.recipe.id, "title": "Soup"}]
+            def search_owned_ingredients(self, owner, query, limit=20):
+                seen.append(("ingredient", owner))
+                return []
+            def list_ingredient_offers(self, owner, ingredient_id):
+                return []
+            def list_latest_observations_for_offers(self, owner, offer_ids):
+                return {}
+        repo = Repo()
+        rid = str(uuid4())
+        repo.recipe = self._recipe(rid)
+        client, owner = self._client(repo, MetaResponsesProvider("fixture"))
+        first = _call_turn(name="search_recipes", arguments='{"query":"Soup"}')
+        second = _call_turn(call_id="read", name="get_recipe", arguments=json.dumps({"recipe_id": rid}))
+        second["output"].append({"type": "function_call", "call_id": "price", "name": "get_price_reference", "arguments": '{"query":"トマト"}'})
+        operations = [{"op": "set_material_quantity", "material_id": "mat-1", "value": "15", "unit": "g"}]
+        responses = iter([first, second, _msg(json.dumps({"operations": operations}))])
+        payloads = []
+        def transport(request, timeout):
+            payload = json.loads(request.data)
+            payloads.append(payload)
+            return io.BytesIO(json.dumps(next(responses)).encode())
+        try:
+            with patch("urllib.request.OpenerDirector.open", side_effect=transport):
+                response = client.post(f"/demo/recipes/{rid}/propose?tools=ledger", json={"instruction": "Soupを参照して使用量を15gに変更"}, headers={"X-Demo-Access": "secret-w"})
+        finally:
+            client.close()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["requires_confirmation"])
+        self.assertEqual(response.json()["operations"], operations)
+        self.assertTrue(all(found_owner == owner for _, found_owner in seen))
+        outputs = {item["call_id"]: json.loads(item["output"]) for item in payloads[-1]["input"] if item["type"] == "function_call_output"}
+        self.assertEqual(outputs["read"]["materials"][0]["quantity"]["value"], "200")
+        self.assertEqual(outputs["price"]["adoption"], "unapproved")
+        self.assertEqual(repo.recipe.materials[0].quantity.value, "200")

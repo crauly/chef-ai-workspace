@@ -236,7 +236,9 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
     feedback("変更案を破棄しました。レシピ自体は変更していません。");continue;
    }
    let nav=voiceNavigation(input.text);
-   // Only navigation paraphrases need an intent call. Material dictation and
+   const explicitLookup=nav?.target&&(nav.mode==="browse"||nav.mode==="edit");
+   // Navigation paraphrases and explicit recipe targets use tool-enabled intent.
+   // Material dictation and
    // approval controls stay on their existing paths without another model hop.
    if(!nav&&!isPriceResearchRequest(input.text)&&commandForMode(input.text)==="data"&&!explicitEditRequest(input.text)&&/(?:モード|レシピ|メニュー|参照|呼び出|検索|見たい|開い|探したい)/.test(input.text)){
     if(/しない|しません|ではなく|じゃなく|やめ/.test(input.text)){feedback("切り替えずに現在の内容を保持しています。希望する操作をもう一度教えてください。",true);continue;}
@@ -246,6 +248,11 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
     }
     logVoiceEvent("intent.fallback",`${currentMode.current}->${result.intent}`,input.meta.traceId??"");
     nav={mode:result.intent as Navigation["mode"],target:result.target};
+   }
+   if(explicitLookup){
+    const result=await checkIntent(input.text,currentMode.current);
+    if(!["browse","edit"].includes(result.intent)||!result.target){feedback("対象のレシピを呼び出してください。候補が複数なら画面で選んでください。",true);continue;}
+    nav={mode:result.intent as "browse"|"edit",target:result.target};
    }
    if(nav){await navigate(nav,input.text,input.meta.traceId??"");continue;}
    if(currentMode.current==="idle"){
