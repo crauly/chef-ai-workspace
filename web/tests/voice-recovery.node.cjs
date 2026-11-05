@@ -28,3 +28,10 @@ test('timeouts are bounded and distinct from user cancellation during a request'
  try{await assert.rejects(voiceRecipeModel('k','s',{},new AbortController().signal,{}),e=>e.code==='timeout');assert.equal(calls,1);calls=0;const c=new AbortController();setTimeout(()=>c.abort(),0);await assert.rejects(voiceRecipeModel('k','s',{},c.signal,{}),e=>e.code==='cancelled');assert.equal(calls,1);}finally{clearInterval(keepAlive);global.fetch=original;AbortSignal.timeout=timeout;}
 });
 test('numeric units are regenerated rather than invented as unit symbols',()=>{assert.equal(normalizedDraft({...draft,materials:[{...draft.materials[0],unit:100}]}),null);});
+test('continuous transcript reaches Muse as one string with the current draft and latest correction',async()=>{
+ Object.assign(process.env,{MODEL_API_KEY:'fixture',DEMO_PREVIEW_PASSWORD:'test-only-preview-password-32-characters'});
+ const original=global.fetch;let sent;
+ global.fetch=async(_,init)=>{sent=JSON.parse(init.body);return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(draft)}}]});};
+ const transcript='パスタ100g\n鶏卵一個\n三十五円\n鶏卵は三十円に訂正';
+ try{const r=await POST(new NextRequest('http://localhost/api/voice-recipe',{method:'POST',headers:{origin:'http://localhost',authorization:'Basic '+Buffer.from('chef:'+process.env.DEMO_PREVIEW_PASSWORD).toString('base64')},body:JSON.stringify({turns:['鶏卵は三十円に訂正'],transcript,previous:draft,defer_prices:true})}));assert.equal(r.status,200);const input=JSON.parse(sent.messages[1].content);assert.equal(input.conversation_transcript,transcript);assert.equal(input.new_turns,'鶏卵は三十円に訂正');assert.equal(input.previous_draft.title,draft.title);}finally{global.fetch=original;}
+});

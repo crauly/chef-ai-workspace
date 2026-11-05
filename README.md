@@ -86,6 +86,7 @@ Cost calculation and data validation remain deterministic application responsibi
   text becomes draft input only, never authorization
   (`web/voice-transcription.ts`, [ADR-007](docs/ADR_007_MUSE_VOICE_INPUT_BOUNDARY.md)).
 - **Recipe interpretation — Muse Spark (`muse-spark-1.3`) with Structured Output.**
+  Voice fragments accumulate as continuous dictation. Stop the mic or request review/save to interpret the full transcript; manual Apply remains immediate. See [voice pipeline](docs/VOICE_UX_PIPELINE.md).
   `POST /api/voice-recipe` parses turns against a strict JSON schema; unknown
   values stay unresolved and block approval via `missing[]`
   ([ADR-011](docs/ADR_011_STRUCTURED_OUTPUT.md)).
