@@ -17,7 +17,7 @@ test('continuous fragments produce one contextual draft then a mixed correction/
  expect(parses).toHaveLength(1);expect(parses[0].transcript).toBe(fragments.join('\n'));expect(saves).toHaveLength(0);
  await voiceInput(page,'鶏卵は30円に訂正。保存して');
  await expect(page).toHaveURL(/\/recipes\/[0-9a-f-]+$/);
- expect(parses).toHaveLength(2);expect(parses[1].transcript).toContain(fragments.join('\n'));expect(parses[1].transcript).toContain('鶏卵は30円に訂正');
+ expect(parses).toHaveLength(2);expect(parses[1].history).toBe(fragments.join('\n'));expect(parses[1].transcript).toContain('鶏卵は30円に訂正');
  expect(saves).toHaveLength(1);expect(saves[0].materials).toHaveLength(5);
 });
 test('stopping capture flushes all dictation; failed parsing retains the same transcript for retry',async({page})=>{
@@ -28,4 +28,20 @@ test('stopping capture flushes all dictation; failed parsing retains the same tr
  await expect(page.getByRole('button',{name:'解析を再試行',exact:true})).toBeEnabled();
  await page.getByRole('button',{name:'解析を再試行',exact:true}).click();
  await expect(page.getByLabel('未保存のレシピ下書き')).toBeVisible();expect(parses).toHaveLength(2);expect(parses[1]).toEqual(parses[0]);
+});
+
+test('oversized dictation checkpoints successful text and retries only the failed remainder',async({page})=>{
+ test.setTimeout(60000);
+ const parses:any[]=[],saves:any[]=[];
+ await page.route('**/api/voice-recipe',async r=>{const body=r.request().postDataJSON();parses.push(body);expect(Buffer.byteLength(r.request().postData()!)).toBeLessThanOrEqual(64000);expect(body.transcript.length).toBeLessThanOrEqual(30000);expect(body.turns).toBeUndefined();await r.fulfill(parses.length===2?{status:503,json:{code:'timeout'}}:{json:draft});});
+ page.on('request',r=>{if(r.url().endsWith('/recipes/full'))saves.push(r.postDataJSON());});
+ await page.goto('/');
+ const fragments=Array.from({length:35},(_,i)=>`${i}鶏卵`+'あ'.repeat(895));
+ for(const text of fragments)await voiceInput(page,text);
+ await voiceInput(page,'保存');
+ await expect(page.getByRole('button',{name:'解析を再試行',exact:true})).toBeEnabled();expect(parses).toHaveLength(2);expect(saves).toHaveLength(0);
+ await page.getByRole('button',{name:'解析を再試行',exact:true}).click();
+ await expect(page.getByRole('button',{name:'レシピを登録',exact:true})).toBeEnabled();
+ expect(parses).toHaveLength(3);expect(parses[2]).toEqual(parses[1]);expect(parses[0].transcript+'\n'+parses[2].transcript).toBe(fragments.join('\n'));
+ await voiceInput(page,'保存');await expect(page).toHaveURL(/\/recipes\/[0-9a-f-]+$/);expect(saves).toHaveLength(1);
 });

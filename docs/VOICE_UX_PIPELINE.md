@@ -149,3 +149,12 @@ Block 1を明示的にopt-inとし、通常経路を変更しない決定だっ�
 Meta公式: https://dev.meta.ai/docs/tool-calling
 Responsesはflat tools/function_call_output、Chat Completionsはnested function/tool messages。
 SDKの有無ではなく、tools定義→許可済み実行器→結果返送→最終検証への接続が必要。
+
+### PR147レビュー: 送信上限と長文再開
+
+HTTPでは未解析原文をtranscriptとして一度だけ送る（turnsとの重複を廃止）。
+JSON全体のUTF-8サイズ64,000 bytesと原文30,000文字を送信前に検査し、
+超過時だけ発話順に最大限まとめて送信する。成功した範囲の下書き・カーソルを保持し、
+残りを続けて解析する。途中失敗は同じ未解析範囲から再試行し、全範囲完了前には保存しない。
+解析済みの原文も収まる場合はhistoryとして追加し、収まらない場合はその範囲の解析済み下書きを
+文脈として使用する。端末の原文履歴は切り捨てない。通常の会話は一回の連続テキストで解釈する。

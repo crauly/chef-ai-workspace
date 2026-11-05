@@ -10,7 +10,7 @@ import {voiceCommand,editVoiceCommand,type VoiceCommand} from "./voice-commands"
 import {logVoiceEvent} from "./voice-diagnostics";
 import {dishImagePrompt,isAbortError,dishCompletionKept} from "./dish-image";
 import {storeDishPreview} from "./dish-image-cache";
-import {prepareRecipeTurns} from "../recipe-turns";
+import {recipeRequestBatch} from "../recipe-turns";
 import {loadWorkingDraft,saveWorkingDraft,type WorkingDraftSnapshot} from "./working-draft-cache";
 
 type Ingredient={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string;supplier:string};
@@ -264,15 +264,26 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   logVoiceEvent("muse.start",`${turnsToSend.length} new turns${usePrevious?"+draft":""}`,traceId);if(alive.current){setParseFailed(false);setParsing(true);}say(ja?"レシピを解析中です。価格調査を依頼した場合は続けて検索します…":"Interpreting recipe and checking requested prices…");
   const parseStarted=performance.now();
   try{
-   const packedTurns=prepareRecipeTurns(turnsToSend);
-   const transcript=next.join("\n");
-   // Send recipe facts and outstanding requests, not search evidence/caches.
-   // Ten sourced candidates can be much larger than the actual revision.
-   const context=usePrevious?{title:usePrevious.title,materials:usePrevious.materials,
-    selling_price_jpy:usePrevious.selling_price_jpy,notes:usePrevious.notes,
-    interpretations:usePrevious.interpretations,nameCorrections:usePrevious.nameCorrections,
-    unitProposals:usePrevious.unitProposals,pending_research:usePrevious.pending_research}:null;
-   const out=await request<Draft>("/api/voice-recipe",{method:"POST",body:JSON.stringify(usePrevious?{turns:packedTurns,transcript,previous:context,defer_prices:true}:{turns:packedTurns,transcript,defer_prices:true}),signal:aborter.signal});
+   let cursor=usePrevious?parsedTurns.current:0;
+   let base=usePrevious;
+   let out:Draft;
+   do{
+    const context=base?{title:base.title,materials:base.materials,
+     selling_price_jpy:base.selling_price_jpy,notes:base.notes,
+     interpretations:base.interpretations,nameCorrections:base.nameCorrections,
+     unitProposals:base.unitProposals,pending_research:base.pending_research}:null;
+    const batch=recipeRequestBatch(next,cursor,context);
+    out=await request<Draft>("/api/voice-recipe",{method:"POST",body:JSON.stringify(batch.body),signal:aborter.signal});
+    if(!alive.current||epoch.current!==current)return;
+    cursor+=batch.count;
+    if(cursor<next.length){
+     base=applyFoundPrices(out);parseBase.current=base;parsedTurns.current=cursor;
+     setDraft(base);setPrefixPreview(true);
+     try{await saveWorkingDraft({draft:base,parsedTurnCount:cursor,turns:[...dataTurns.current,...inbox.current.filter(item=>item.command==="data").map(item=>item.text)],image:dishPreviewRef.current,requestId:requestId.current,registrationPayload:registrationPayload.current});}
+     catch{say(ja?"下書きを端末に保持できません。画面の内容は保持しています。":"Could not persist draft locally. On-screen draft retained.");}
+     if(!alive.current||epoch.current!==current)return;
+    }
+   }while(cursor<next.length);
    logVoiceEvent("muse.ok",`${Math.round(performance.now()-parseStarted)}ms; structured response`,traceId);
    if(!alive.current||epoch.current!==current){logVoiceEvent("muse.ok","discarded session ignored",traceId);return;}
    if(revision.current!==version){
@@ -361,11 +372,11 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    }
    say(enriched.missing.length||enriched.notes.length?(ja?"確認が必要です："+[...enriched.missing,...enriched.notes].join("、"):"Needs review: "+[...enriched.missing,...enriched.notes].join(", ")):
     (ja?"下書きを更新しました。「保存」で現在の内容を保存できます。不足情報は後から編集できます。":"Draft updated. Review it, then explicitly approve saving."));
-  }catch{
+  }catch(error){
    if(alive.current&&epoch.current===current&&revision.current===version&&!aborter.signal.aborted){
     logVoiceEvent("muse.fail","voice-recipe failed; draft kept",traceId);
     setParseFailed(true);
-    say("料理の解釈に失敗しました。保存していません。「解析を再試行」か補助入力で再開できます。");
+    say(error instanceof Error&&error.message==="recipe_context_too_large"?(ja?"下書きと発話が送信上限を超えています。内容は保持しています。下書きの長い説明を短くして再試行してください。":"Draft and speech exceed the request limit. Content retained. Shorten long draft descriptions before retrying."):"料理の解釈に失敗しました。保存していません。「解析を再試行」か補助入力で再開できます。");
     const stash=priceStash.current;
     const candidate=draftRef.current ?? parseBase.current;
     if(stash&&candidate&&researchKey(candidate.pending_research??[])===stash.key&&
