@@ -320,7 +320,7 @@ export default function VoiceWorkspace({locale,selected,editor,onBrowse,setEditT
     </details>
    </section>}
   </section>
-  <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} onDiscarded={()=>setDraftPending(false)} sharedVoice={{markReview:mark,cancel:()=>{},mic:realtimeActive?{recording:realtime.recording,transcribing:false,queued:0}:{recording:voice.recording,transcribing:voice.busy||voice.queued>0,queued:voice.queued},captureMessage:micRecording?"音声受付中です。「保存」と話すと、数量・価格などが未確定でも現在の内容を保存します。":micBusy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${micError||micNotice||""}`}} onCreated={(recipe,mode,suppliers)=>{
+  <div hidden={mode!=="create"}><VoiceRecipeRegistration locale={locale} control={registration} onDiscarded={()=>setDraftPending(false)} sharedVoice={{markReview:mark,cancel:()=>{},mic:realtimeActive?{recording:realtime.recording,transcribing:realtime.state==="draining",queued:0}:{recording:voice.recording,transcribing:voice.busy||voice.queued>0,queued:voice.queued},captureMessage:micRecording?"音声受付中です。「保存」と話すと、数量・価格などが未確定でも現在の内容を保存します。":micBusy?"音声受付は一時停止しています。受信済みの音声を処理中です。下書きは保持しています。":`音声受付は停止中です。下書きは保持しています。${micError||micNotice||""}`}} onCreated={(recipe,mode,suppliers)=>{
    // The formal save has already committed supplier links. Keep their names
    // for feedback when the registration panel switches back to browse.
   if(currentMode.current!=="create"||window.location.pathname!==(detailOnly&&selected?`/recipes/${encodeURIComponent(selected.id)}`:"/")){setDraftPending(false);return;}

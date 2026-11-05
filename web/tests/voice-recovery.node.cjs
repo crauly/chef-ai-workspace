@@ -28,3 +28,25 @@ test('timeouts are bounded and distinct from user cancellation during a request'
  try{await assert.rejects(voiceRecipeModel('k','s',{},new AbortController().signal,{}),e=>e.code==='timeout');assert.equal(calls,1);calls=0;const c=new AbortController();setTimeout(()=>c.abort(),0);await assert.rejects(voiceRecipeModel('k','s',{},c.signal,{}),e=>e.code==='cancelled');assert.equal(calls,1);}finally{clearInterval(keepAlive);global.fetch=original;AbortSignal.timeout=timeout;}
 });
 test('numeric units are regenerated rather than invented as unit symbols',()=>{assert.equal(normalizedDraft({...draft,materials:[{...draft.materials[0],unit:100}]}),null);});
+test('continuous transcript reaches Muse as one string with the current draft and latest correction',async()=>{
+ Object.assign(process.env,{MODEL_API_KEY:'fixture',DEMO_PREVIEW_PASSWORD:'test-only-preview-password-32-characters'});
+ const original=global.fetch;let sent;
+ global.fetch=async(_,init)=>{sent=JSON.parse(init.body);return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(draft)}}]});};
+ const transcript='パスタ100g\n鶏卵一個\n三十五円\n鶏卵は三十円に訂正';
+ try{const r=await POST(new NextRequest('http://localhost/api/voice-recipe',{method:'POST',headers:{origin:'http://localhost',authorization:'Basic '+Buffer.from('chef:'+process.env.DEMO_PREVIEW_PASSWORD).toString('base64')},body:JSON.stringify({transcript:'鶏卵は三十円に訂正',history:'パスタ100g\n鶏卵一個\n三十五円',previous:draft,defer_prices:true})}));assert.equal(r.status,200);const input=JSON.parse(sent.messages[1].content);assert.equal(input.conversation_transcript,transcript);assert.equal(input.new_turns,'鶏卵は三十円に訂正');assert.equal(input.previous_draft.title,draft.title);}finally{global.fetch=original;}
+});
+
+const {recipeRequestBatch}=require('../recipe-turns.ts');
+test('UTF-8 body limits preserve every pending fragment without duplicate text',()=>{
+ for(const size of [12,35,80]){
+  const turns=Array.from({length:size},(_,i)=>String(i)+'卵'.repeat(898));let offset=0;const recovered=[];
+  while(offset<turns.length){const {body,count}=recipeRequestBatch(turns,offset,offset?draft:null);assert.ok(Buffer.byteLength(JSON.stringify(body))<=64000);assert.ok(body.transcript.length<=30000);assert.equal(body.turns,undefined);recovered.push(body.transcript);offset+=count;}
+  assert.equal(recovered.join('\n'),turns.join('\n'));
+ }
+ const old=Array(40).fill('卵'.repeat(900));const {body,count}=recipeRequestBatch([...old,'卵は30円'],40,draft);assert.equal(count,1);assert.equal(body.transcript,'卵は30円');assert.equal(body.history,undefined);assert.equal(body.previous,draft);
+});
+test('review example of twelve 900-character Japanese fragments is accepted by the real route',async()=>{
+ Object.assign(process.env,{MODEL_API_KEY:'fixture',DEMO_PREVIEW_PASSWORD:'test-only-preview-password-32-characters'});
+ const original=global.fetch;global.fetch=async()=>Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(draft)}}]});
+ try{const {body,count}=recipeRequestBatch(Array(12).fill('卵'.repeat(900)),0,null);assert.equal(count,12);const r=await POST(new NextRequest('http://localhost/api/voice-recipe',{method:'POST',headers:{origin:'http://localhost',authorization:'Basic '+Buffer.from('chef:'+process.env.DEMO_PREVIEW_PASSWORD).toString('base64')},body:JSON.stringify(body)}));assert.equal(r.status,200);}finally{global.fetch=original;}
+});

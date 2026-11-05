@@ -6,11 +6,11 @@ import {useVoiceProcessingStatus,type VoiceStatusRow} from "./VoiceProcessingSta
 import type {Locale} from "./i18n";
 import {request,type Recipe} from "./types";
 import {useVoiceCapture,type VoiceCaptureMeta} from "./useVoiceCapture";
-import {voiceCommand,type VoiceCommand} from "./voice-commands";
+import {voiceCommand,editVoiceCommand,type VoiceCommand} from "./voice-commands";
 import {logVoiceEvent} from "./voice-diagnostics";
 import {dishImagePrompt,isAbortError,dishCompletionKept} from "./dish-image";
 import {storeDishPreview} from "./dish-image-cache";
-import {prepareRecipeTurns} from "../recipe-turns";
+import {recipeRequestBatch} from "../recipe-turns";
 import {loadWorkingDraft,saveWorkingDraft,type WorkingDraftSnapshot} from "./working-draft-cache";
 
 type Ingredient={name:string;quantity:string;unit:string;price_jpy:string;price_quantity:string;price_unit:string;supplier:string};
@@ -174,7 +174,12 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  const clearTrace=useRef("");
  const capture=useVoiceCapture(locale,enqueue,true);
  const voice={...capture,...sharedVoice};
- useImperativeHandle(control,()=>({submit:enqueue,hasPending:()=>Boolean(dataTurns.current.length||inbox.current.length||draftRef.current),isSaving:()=>phaseRef.current==="saving",requestReview:()=>{showReview();},suspend:(resume=false)=>{
+ const collecting=sharedVoice?.mic
+  ? sharedVoice.mic.recording||sharedVoice.mic.transcribing||sharedVoice.mic.queued>0
+  : capture.recording||capture.busy||capture.queued>0;
+ const collectingRef=useRef(collecting);collectingRef.current=collecting;
+ useEffect(()=>{if(!collecting&&inbox.current.length)void drain();},[collecting]);
+ useImperativeHandle(control,()=>({submit:enqueue,hasPending:()=>Boolean(dataTurns.current.length||inbox.current.length||draftRef.current),isSaving:()=>phaseRef.current==="saving",requestReview:()=>{enqueue("内容を確認");},suspend:(resume=false)=>{
   if(phaseRef.current==="saving")return;
   if(!resume&&(draftRef.current||dataTurns.current.length))saveEpochFloor.current=voice.markReview();reviewed.current=null;inbox.current=inbox.current.filter(input=>input.command==="data");setStage("dictating");
  }}));
@@ -205,7 +210,8 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
  },[]);
  useEffect(()=>{
   if(!restored||prefixPreview)return;
-  const snapshot:WorkingDraftSnapshot<Draft>|null=(draft||dataTurns.current.length)?{draft,parsedTurnCount:parsedTurns.current,turns:[...dataTurns.current],image:dishPreviewRef.current,requestId:requestId.current,registrationPayload:registrationPayload.current}:null;
+  const pendingTurns=inbox.current.filter(item=>item.command==="data").map(item=>item.text);
+  const snapshot:WorkingDraftSnapshot<Draft>|null=(draft||dataTurns.current.length||pendingTurns.length)?{draft:parseBase.current??draft,parsedTurnCount:parsedTurns.current,turns:[...dataTurns.current,...pendingTurns],image:dishPreviewRef.current,requestId:requestId.current,registrationPayload:registrationPayload.current}:null;
   void saveWorkingDraft(snapshot).catch(()=>{if(alive.current)say(ja?"下書きを端末に保存できませんでした。":"Could not persist the working draft on this device.");});
  },[draft,restored,dishImageUrl,prefixPreview]);
 
@@ -258,14 +264,26 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   logVoiceEvent("muse.start",`${turnsToSend.length} new turns${usePrevious?"+draft":""}`,traceId);if(alive.current){setParseFailed(false);setParsing(true);}say(ja?"レシピを解析中です。価格調査を依頼した場合は続けて検索します…":"Interpreting recipe and checking requested prices…");
   const parseStarted=performance.now();
   try{
-   const packedTurns=prepareRecipeTurns(turnsToSend);
-   // Send recipe facts and outstanding requests, not search evidence/caches.
-   // Ten sourced candidates can be much larger than the actual revision.
-   const context=usePrevious?{title:usePrevious.title,materials:usePrevious.materials,
-    selling_price_jpy:usePrevious.selling_price_jpy,notes:usePrevious.notes,
-    interpretations:usePrevious.interpretations,nameCorrections:usePrevious.nameCorrections,
-    unitProposals:usePrevious.unitProposals,pending_research:usePrevious.pending_research}:null;
-   const out=await request<Draft>("/api/voice-recipe",{method:"POST",body:JSON.stringify(usePrevious?{turns:packedTurns,previous:context,defer_prices:true}:{turns:packedTurns,defer_prices:true}),signal:aborter.signal});
+   let cursor=usePrevious?parsedTurns.current:0;
+   let base=usePrevious;
+   let out:Draft;
+   do{
+    const context=base?{title:base.title,materials:base.materials,
+     selling_price_jpy:base.selling_price_jpy,notes:base.notes,
+     interpretations:base.interpretations,nameCorrections:base.nameCorrections,
+     unitProposals:base.unitProposals,pending_research:base.pending_research}:null;
+    const batch=recipeRequestBatch(next,cursor,context);
+    out=await request<Draft>("/api/voice-recipe",{method:"POST",body:JSON.stringify(batch.body),signal:aborter.signal});
+    if(!alive.current||epoch.current!==current)return;
+    cursor+=batch.count;
+    if(cursor<next.length){
+     base=applyFoundPrices(out);parseBase.current=base;parsedTurns.current=cursor;
+     setDraft(base);setPrefixPreview(true);
+     try{await saveWorkingDraft({draft:base,parsedTurnCount:cursor,turns:[...dataTurns.current,...inbox.current.filter(item=>item.command==="data").map(item=>item.text)],image:dishPreviewRef.current,requestId:requestId.current,registrationPayload:registrationPayload.current});}
+     catch{say(ja?"下書きを端末に保持できません。画面の内容は保持しています。":"Could not persist draft locally. On-screen draft retained.");}
+     if(!alive.current||epoch.current!==current)return;
+    }
+   }while(cursor<next.length);
    logVoiceEvent("muse.ok",`${Math.round(performance.now()-parseStarted)}ms; structured response`,traceId);
    if(!alive.current||epoch.current!==current){logVoiceEvent("muse.ok","discarded session ignored",traceId);return;}
    if(revision.current!==version){
@@ -354,11 +372,11 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    }
    say(enriched.missing.length||enriched.notes.length?(ja?"確認が必要です："+[...enriched.missing,...enriched.notes].join("、"):"Needs review: "+[...enriched.missing,...enriched.notes].join(", ")):
     (ja?"下書きを更新しました。「保存」で現在の内容を保存できます。不足情報は後から編集できます。":"Draft updated. Review it, then explicitly approve saving."));
-  }catch{
+  }catch(error){
    if(alive.current&&epoch.current===current&&revision.current===version&&!aborter.signal.aborted){
     logVoiceEvent("muse.fail","voice-recipe failed; draft kept",traceId);
     setParseFailed(true);
-    say("料理の解釈に失敗しました。保存していません。「解析を再試行」か補助入力で再開できます。");
+    say(error instanceof Error&&error.message==="recipe_context_too_large"?(ja?"下書きと発話が送信上限を超えています。内容は保持しています。下書きの長い説明を短くして再試行してください。":"Draft and speech exceed the request limit. Content retained. Shorten long draft descriptions before retrying."):"料理の解釈に失敗しました。保存していません。「解析を再試行」か補助入力で再開できます。");
     const stash=priceStash.current;
     const candidate=draftRef.current ?? parseBase.current;
     if(stash&&candidate&&researchKey(candidate.pending_research??[])===stash.key&&
@@ -592,6 +610,9 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   if(draining.current)return;draining.current=true;setBusy(true);
   try{
    while(alive.current&&inbox.current.length){
+    // ASR fragments are transport boundaries, not semantic recipe turns.
+    // Buffer voice facts until capture drains or the chef requests review/save.
+    if(collectingRef.current&&inbox.current.every(item=>item.command==="data"&&!item.manual))break;
     const input=inbox.current.shift()!;
     if(input.command==="data"){
      const batch=[input];while(inbox.current[0]?.command==="data")batch.push(inbox.current.shift()!);
@@ -617,11 +638,17 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    }
   }finally{draining.current=false;if(alive.current)setBusy(false);}
  }
- function enqueue(text:string,meta?:VoiceCaptureMeta){
+ function enqueue(text:string,meta?:VoiceCaptureMeta,asData=false){
   if(!text.trim())return;
   if(phaseRef.current==="saving"){say(ja?"保存処理中です。同じ指示を重ねず完了をお待ちください。":"Saving. Please wait without repeating the request.");return;}
-  const command=voiceCommand(text);
+  const command=asData?"data":voiceCommand(text);
   if(command==="save"&&meta?.utteranceId){if(seenSaves.current.has(meta.utteranceId)){say(ja?"同じ保存指示は受付済みです。":"This save request was already received.");return;}seenSaves.current.add(meta.utteranceId);}
+  // A mixed dictation/save utterance contributes facts before its control.
+  // Keep the original text; Muse interprets facts and ignores save wording.
+  if(command==="save"&&editVoiceCommand(text)==="data"){
+   if(meta&&meta.source!=="manual"&&meta.reviewEpoch<saveEpochFloor.current){say(ja?"別の下書きの保存指示は実行しません。":"Ignored a save for another draft.");return;}
+   enqueue(text,meta,true);
+  }
   if(command==="cancel"){clearTrace.current=meta?.traceId??"";clear();return;}
   setTurns(previous=>[...previous,text].slice(-30));
   if(command==="data"){
@@ -798,7 +825,7 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
   <p>{ja?"料理名、食材、分量、仕入単価、売価を自然な言葉で伝えてください。料理の文脈を解釈し、変更案を下書きで確認できます。":"Describe the dish, ingredients, quantities, purchase prices and selling price naturally. Review the interpreted recipe as a draft."}</p>
   <p>{ja?"下書きは自動保存されます。「保存」で現在の内容を保存します。数量・価格などの不足は未確定のまま残り、保存後に編集できます。「破棄」で下書きを削除します。":"Ask to review the draft before saving. An explicit approval is required to save; discarding removes the draft."}</p>
   <p>{ja?"仕入単価だけが不明でも、価格を推測・ゼロ埋めせず、価格未確定のレシピとして登録できます。":"If only purchase prices are missing, you can register with unconfirmed costs. Missing prices are never guessed or set to zero."}</p>
-  <p>{ja?"音声はMetaへ送信して文字起こしします。録音は保存しません。発話の間を約1秒空けると解釈します。":"Audio is sent to Meta and not stored. Pause for about one second between turns."}</p>
+  <p>{ja?"音声はMetaへ送信して文字起こしします。録音は保存しません。説明を続けて話してください。マイク停止後、または「内容を確認」「保存」で、まとまった原文を解釈します。":"Audio is sent to Meta and not stored. Speak continuously. Stop the microphone or ask to review/save to interpret the complete dictation."}</p>
   </details>
   {!sharedVoice&&<><button type="button" disabled={!voice.recording&&(voice.supported===false||voice.busy||phase==="saving")} onClick={voice.recording?voice.stop:()=>void voice.start()} aria-pressed={voice.recording}>{voice.recording?(ja?"■ マイクを停止":"■ Stop microphone"):(ja?"🎙 音声操作を開始":"🎙 Start voice control")}</button>
   <p aria-live="polite">{voice.recording?"聞き取り中… ":""}{voice.busy?"音声を文字にしています…":""}</p>
@@ -810,6 +837,8 @@ export default function VoiceRecipeRegistration({locale,onCreated,onDiscarded,co
    <button type="submit" disabled={!manual.trim()||phase==="saving"}>{ja?"反映":"Apply"}</button>
   </form>}
   {!unitCatalog&&<button type="button" disabled={busy} onClick={()=>void request<{items:Array<{id:string;symbol:string;dimension:string;base_factor:string|null;aliases:string[]}>}>("/api/units").then(result=>{setUnitCatalog(result.items);say(ja?"単位マスターを再取得しました。内容を確認してください。":"Unit catalog reloaded. Review the draft.");}).catch(()=>say(ja?"単位マスターを取得できません。下書きは保持しています。":"Unit catalog unavailable. Draft retained."))}>{ja?"単位マスターを再取得":"Reload unit catalog"}</button>}
+  {collecting&&inbox.current.some(item=>item.command==="data")&&<p role="status">{ja?"発話を蓄積しています。続けて話すか、「内容を確認」「保存」と指示してください。":"Collecting dictation. Continue speaking, or ask to review/save."}</p>}
+  {inbox.current.some(item=>item.command==="data")&&<button type="button" disabled={busy||phase==="saving"} onClick={()=>enqueue("内容を確認")}>{ja?"ここまでを下書きに反映":"Update draft from dictation"}</button>}
   {recoveredPending&&<p>{ja?"未解析の発話を復元しました。再解析してから内容を確認してください。":"Restored pending dictation. Retry analysis before reviewing."}</p>}
   {(parseFailed||recoveredPending)&&<button type="button" disabled={busy||!dataTurns.current.length||phase==="saving"} onClick={retry}>{ja?"解析を再試行":"Retry analysis"}</button>}
 

@@ -1,0 +1,47 @@
+import {test,expect} from '@playwright/test';
+import {voiceInput} from './voice-input';
+const materials=['グアンチャレ','鶏卵','ペコリーノロマーノ','乾燥パスタ','黒胡椒'].map(name=>({name,quantity:'',unit:'',price_jpy:'',price_quantity:'',price_unit:'',supplier:''}));
+const draft={title:'カルボナーラ',materials,selling_price_jpy:'',notes:[],missing:[]};
+test.beforeEach(async({request})=>{await request.post('http://127.0.0.1:8100/test/reset');});
+test('continuous fragments produce one contextual draft then a mixed correction/save is parsed before persistence',async({page})=>{
+ const parses:any[]=[],saves:any[]=[];
+ await page.route('**/api/voice-recipe',async r=>{parses.push(r.request().postDataJSON());await r.fulfill({json:draft});});
+ page.on('request',r=>{if(r.url().endsWith('/recipes/full'))saves.push(r.postDataJSON());});
+ await page.goto('/');
+ const fragments=['カルボナーラ。グアンチャレ35g','定覧、一個、','食材費、','三十五円。','ペコリーノロマーノ30g','乾燥パスタ100g、黒胡椒'];
+ for(const text of fragments)await voiceInput(page,text);
+ await expect(page.getByText('発話を蓄積しています。続けて話すか、「内容を確認」「保存」と指示してください。')).toBeVisible();
+ expect(parses).toHaveLength(0);
+ await voiceInput(page,'内容を確認');
+ await expect(page.getByLabel('未保存のレシピ下書き')).toBeVisible();
+ expect(parses).toHaveLength(1);expect(parses[0].transcript).toBe(fragments.join('\n'));expect(saves).toHaveLength(0);
+ await voiceInput(page,'鶏卵は30円に訂正。保存して');
+ await expect(page).toHaveURL(/\/recipes\/[0-9a-f-]+$/);
+ expect(parses).toHaveLength(2);expect(parses[1].history).toBe(fragments.join('\n'));expect(parses[1].transcript).toContain('鶏卵は30円に訂正');
+ expect(saves).toHaveLength(1);expect(saves[0].materials).toHaveLength(5);
+});
+test('stopping capture flushes all dictation; failed parsing retains the same transcript for retry',async({page})=>{
+ const parses:any[]=[];
+ await page.route('**/api/voice-recipe',async r=>{parses.push(r.request().postDataJSON());await r.fulfill(parses.length===1?{status:503,json:{code:'timeout'}}:{json:draft});});
+ await page.goto('/');await voiceInput(page,'カルボナーラ、鶏卵一個');await voiceInput(page,'三十五円');expect(parses).toHaveLength(0);
+ await page.getByRole('button',{name:'■ マイクを停止',exact:true}).click();
+ await expect(page.getByRole('button',{name:'解析を再試行',exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'解析を再試行',exact:true}).click();
+ await expect(page.getByLabel('未保存のレシピ下書き')).toBeVisible();expect(parses).toHaveLength(2);expect(parses[1]).toEqual(parses[0]);
+});
+
+test('oversized dictation checkpoints successful text and retries only the failed remainder',async({page})=>{
+ test.setTimeout(60000);
+ const parses:any[]=[],saves:any[]=[];
+ await page.route('**/api/voice-recipe',async r=>{const body=r.request().postDataJSON();parses.push(body);expect(Buffer.byteLength(r.request().postData()!)).toBeLessThanOrEqual(64000);expect(body.transcript.length).toBeLessThanOrEqual(30000);expect(body.turns).toBeUndefined();await r.fulfill(parses.length===2?{status:503,json:{code:'timeout'}}:{json:draft});});
+ page.on('request',r=>{if(r.url().endsWith('/recipes/full'))saves.push(r.postDataJSON());});
+ await page.goto('/');
+ const fragments=Array.from({length:35},(_,i)=>`${i}鶏卵`+'あ'.repeat(895));
+ for(const text of fragments)await voiceInput(page,text);
+ await voiceInput(page,'保存');
+ await expect(page.getByRole('button',{name:'解析を再試行',exact:true})).toBeEnabled();expect(parses).toHaveLength(2);expect(saves).toHaveLength(0);
+ await page.getByRole('button',{name:'解析を再試行',exact:true}).click();
+ await expect(page.getByRole('button',{name:'レシピを登録',exact:true})).toBeEnabled();
+ expect(parses).toHaveLength(3);expect(parses[2]).toEqual(parses[1]);expect(parses[0].transcript+'\n'+parses[2].transcript).toBe(fragments.join('\n'));
+ await voiceInput(page,'保存');await expect(page).toHaveURL(/\/recipes\/[0-9a-f-]+$/);expect(saves).toHaveLength(1);
+});
