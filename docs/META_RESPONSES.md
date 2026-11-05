@@ -6,10 +6,14 @@ It uses native `instructions` and `input`, reads completed assistant
 `output[].content[]` blocks of type `output_text`, and strictly parses the
 result as an operations proposal. Reasoning is ignored; refusals, incomplete
 responses, tool calls, invalid JSON and malformed envelopes fail closed.
-Block 1 adds an opt-in owned-ledger tool loop (`propose_with_tools`,
-`?tools=ledger`): one read-only `search_owned_ingredients` function with
-manual stateless history (`store=false`), capped at 2 tool turns and 4
-calls/turn; the final turn uses the same strict parser. See ADR-012.
+The normal Next edit proxy now selects `propose_with_tools` (`?tools=ledger`).
+It exposes owned recipe search/detail, ingredient search and price-reference reads,
+reusing existing handlers. Manual stateless history (`store=false`) is capped at
+2 tool rounds and 4 calls/round, with the remaining 25-second budget passed to
+subsequent model transports. The final turn uses the same strict parser.
+Registration/navigation use the corresponding bounded Chat Completions loop
+with Structured Output; both adapters follow the official tool-result protocol.
+See ADR-012 for the normal entrypoints and approval boundary.
 The normal mutation validator still checks every operation before preview,
 and only the chef's explicit confirm action can persist and recalculate.
 

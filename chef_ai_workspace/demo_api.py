@@ -941,8 +941,27 @@ def propose_demo_change(recipe_id: UUID, body: AIProposalBody,
             run_tools = getattr(provider, "propose_with_tools", None)
             if run_tools is None:
                 raise HTTPException(503, "Tool path requires the Meta provider")
+            known_recipes = set()
+            def read_tool(name, value):
+                # Reuse the owned read handlers; never expose a write executor.
+                try:
+                    if name == "search_recipes":
+                        result = list_demo_recipes(page=1, page_size=10, q=value, ctx=ctx)
+                        known_recipes.update(str(row["id"]) for row in result["items"])
+                        return {"items": [{"id": row["id"], "title": row["title"]} for row in result["items"]]}
+                    if name == "get_recipe":
+                        if value not in known_recipes:
+                            return {"error": "search_recipe_first"}
+                        result = get_demo_recipe(UUID(value), ctx=ctx)
+                        return {key: result.get(key) for key in ("id", "title", "materials", "display_names")}
+                    if name == "get_price_reference":
+                        result = reference_demo_price(name=value, ingredient_id=None, ctx=ctx)
+                        return {"adoption": "unapproved", "candidates": result.get("candidates", [])}
+                    return {"error": "unknown_tool"}
+                except (HTTPException, ValueError, TypeError, KeyError):
+                    return {"error": "lookup_unavailable"}
             operations = run_tools(body.instruction, context,
-                                   _tool_search(owner, repository, recipe))
+                                   _tool_search(owner, repository, recipe), read=read_tool)
         else:
             operations = provider.propose(body.instruction, context)
     except ProposalProviderError as exc:

@@ -1,7 +1,8 @@
 # ADR-012: Tool Calling Block 1 — Read-Only Owned-Ledger Lookup
 
 ## Status
-Accepted (Block 1, opt-in). Live-verified against `muse-spark-1.3` 2026-11-02.
+Accepted. The original Block 1 below was opt-in and live-verified 2026-11-02.
+The 2026-11-05 normal-path integration below supersedes its opt-in-only scope.
 
 ## Context
 The voice-recipe `price_research` → ledger → `web_search` loop already resolves
@@ -88,3 +89,54 @@ existing 40-operation limit. No unbounded retry.
   probes; `tool_choice` required-mode is unsupported by the API — do not rely on
   forced calls. Multi-turn `previous_response_id` chaining needs `store: true`
   semantics review before use.
+
+
+## 2026-11-05: Normal voice paths (supersedes opt-in-only scope)
+
+The approved central Tool Calling policy is now connected at existing model boundaries:
+
+| Normal entry | Tool loop | Final contract |
+| --- | --- | --- |
+| Continuous registration → `/api/voice-recipe` | `voiceRecipeModel` → `museConversation` | existing VOICE_RECIPE_SCHEMA + parseRecipeDraft |
+| Voice search/reference/targeted edit → `/api/intent` | same Chat Completions loop | existing INTENT_SCHEMA; target drives owned browse/detail |
+| Voice edit → `/api/recipes/{id}/propose` | proxy adds `tools=ledger`; existing `propose_with_tools` | existing operations validation → review → explicit confirm |
+
+Tools are `search_recipes`, `get_recipe`, `search_owned_ingredients`, and
+`get_price_reference`. Next adapters call existing owned GET endpoints using
+server credentials and the backend URL allow-list. Python edit adapters call the
+same existing owned read handlers with the authenticated context. No duplicate
+search, price calculation, master creation or save implementation is introduced.
+Recipe details require an ID returned by recipe search in that request. Unknown
+tools and malformed calls cannot select an HTTP method, origin, path or owner.
+Tool results are reference data, not instructions, approval, or adopted prices.
+External web research remains in the existing ledger-first/Search Grounding path.
+
+Chat Completions uses nested function definitions, assistant tool_calls and
+one tool message per call_id, then validates the final Structured Output.
+Responses retains flat tools and manual function_call_output history with
+store=false. Both allow at most 2 tool rounds / 4 calls per round. Registration
+shares its existing 20s budget with tool calls and schema repair; intent shares
+22s; edit transports use the remaining 25s budget rather than 25s per turn.
+Synchronous backend reads retain their repository transport limits. No streaming
+or migration is introduced. Model calls choose tools only when needed; simple
+facts and explicit save commands do not gain an unconditional lookup phase.
+
+PR147's transcript batching, partial checkpoints and retry cursor are unchanged.
+Only explicit navigation with a recipe target additionally reaches tool-enabled
+intent; recording fragments still accumulate before registration analysis.
+Neither protocol exposes write tools. Final saves, price adoption, ownership,
+version conflicts and request-id receipts stay in the existing Human Gate/APIs.
+
+Verification (offline): Node route/loop tests cover all four reads and returned
+results, navigation target, normal edit proxy selection, unknown writes, arbitrary
+IDs/owners and loop exhaustion. Python tests cover real propose endpoint → Meta
+Responses loop → owned recipe/ledger read handlers → validated proposal with no
+mutation, plus existing link provenance/refusal/ownership contracts. Browser test
+uses real Next handler/tool adapters with mocked Meta transport and the isolated
+backend for voice → continuous draft → explicit save → tool-backed reference →
+edit preview → explicit confirm. PR147 continuous/oversized/retry tests retained.
+No external Meta calls or production DB writes were made. This proves wiring and
+contracts, not live model selection quality or elimination of provider 503s.
+
+Official protocol: https://dev.meta.ai/docs/tool-calling
+Structured output: https://dev.meta.ai/docs/structured-output
